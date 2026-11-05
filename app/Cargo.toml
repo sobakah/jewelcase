@@ -1,0 +1,21 @@
+[package]
+name = "gatefold"
+description = "A local-first music player for albums, artists and playlists"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# librespot streaming (CONCEPT.md §9.4). Off by default; empty until Phase 8.
+spotify-stream = []
+
+[dependencies]
+gatefold-core.workspace = true
+
+adw.workspace = true
+gettext-rs.workspace = true
+gtk.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

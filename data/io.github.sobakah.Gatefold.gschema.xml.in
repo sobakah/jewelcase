@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gatefold">
+  <schema id="@app_id@" path="@schema_path@">
+    <key name="window-width" type="i">
+      <default>1100</default>
+      <summary>Window width</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>760</default>
+      <summary>Window height</summary>
+    </key>
+    <key name="is-maximized" type="b">
+      <default>false</default>
+      <summary>Window is maximized</summary>
+    </key>
+    <key name="library-view" type="s">
+      <choices>
+        <choice value="albums"/>
+        <choice value="artists"/>
+        <choice value="playlists"/>
+      </choices>
+      <default>"albums"</default>
+      <summary>Last library view</summary>
+    </key>
+    <key name="library-folders" type="as">
+      <default>[]</default>
+      <summary>Music folders</summary>
+      <description>Folders the library is read from. While this key is unset, the XDG Music folder is used.</description>
+    </key>
+  </schema>
+</schemalist>

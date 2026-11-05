@@ -1,0 +1,13 @@
+option(
+  'profile',
+  type: 'combo',
+  choices: ['default', 'development'],
+  value: 'default',
+  description: 'development: debug build with app ID io.github.sobakah.Gatefold.Devel',
+)
+option(
+  'spotify_stream',
+  type: 'boolean',
+  value: false,
+  description: 'Build librespot streaming (Cargo feature spotify-stream, CONCEPT.md §9.4)',
+)

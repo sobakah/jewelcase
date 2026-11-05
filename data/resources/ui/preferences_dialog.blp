@@ -1,0 +1,30 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
+  Adw.PreferencesPage {
+    title: _("Library");
+    icon-name: "folder-music-symbolic";
+
+    // Rows are added from preferences_dialog.rs.
+    Adw.PreferencesGroup folders_group {
+      title: _("Music Folders");
+      description: _("Gatefold reads music from these folders. Symlinked folders and folders inside another music folder can't be added.");
+
+      header-suffix: Gtk.Button {
+        valign: center;
+        action-name: "prefs.add-folder";
+
+        child: Adw.ButtonContent {
+          icon-name: "list-add-symbolic";
+          label: _("_Add");
+          use-underline: true;
+        };
+
+        styles [
+          "flat",
+        ]
+      };
+    }
+  }
+}

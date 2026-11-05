@@ -1,0 +1,21 @@
+/* Covers are the main visual (CONCEPT.md §1). Until real covers load,
+   placeholders keep their shape. */
+.cover {
+  border-radius: 12px;
+}
+
+.cover-placeholder {
+  background-color: alpha(currentColor, 0.08);
+  color: alpha(currentColor, 0.5);
+}
+
+.mini-player .cover {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 6px;
+}
+
+.player-view .play-button {
+  min-width: 56px;
+  min-height: 56px;
+}

@@ -1,0 +1,12 @@
+# Files with translatable strings, relative to the project root.
+data/io.github.sobakah.Gatefold.desktop.in.in
+data/io.github.sobakah.Gatefold.gschema.xml.in
+data/io.github.sobakah.Gatefold.metainfo.xml.in.in
+data/resources/ui/mini_player.blp
+data/resources/ui/player_view.blp
+data/resources/ui/preferences_dialog.blp
+data/resources/ui/shortcuts_dialog.blp
+data/resources/ui/window.blp
+app/src/application.rs
+app/src/main.rs
+app/src/preferences_dialog.rs

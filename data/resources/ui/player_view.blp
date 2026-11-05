@@ -1,0 +1,209 @@
+using Gtk 4.0;
+using Adw 1;
+
+// The full player in the expanded bottom sheet, sleek layout (CONCEPT.md §4.3).
+template $GatefoldPlayerView: Adw.Bin {
+  styles [
+    "player-view",
+  ]
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+
+      [start]
+      Gtk.Button {
+        icon-name: "pan-down-symbolic";
+        tooltip-text: _("Hide Player");
+        action-name: "win.close-player";
+      }
+    }
+
+    content: Gtk.Box {
+      orientation: vertical;
+      valign: center;
+      spacing: 18;
+      margin-start: 24;
+      margin-end: 24;
+      margin-bottom: 24;
+
+      Adw.Clamp {
+        maximum-size: 420;
+
+        child: Gtk.AspectFrame {
+          ratio: 1;
+          obey-child: false;
+
+          child: Gtk.Image {
+            icon-name: "folder-music-symbolic";
+            pixel-size: 96;
+            accessible-role: presentation;
+
+            styles [
+              "cover",
+              "cover-placeholder",
+            ]
+          };
+        };
+      }
+
+      Gtk.Box {
+        orientation: vertical;
+        spacing: 3;
+
+        Gtk.Label {
+          label: _("Not Playing");
+          ellipsize: end;
+
+          styles [
+            "title-2",
+          ]
+        }
+
+        Gtk.Label {
+          label: _("Pick an album to start");
+          ellipsize: end;
+
+          styles [
+            "dim-label",
+          ]
+        }
+      }
+
+      Adw.Clamp {
+        maximum-size: 560;
+
+        child: Gtk.Box {
+          spacing: 6;
+
+          Gtk.Label {
+            label: "0:00";
+            width-chars: 5;
+
+            styles [
+              "caption",
+              "numeric",
+            ]
+          }
+
+          Gtk.Scale {
+            hexpand: true;
+            sensitive: false;
+
+            adjustment: Gtk.Adjustment {
+              lower: 0;
+              upper: 1;
+            };
+          }
+
+          Gtk.Label {
+            label: "0:00";
+            width-chars: 5;
+
+            styles [
+              "caption",
+              "numeric",
+            ]
+          }
+        };
+      }
+
+      Gtk.Box {
+        halign: center;
+        spacing: 18;
+
+        Gtk.ToggleButton {
+          icon-name: "media-playlist-shuffle-symbolic";
+          tooltip-text: _("Shuffle");
+          action-name: "player.shuffle";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "media-skip-backward-symbolic";
+          tooltip-text: _("Previous");
+          action-name: "player.previous";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "media-playback-start-symbolic";
+          tooltip-text: _("Play");
+          action-name: "player.play-pause";
+
+          styles [
+            "circular",
+            "suggested-action",
+            "play-button",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "media-skip-forward-symbolic";
+          tooltip-text: _("Next");
+          action-name: "player.next";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "media-playlist-repeat-symbolic";
+          tooltip-text: _("Repeat");
+          action-name: "player.repeat";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+      }
+
+      Gtk.Box {
+        halign: end;
+        spacing: 6;
+
+        Gtk.ToggleButton {
+          action-name: "player.show-lyrics";
+
+          child: Adw.ButtonContent {
+            icon-name: "gatefold-lyrics-symbolic";
+            label: _("Lyrics");
+          };
+
+          styles [
+            "flat",
+          ]
+        }
+
+        Gtk.ToggleButton {
+          action-name: "player.show-queue";
+
+          child: Adw.ButtonContent {
+            icon-name: "view-list-symbolic";
+            label: _("Queue");
+          };
+
+          styles [
+            "flat",
+          ]
+        }
+      }
+    };
+  };
+}

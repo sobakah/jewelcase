@@ -1,0 +1,136 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Library window with the player in a bottom sheet (CONCEPT.md §4).
+template $GatefoldWindow: Adw.ApplicationWindow {
+  default-width: 1100;
+  default-height: 760;
+  width-request: 360;
+  height-request: 294;
+  title: _("Gatefold");
+
+  Adw.Breakpoint {
+    condition ("max-width: 550sp")
+
+    setters {
+      header_bar.show-title: false;
+      switcher_bar.reveal: true;
+    }
+  }
+
+  content: Adw.BottomSheet bottom_sheet {
+    content: Adw.ToolbarView {
+      [top]
+      Adw.HeaderBar header_bar {
+        title-widget: Adw.ViewSwitcher {
+          stack: stack;
+          policy: wide;
+        };
+
+        [end]
+        Gtk.MenuButton {
+          primary: true;
+          icon-name: "open-menu-symbolic";
+          tooltip-text: _("Main Menu");
+          menu-model: primary_menu;
+        }
+
+        [end]
+        Gtk.ToggleButton search_button {
+          icon-name: "system-search-symbolic";
+          tooltip-text: _("Search");
+        }
+      }
+
+      [top]
+      Gtk.SearchBar search_bar {
+        search-mode-enabled: bind search_button.active bidirectional;
+
+        child: Adw.Clamp {
+          maximum-size: 480;
+
+          child: Gtk.SearchEntry search_entry {
+            hexpand: true;
+            placeholder-text: _("Search artists, albums, songs and playlists");
+          };
+        };
+      }
+
+      content: Adw.ViewStack stack {
+        Adw.ViewStackPage {
+          name: "albums";
+          title: _("Albums");
+          icon-name: "media-optical-symbolic";
+
+          child: Adw.StatusPage {
+            icon-name: "folder-music-symbolic";
+            title: _("No Albums Yet");
+            description: _("Gatefold shows the albums in your music folders. Scanning arrives in a later version.");
+
+            child: Gtk.Button {
+              halign: center;
+              label: _("_Choose Music Folders…");
+              use-underline: true;
+              action-name: "app.preferences";
+
+              styles [
+                "pill",
+              ]
+            };
+          };
+        }
+
+        Adw.ViewStackPage {
+          name: "artists";
+          title: _("Artists");
+          icon-name: "avatar-default-symbolic";
+
+          child: Adw.StatusPage {
+            icon-name: "avatar-default-symbolic";
+            title: _("No Artists Yet");
+            description: _("Album artists from your library will show up here.");
+          };
+        }
+
+        Adw.ViewStackPage {
+          name: "playlists";
+          title: _("Playlists");
+          icon-name: "view-list-bullet-symbolic";
+
+          child: Adw.StatusPage {
+            icon-name: "view-list-bullet-symbolic";
+            title: _("No Playlists Yet");
+            description: _("Playlists you create will show up here.");
+          };
+        }
+      };
+
+      [bottom]
+      Adw.ViewSwitcherBar switcher_bar {
+        stack: stack;
+      }
+    };
+
+    bottom-bar: $GatefoldMiniPlayer {};
+    sheet: $GatefoldPlayerView {};
+  };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: _("_Preferences");
+      action: "app.preferences";
+    }
+
+    item {
+      label: _("_Keyboard Shortcuts");
+      action: "app.shortcuts";
+    }
+
+    item {
+      label: _("_About Gatefold");
+      action: "app.about";
+    }
+  }
+}

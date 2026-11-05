@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>@app_id@</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Gatefold</name>
+  <summary>Listen to albums, follow artists, curate playlists</summary>
+  <description>
+    <p>
+      Gatefold is a local-first music player for people who listen to albums.
+      Cover art is the main way around your library, and lyrics, the queue
+      and details stay out of the way until you want them.
+    </p>
+    <ul>
+      <li>Albums, artists and playlists from your local music files</li>
+      <li>A clean artist list with album artists only</li>
+      <li>Synced lyrics with romanization</li>
+    </ul>
+  </description>
+
+  <developer id="io.github.sobakah">
+    <name>sobakah</name>
+  </developer>
+
+  <url type="homepage">https://github.com/sobakah/gatefold</url>
+  <url type="bugtracker">https://github.com/sobakah/gatefold/issues</url>
+  <url type="vcs-browser">https://github.com/sobakah/gatefold</url>
+
+  <launchable type="desktop-id">@app_id@.desktop</launchable>
+  <translation type="gettext">gatefold</translation>
+  <content_rating type="oars-1.1"/>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#99c1f1</color>
+    <color type="primary" scheme_preference="dark">#1a5fb4</color>
+  </branding>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-05">
+      <description>
+        <p>Project skeleton: empty library window and bottom-sheet player.</p>
+      </description>
+    </release>
+  </releases>
+</component>

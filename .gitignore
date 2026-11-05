@@ -1,0 +1,6 @@
+/_build/
+/target/
+/vendor/
+/rpmbuild/
+/.cargo/
+*.tar.xz

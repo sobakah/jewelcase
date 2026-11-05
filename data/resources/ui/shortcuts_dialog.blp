@@ -1,0 +1,53 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Keep in sync with GatefoldApplication::setup_accels (application.rs).
+Adw.ShortcutsDialog shortcuts_dialog {
+  Adw.ShortcutsSection {
+    title: _("General");
+
+    Adw.ShortcutsItem {
+      title: _("Search");
+      accelerator: "<Control>f";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Preferences");
+      accelerator: "<Control>comma";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Keyboard Shortcuts");
+      accelerator: "<Control>question";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Close Window");
+      accelerator: "<Control>w";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Quit");
+      accelerator: "<Control>q";
+    }
+  }
+
+  Adw.ShortcutsSection {
+    title: _("Library");
+
+    Adw.ShortcutsItem {
+      title: _("Albums");
+      accelerator: "<Control>1";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Artists");
+      accelerator: "<Control>2";
+    }
+
+    Adw.ShortcutsItem {
+      title: _("Playlists");
+      accelerator: "<Control>3";
+    }
+  }
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- An opened gatefold LP sleeve with the record sliding out of the right pocket. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- shadow -->
+  <rect x="8" y="46" width="112" height="76" rx="6" fill="#000000" opacity="0.15"/>
+  <!-- record -->
+  <circle cx="91" cy="44" r="28" fill="#241f31"/>
+  <circle cx="91" cy="44" r="23" fill="none" stroke="#3d3846" stroke-width="1.5"/>
+  <circle cx="91" cy="44" r="18" fill="none" stroke="#3d3846" stroke-width="1.5"/>
+  <circle cx="91" cy="44" r="10" fill="#e66100"/>
+  <circle cx="91" cy="44" r="2" fill="#241f31"/>
+  <!-- left panel: cover art -->
+  <path d="M 14 40 L 64 40 L 64 116 L 14 116 C 10.7 116 8 113.3 8 110 L 8 46 C 8 42.7 10.7 40 14 40 Z" fill="#3584e4"/>
+  <circle cx="36" cy="70" r="13" fill="#f6d32d"/>
+  <rect x="8" y="90" width="56" height="5" fill="#1c71d8"/>
+  <rect x="8" y="99" width="56" height="5" fill="#1c71d8"/>
+  <!-- right panel: the pocket -->
+  <path d="M 64 40 L 114 40 C 117.3 40 120 42.7 120 46 L 120 110 C 120 113.3 117.3 116 114 116 L 64 116 Z" fill="#1c71d8"/>
+  <path d="M 72 40 L 112 40 L 108 46 L 76 46 Z" fill="#1a5fb4"/>
+  <!-- fold -->
+  <rect x="63" y="40" width="2" height="76" fill="#62a0ea"/>
+</svg>
