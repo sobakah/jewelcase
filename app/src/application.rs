@@ -9,6 +9,7 @@ use crate::config::{APP_ID, RESOURCE_BASE_PATH, VERSION};
 use crate::library::Library;
 use crate::player::Player;
 use crate::preferences_dialog::PreferencesDialog;
+use crate::tools::Tools;
 use crate::window::GatefoldWindow;
 
 mod imp {
@@ -18,6 +19,7 @@ mod imp {
     pub struct GatefoldApplication {
         pub library: OnceCell<Library>,
         pub player: OnceCell<Player>,
+        pub tools: OnceCell<Tools>,
     }
 
     #[glib::object_subclass]
@@ -35,6 +37,10 @@ mod imp {
             let app = self.obj();
             app.setup_actions();
             app.setup_accels();
+
+            let tools = Tools::new();
+            tools.start();
+            self.tools.set(tools).expect("set once");
 
             let library = Library::new();
             if let Err(err) = library.start() {
@@ -93,6 +99,10 @@ impl GatefoldApplication {
         self.imp().library.get().expect("set in startup()").clone()
     }
 
+    pub fn tools(&self) -> Tools {
+        self.imp().tools.get().expect("set in startup()").clone()
+    }
+
     pub fn player(&self) -> Player {
         self.imp().player.get().expect("set in startup()").clone()
     }
@@ -103,6 +113,13 @@ impl GatefoldApplication {
                 // Closing (instead of quit()) runs close_request, which saves
                 // the window state; the app exits with its last window.
                 for window in app.windows() {
+                    // An open dialog would take the close request itself.
+                    if let Some(dialog) = window
+                        .downcast_ref::<adw::ApplicationWindow>()
+                        .and_then(|w| w.visible_dialog())
+                    {
+                        dialog.force_close();
+                    }
                     window.close();
                 }
             })
@@ -121,7 +138,33 @@ impl GatefoldApplication {
         let rescan = gio::ActionEntry::builder("rescan")
             .activate(|app: &Self, _, _| app.library().rescan())
             .build();
-        self.add_action_entries([quit, preferences, shortcuts, about, rescan]);
+        let import_cd = gio::ActionEntry::builder("import-cd")
+            .activate(|app: &Self, _, _| app.tools().import_cd())
+            .build();
+        let continue_import = gio::ActionEntry::builder("continue-import")
+            .activate(|app: &Self, _, _| app.tools().continue_import())
+            .build();
+        let show_page = gio::ActionEntry::builder("tool-show-page")
+            .activate(|app: &Self, _, _| app.tools().show_page())
+            .build();
+        let stop = gio::ActionEntry::builder("tool-stop")
+            .activate(|app: &Self, _, _| app.tools().stop_page())
+            .build();
+        let add_cdimport_folder = gio::ActionEntry::builder("add-cdimport-folder")
+            .activate(|app: &Self, _, _| app.add_cdimport_folder())
+            .build();
+        self.add_action_entries([
+            quit,
+            preferences,
+            shortcuts,
+            about,
+            rescan,
+            import_cd,
+            continue_import,
+            show_page,
+            stop,
+            add_cdimport_folder,
+        ]);
     }
 
     fn setup_accels(&self) {
@@ -140,6 +183,26 @@ impl GatefoldApplication {
         ];
         for (action, keys) in accels {
             self.set_accels_for_action(action, keys);
+        }
+    }
+
+    /// Library folder agreement (§10.2): cdimport's library folder becomes a
+    /// music folder, if the user accepts the offer.
+    fn add_cdimport_folder(&self) {
+        let Some(dir) = gatefold_tools::cdimport::Config::read().library_dir else {
+            return;
+        };
+        let settings = gio::Settings::new(APP_ID);
+        let mut folders = crate::library_folders::load(&settings);
+        let home = glib::home_dir();
+        match gatefold_core::library::folders::validate_new_folder(&dir, &folders, Some(&home)) {
+            Ok(folder) => {
+                folders.push(folder);
+                if let Err(err) = crate::library_folders::store(&settings, &folders) {
+                    tracing::warn!("Cannot save music folders: {err}");
+                }
+            }
+            Err(err) => tracing::info!("cdimport's folder can't be added: {err}"),
         }
     }
 

@@ -80,6 +80,54 @@ template $GatefoldWindow: Adw.ApplicationWindow {
         revealed: false;
       }
 
+      // While a companion tool's page is open (CONCEPT.md §10.0).
+      [top]
+      Gtk.Revealer tool_revealer {
+        transition-type: slide_down;
+
+        child: Gtk.Box {
+          spacing: 6;
+
+          styles [
+            "tool-bar",
+          ]
+
+          Gtk.Label tool_label {
+            hexpand: true;
+            ellipsize: end;
+          }
+
+          Gtk.Button {
+            label: _("_Show Page");
+            use-underline: true;
+            action-name: "app.tool-show-page";
+            valign: center;
+          }
+
+          Gtk.Button {
+            label: _("_Stop");
+            use-underline: true;
+            action-name: "app.tool-stop";
+            valign: center;
+          }
+        };
+      }
+
+      [top]
+      Adw.Banner cd_banner {
+        title: _("Audio CD detected");
+        button-label: _("_Import");
+        action-name: "app.import-cd";
+        revealed: false;
+      }
+
+      [top]
+      Adw.Banner unfinished_banner {
+        button-label: _("_Continue");
+        action-name: "app.continue-import";
+        revealed: false;
+      }
+
       content: Adw.ViewStack stack {
         Adw.ViewStackPage {
           name: "albums";
@@ -312,6 +360,11 @@ menu sort_menu {
 
 menu primary_menu {
   section {
+    item {
+      label: _("_Import CD…");
+      action: "app.import-cd";
+    }
+
     item {
       label: _("_Rescan Library");
       action: "app.rescan";

@@ -84,6 +84,37 @@
       <default>""</default>
       <summary>fanart.tv project API key</summary>
     </key>
+    <key name="lyrembed-path" type="s">
+      <default>""</default>
+      <summary>lyrembed program</summary>
+      <description>Empty: look in PATH and ~/.local/bin.</description>
+    </key>
+    <key name="cdimport-path" type="s">
+      <default>""</default>
+      <summary>cdimport program</summary>
+      <description>Empty: look in PATH and ~/.local/bin.</description>
+    </key>
+    <key name="tag-editor" type="s">
+      <choices>
+        <choice value="auto"/>
+        <choice value="eartag"/>
+        <choice value="kid3"/>
+        <choice value="picard"/>
+        <choice value="custom"/>
+      </choices>
+      <default>"auto"</default>
+      <summary>Tag editor</summary>
+      <description>“auto” uses cdimport’s editor setting, else Ear Tag.</description>
+    </key>
+    <key name="tag-editor-command" type="s">
+      <default>""</default>
+      <summary>Custom tag editor command</summary>
+      <description>With {files} for the files or {dir} for their folder.</description>
+    </key>
+    <key name="cdimport-folder-offered" type="b">
+      <default>false</default>
+      <summary>Whether cdimport’s library folder was offered as a music folder</summary>
+    </key>
     <key name="volume" type="d">
       <range min="0" max="1"/>
       <default>1</default>

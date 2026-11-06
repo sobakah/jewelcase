@@ -15,6 +15,7 @@ spotify-stream = []
 gatefold-core.workspace = true
 gatefold-lyrics.workspace = true
 gatefold-metadata.workspace = true
+gatefold-tools.workspace = true
 
 adw.workspace = true
 async-channel.workspace = true

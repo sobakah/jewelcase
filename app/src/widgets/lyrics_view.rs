@@ -40,6 +40,11 @@ mod imp {
         pub animation: RefCell<Option<adw::SpringAnimation>>,
         pub settings: gio::Settings,
         pub lines: RefCell<Vec<Line>>,
+        /// The last loaded state, to skip rebuilding unchanged lyrics.
+        pub state: RefCell<Option<LyricsState>>,
+        /// The current track's album folder, for lyrembed.
+        pub album_dir: RefCell<Option<std::path::PathBuf>>,
+        pub status_actions: gtk::Box,
     }
 
     impl Default for LyricsView {
@@ -71,6 +76,13 @@ mod imp {
                 animation: RefCell::default(),
                 settings: gio::Settings::new(APP_ID),
                 lines: RefCell::default(),
+                state: RefCell::default(),
+                album_dir: RefCell::default(),
+                status_actions: gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .spacing(12)
+                    .halign(gtk::Align::Center)
+                    .build(),
             }
         }
     }
@@ -113,6 +125,24 @@ impl LyricsView {
         imp.scroller.set_child(Some(&clamp));
         imp.stack.add_named(&imp.scroller, Some("lyrics"));
         imp.stack.add_named(&imp.status, Some("status"));
+        // "No lyrics": get them with lyrembed (§10.1).
+        let find = gtk::Button::builder()
+            .label(gettext("_Find Automatically"))
+            .use_underline(true)
+            .css_classes(["pill", "suggested-action"])
+            .build();
+        find.connect_clicked(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_| {
+                if let Some(dir) = view.imp().album_dir.borrow().clone() {
+                    GatefoldApplication::get().tools().find_lyrics(&dir);
+                }
+            }
+        ));
+        imp.status_actions.append(&find);
+        imp.status_actions.append(&self.lyrembed_button());
+        imp.status.set_child(Some(&imp.status_actions));
         self.set_child(Some(&imp.stack));
         self.add_css_class("lyrics-view");
 
@@ -150,7 +180,77 @@ impl LyricsView {
                 move |_, _| view.rebuild()
             ),
         );
+        // Tools write lyrics into the files; rescans bring them here live.
+        GatefoldApplication::get().library().connect_local(
+            "reloaded",
+            false,
+            glib::clone!(
+                #[weak(rename_to = view)]
+                self,
+                #[upgrade_or]
+                None,
+                move |_| {
+                    view.reload();
+                    None
+                }
+            ),
+        );
+        GatefoldApplication::get()
+            .tools()
+            .connect_lyrics_jobs_notify(glib::clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |_| {
+                    if view.imp().state.borrow().as_ref() == Some(&LyricsState::None) {
+                        view.show_lyrics(LyricsState::None);
+                    }
+                }
+            ));
         self.set_track(player.current_track());
+    }
+
+    /// "Check & Edit in lyrembed…": lyrembed's page for the album.
+    fn lyrembed_button(&self) -> gtk::Button {
+        let button = gtk::Button::builder()
+            .label(gettext("_Check & Edit in lyrembed…"))
+            .use_underline(true)
+            .halign(gtk::Align::Center)
+            .css_classes(["pill"])
+            .build();
+        button.connect_clicked(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_| {
+                if let Some(dir) = view.imp().album_dir.borrow().clone() {
+                    GatefoldApplication::get().tools().lyrembed_page(&dir);
+                }
+            }
+        ));
+        button
+    }
+
+    /// Reloads the current track's lyrics, keeping the view if unchanged.
+    fn reload(&self) {
+        let Some(track) = GatefoldApplication::get().player().current_track() else {
+            return;
+        };
+        let id = Some(track.id());
+        let path = track.track().record.path.clone();
+        let title = track.track().record.tags.title.clone();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            async move {
+                let state =
+                    gio::spawn_blocking(move || gatefold_lyrics::load(&path, title.as_deref()))
+                        .await
+                        .unwrap_or(LyricsState::None);
+                let imp = view.imp();
+                if imp.track_id.get() == id && imp.state.borrow().as_ref() != Some(&state) {
+                    view.show_lyrics(state);
+                }
+            }
+        ));
     }
 
     fn show_status(&self, icon: &str, title: &str, description: Option<&str>) {
@@ -169,6 +269,10 @@ impl LyricsView {
         }
         imp.track_id.set(id);
         imp.lines.replace(Vec::new());
+        imp.state.replace(None);
+        imp.album_dir.replace(track.as_ref().map(|t| {
+            gatefold_core::library::grouping::album_folder(&t.track().record.path).to_path_buf()
+        }));
         self.rebuild();
         let Some(track) = track else {
             self.show_status("gatefold-lyrics-symbolic", &gettext("No Lyrics"), None);
@@ -194,6 +298,18 @@ impl LyricsView {
 
     fn show_lyrics(&self, state: LyricsState) {
         let imp = self.imp();
+        imp.state.replace(Some(state.clone()));
+        let tools = GatefoldApplication::get().tools();
+        let has_lyrembed = tools.lyrembed_path().is_some();
+        imp.status_actions
+            .set_visible(state == LyricsState::None && has_lyrembed && tools.lyrics_jobs() == 0);
+        if state == LyricsState::None && tools.lyrics_jobs() > 0 {
+            return self.show_status(
+                "gatefold-lyrics-symbolic",
+                &gettext("Looking for Lyrics…"),
+                Some(&gettext("lyrembed is searching for this album's lyrics")),
+            );
+        }
         match state {
             LyricsState::Lyrics(lyrics) => {
                 imp.synced.set(lyrics.synced);
@@ -275,6 +391,15 @@ impl LyricsView {
             rows.push((line.time_ms, button));
         }
         imp.rows.replace(rows);
+        if !imp.lines.borrow().is_empty()
+            && GatefoldApplication::get().tools().lyrembed_path().is_some()
+        {
+            let button = self.lyrembed_button();
+            button.set_margin_top(24);
+            button.add_css_class("flat");
+            button.remove_css_class("pill");
+            imp.lines_box.append(&button);
+        }
     }
 
     fn set_position(&self, position_ms: u64) {

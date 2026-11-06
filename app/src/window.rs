@@ -33,6 +33,14 @@ mod imp {
         #[template_child]
         pub scan_banner: TemplateChild<adw::Banner>,
         #[template_child]
+        pub tool_revealer: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub tool_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub cd_banner: TemplateChild<adw::Banner>,
+        #[template_child]
+        pub unfinished_banner: TemplateChild<adw::Banner>,
+        #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub split_view: TemplateChild<adw::OverlaySplitView>,
@@ -85,6 +93,21 @@ mod imp {
                 let bar = &win.imp().search_bar;
                 bar.set_search_mode(!bar.is_search_mode());
             });
+            klass.install_action(
+                "win.show-album",
+                Some(glib::VariantTy::INT64),
+                |win, _, param| {
+                    let library = GatefoldApplication::get().library();
+                    if let Some(album) = param
+                        .and_then(|p| p.get::<i64>())
+                        .and_then(|id| library.album_group(id))
+                    {
+                        win.imp().bottom_sheet.set_open(false);
+                        win.imp().stack.set_visible_child_name("albums");
+                        win.show_album(&album);
+                    }
+                },
+            );
             klass.install_action(
                 "win.show-artist",
                 Some(glib::VariantTy::INT64),
@@ -147,6 +170,7 @@ mod imp {
             obj.setup_albums();
             obj.setup_artists();
             obj.setup_messages();
+            obj.setup_tools();
 
             self.search_bar.set_key_capture_widget(Some(&*obj));
 
@@ -363,12 +387,14 @@ impl GatefoldWindow {
             move |item| {
                 let artist = item.downcast_ref::<ArtistObject>().expect("artists");
                 let search = window.imp().search.borrow();
+                // Any alias spelling matches: "Hoshino Gen" finds 星野源 (§10.1).
                 search.is_empty()
-                    || artist
-                        .artist()
-                        .name
-                        .to_lowercase()
-                        .contains(search.as_str())
+                    || GatefoldApplication::get()
+                        .library()
+                        .aliases()
+                        .spellings(&artist.artist().name)
+                        .iter()
+                        .any(|name| name.to_lowercase().contains(search.as_str()))
             }
         ));
         let filtered =
@@ -463,11 +489,122 @@ impl GatefoldWindow {
         imp.artists_nav.push(&page);
     }
 
+    fn setup_tools(&self) {
+        let tools = GatefoldApplication::get().tools();
+        let update = glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |tools: &crate::tools::Tools| window.update_tool_banners(tools)
+        );
+        let on_page = update.clone();
+        tools.connect_page_status_notify(move |tools| on_page(tools));
+        let on_cd = update.clone();
+        tools.connect_cd_present_notify(move |tools| on_cd(tools));
+        let on_unfinished = update.clone();
+        tools.connect_unfinished_imports_notify(move |tools| on_unfinished(tools));
+        tools.connect_local(
+            "detected",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |values| {
+                    let tools = values[0].get::<crate::tools::Tools>().ok()?;
+                    window.update_tool_banners(&tools);
+                    window.offer_cdimport_folder(&tools);
+                    None
+                }
+            ),
+        );
+        self.update_tool_banners(&tools);
+    }
+
+    fn update_tool_banners(&self, tools: &crate::tools::Tools) {
+        let imp = self.imp();
+        let status = tools.page_status();
+        imp.tool_label.set_label(&status);
+        imp.tool_revealer.set_reveal_child(!status.is_empty());
+        let can_import = tools.detected().cdimport.is_some() && status.is_empty();
+        imp.cd_banner.set_revealed(can_import && tools.cd_present());
+        let unfinished = tools.unfinished_imports();
+        imp.unfinished_banner.set_title(
+            &gettextrs::ngettext(
+                "{} unfinished CD import",
+                "{} unfinished CD imports",
+                unfinished,
+            )
+            .replace("{}", &unfinished.to_string()),
+        );
+        imp.unfinished_banner
+            .set_revealed(can_import && !tools.cd_present() && unfinished > 0);
+    }
+
+    /// Once: if cdimport saves albums outside the music folders, offer its
+    /// folder as one (§10.2).
+    fn offer_cdimport_folder(&self, tools: &crate::tools::Tools) {
+        let settings = self.settings();
+        if tools.detected().cdimport.is_none() || settings.boolean("cdimport-folder-offered") {
+            return;
+        }
+        let Some(dir) = gatefold_tools::cdimport::Config::read().library_dir else {
+            return;
+        };
+        let folders = crate::library_folders::load(settings);
+        let covered = folders
+            .iter()
+            .any(|f| dir.starts_with(f) || f.starts_with(&dir));
+        let _ = settings.set_boolean("cdimport-folder-offered", true);
+        if covered || !dir.is_dir() {
+            return;
+        }
+        // Translators: {} is a folder path.
+        let toast = adw::Toast::builder()
+            .title(
+                gettextrs::gettext("cdimport saves albums to {}")
+                    .replace("{}", &dir.display().to_string()),
+            )
+            .button_label(gettextrs::gettext("_Add as Music Folder"))
+            .action_name("app.add-cdimport-folder")
+            .timeout(0)
+            .build();
+        self.imp().toast_overlay.add_toast(toast);
+    }
+
+    /// After a cdimport run: "New album: <title> — Show" (§10.2).
+    fn announce_imported_albums(&self) {
+        let tools = GatefoldApplication::get().tools();
+        let Some(since) = tools.import_started() else {
+            return;
+        };
+        let library = GatefoldApplication::get().library();
+        let albums = library.albums();
+        let new: Vec<AlbumObject> = (0..albums.n_items())
+            .filter_map(|i| albums.item(i).and_downcast::<AlbumObject>())
+            .filter(|a| a.album().added >= since)
+            .collect();
+        for album in &new {
+            // Translators: {} is an album title.
+            let toast = adw::Toast::builder()
+                .title(gettextrs::gettext("New album: {}").replace("{}", &album.album().title))
+                .button_label(gettextrs::gettext("_Show"))
+                .action_name("win.show-album")
+                .action_target(&album.album().id.to_variant())
+                .build();
+            self.imp().toast_overlay.add_toast(toast);
+        }
+        if !new.is_empty() && tools.page_status().is_empty() {
+            tools.forget_import();
+        }
+    }
+
     fn setup_messages(&self) {
         let app = GatefoldApplication::get();
         for source in [
             app.library().upcast::<glib::Object>(),
             app.player().upcast(),
+            app.tools().upcast(),
         ] {
             source.connect_local(
                 "message",
@@ -501,9 +638,14 @@ impl GatefoldWindow {
         if search.is_empty() {
             return true;
         }
+        let library = GatefoldApplication::get().library();
+        let aliases = library.aliases();
         album.versions().iter().any(|v| {
             v.title.to_lowercase().contains(search.as_str())
-                || v.artist_credit.to_lowercase().contains(search.as_str())
+                || aliases
+                    .spellings(&v.artist_credit)
+                    .iter()
+                    .any(|name| name.to_lowercase().contains(search.as_str()))
         })
     }
 
@@ -532,6 +674,7 @@ impl GatefoldWindow {
 
     fn library_reloaded(&self) {
         let imp = self.imp();
+        self.announce_imported_albums();
         // Leave the page of an artist that's no longer in the library.
         let library = GatefoldApplication::get().library();
         if let Some(page) = imp.artists_nav.visible_page().and_downcast::<ArtistPage>()
@@ -583,7 +726,8 @@ impl GatefoldWindow {
     /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, e.g.
     /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album
     /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
-    /// opens an artist page. Without `GATEFOLD_SCREENSHOT`,
+    /// opens an artist page; `GATEFOLD_SCREENSHOT_PANEL_ACTIONS` runs album
+    /// panel actions; `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences. Without `GATEFOLD_SCREENSHOT`,
     /// only that album step runs.
     fn setup_screenshot(&self) {
         // Without GATEFOLD_SCREENSHOT, only the album and actions steps run
@@ -659,6 +803,21 @@ impl GatefoldWindow {
                         .player()
                         .play_album(album.album().id, None, false);
                 }
+                // e.g. `panel.lyrembed`: actions of the album panel.
+                let panel_actions =
+                    std::env::var("GATEFOLD_SCREENSHOT_PANEL_ACTIONS").unwrap_or_default();
+                for action in panel_actions.split_whitespace() {
+                    let panel = window.imp().album_panel.get();
+                    if let Err(err) = WidgetExt::activate_action(&panel, action, None) {
+                        tracing::warn!("Screenshot panel action {action}: {err}");
+                    }
+                }
+            }
+            // `GATEFOLD_SCREENSHOT_PREFS=integrations`: a Preferences page.
+            if let Ok(page) = std::env::var("GATEFOLD_SCREENSHOT_PREFS") {
+                let dialog = crate::preferences_dialog::PreferencesDialog::new();
+                dialog.set_visible_page_name(&page);
+                dialog.present(Some(&window));
             }
             let Some(path) = path else { return };
             let window = window.downgrade();

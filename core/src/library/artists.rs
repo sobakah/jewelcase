@@ -32,37 +32,41 @@ const NON_PERFORMER: &[&str] = &["prod.", "prod ", "produced by "];
 pub struct Aliases {
     /// Lowercase spelling → lowercase canonical spelling.
     canonical: HashMap<String, String>,
+    /// Lowercase canonical spelling → every spelling as written.
+    groups: HashMap<String, Vec<String>>,
 }
 
 impl Aliases {
     /// Parses lines like `  BTS = Bangtan Boys = 방탄소년단`; other lines
     /// (headers, notes) are skipped.
     pub fn parse_lyrembed(output: &str) -> Self {
-        let mut canonical = HashMap::new();
+        let mut aliases = Self::default();
         for line in output.lines() {
             if !line.starts_with(' ') || !line.contains(" = ") {
                 continue;
             }
             let names: Vec<String> = line
                 .split(" = ")
-                .map(|n| n.trim().to_lowercase())
+                .map(|n| n.trim().to_owned())
                 .filter(|n| !n.is_empty())
                 .collect();
-            if let Some(first) = names.first() {
-                for name in &names {
-                    canonical
-                        .entry(name.clone())
-                        .or_insert_with(|| first.clone());
-                }
+            let Some(first) = names.first().map(|n| n.to_lowercase()) else {
+                continue;
+            };
+            for name in &names {
+                aliases
+                    .canonical
+                    .entry(name.to_lowercase())
+                    .or_insert_with(|| first.clone());
             }
+            aliases.groups.entry(first).or_insert(names);
         }
-        Self { canonical }
+        aliases
     }
 
-    /// Runs `lyrembed --list-aliases`; empty if lyrembed isn't installed.
-    /// (The companion-tool integration proper is roadmap phase 4.)
-    pub fn from_lyrembed() -> Self {
-        match std::process::Command::new("lyrembed")
+    /// Runs `<program> --list-aliases`; empty if that fails.
+    pub fn from_program(program: &std::path::Path) -> Self {
+        match std::process::Command::new(program)
             .arg("--list-aliases")
             .stdin(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -82,6 +86,11 @@ impl Aliases {
         }
     }
 
+    /// `lyrembed` from `PATH`.
+    pub fn from_lyrembed() -> Self {
+        Self::from_program(std::path::Path::new("lyrembed"))
+    }
+
     pub fn len(&self) -> usize {
         self.canonical.len()
     }
@@ -94,6 +103,28 @@ impl Aliases {
     pub fn identity(&self, name: &str) -> String {
         let lower = name.trim().to_lowercase();
         self.canonical.get(&lower).cloned().unwrap_or(lower)
+    }
+
+    /// Every known spelling of a name (at least the name itself), for
+    /// search: "Hoshino Gen" finds 星野源.
+    pub fn spellings(&self, name: &str) -> Vec<String> {
+        match self.groups.get(&self.identity(name)) {
+            Some(group) => group.clone(),
+            None => vec![name.to_owned()],
+        }
+    }
+
+    /// A Latin-script spelling for a native-script name, shown as the
+    /// artist page's subtitle.
+    pub fn latin_name(&self, name: &str) -> Option<String> {
+        if name.chars().all(|c| c.is_ascii() || !c.is_alphabetic()) {
+            return None;
+        }
+        self.groups
+            .get(&self.identity(name))?
+            .iter()
+            .find(|spelling| spelling.chars().all(|c| c.is_ascii() || !c.is_alphabetic()))
+            .cloned()
     }
 }
 
@@ -428,6 +459,16 @@ mod tests {
         );
         assert_eq!(aliases.identity("Adele"), "adele");
         assert_eq!(aliases.len(), 5);
+        assert_eq!(
+            aliases.spellings("txt"),
+            ["TOMORROW X TOGETHER", "TXT", "투모로우바이투게더"]
+        );
+        assert_eq!(aliases.spellings("Adele"), ["Adele"]);
+        assert_eq!(
+            aliases.latin_name("투모로우바이투게더").as_deref(),
+            Some("TOMORROW X TOGETHER")
+        );
+        assert_eq!(aliases.latin_name("BTS"), None);
     }
 
     #[test]

@@ -112,3 +112,9 @@
 .queue-view .drag-handle {
   -gtk-icon-size: 16px;
 }
+
+/* Companion tool status (CONCEPT.md §10.0), styled like a banner. */
+.tool-bar {
+  padding: 6px 12px;
+  background-color: color-mix(in srgb, var(--accent-bg-color) 20%, transparent);
+}

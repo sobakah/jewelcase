@@ -716,6 +716,7 @@ dependencies = [
  "gatefold-core",
  "gatefold-lyrics",
  "gatefold-metadata",
+ "gatefold-tools",
  "gettext-rs",
  "gtk4",
  "libadwaita",
@@ -762,6 +763,15 @@ dependencies = [
  "thiserror",
  "tracing",
  "ureq",
+]
+
+[[package]]
+name = "gatefold-tools"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

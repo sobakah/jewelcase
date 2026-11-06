@@ -67,6 +67,20 @@ mod imp {
                 let tracks = panel.imp().track_objects.borrow().clone();
                 GatefoldApplication::get().player().play_next(tracks);
             });
+            klass.install_action("panel.edit-tags", None, |panel, _, _| {
+                let files = panel.track_paths();
+                GatefoldApplication::get().tools().edit_tags(files);
+            });
+            klass.install_action("panel.find-lyrics", None, |panel, _, _| {
+                if let Some(dir) = panel.album_dir() {
+                    GatefoldApplication::get().tools().find_lyrics(&dir);
+                }
+            });
+            klass.install_action("panel.lyrembed", None, |panel, _, _| {
+                if let Some(dir) = panel.album_dir() {
+                    GatefoldApplication::get().tools().lyrembed_page(&dir);
+                }
+            });
             klass.install_action("panel.add-to-queue", None, |panel, _, _| {
                 let tracks = panel.imp().track_objects.borrow().clone();
                 GatefoldApplication::get().player().add_to_queue(tracks);
@@ -187,6 +201,23 @@ impl AlbumPanel {
         self.fill_tracks(&tracks, &info.artist_credit);
         imp.track_objects.replace(tracks);
         self.update_playing();
+    }
+
+    /// The files of the shown version.
+    fn track_paths(&self) -> Vec<std::path::PathBuf> {
+        self.imp()
+            .track_objects
+            .borrow()
+            .iter()
+            .map(|t| t.track().record.path.clone())
+            .collect()
+    }
+
+    /// The album's folder (above disc subfolders), for lyrembed.
+    fn album_dir(&self) -> Option<std::path::PathBuf> {
+        let tracks = self.imp().track_objects.borrow();
+        let path = &tracks.first()?.track().record.path;
+        Some(gatefold_core::library::grouping::album_folder(path).to_path_buf())
     }
 
     fn fill_artists(&self, album: &gatefold_core::db::Album) {

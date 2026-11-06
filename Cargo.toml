@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["app", "core", "lyrics", "metadata"]
+members = ["app", "core", "lyrics", "metadata", "tools"]
 # Added with their roadmap phases (CONCEPT.md §2, §13):
-# tools (4), similarity (6), spotify (7/8).
+# similarity (6), spotify (7/8).
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ repository = "https://github.com/sobakah/gatefold"
 gatefold-core = { path = "core" }
 gatefold-lyrics = { path = "lyrics" }
 gatefold-metadata = { path = "metadata" }
+gatefold-tools = { path = "tools" }
 
 adw = { package = "libadwaita", version = "0.9", features = ["v1_10"] }
 gettext-rs = { version = "0.8", features = ["gettext-system"] }

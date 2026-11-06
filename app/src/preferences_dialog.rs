@@ -12,6 +12,8 @@ use crate::library_folders;
 
 /// The `replaygain` setting values, in the order of the combo row.
 const REPLAYGAIN_MODES: [&str; 4] = ["off", "auto", "track", "album"];
+/// The `tag-editor` setting values, in the order of the combo row.
+const TAG_EDITORS: [&str; 5] = ["auto", "eartag", "kid3", "picard", "custom"];
 /// The `lyrics-layout` setting values, in the order of the combo row.
 const LYRICS_LAYOUTS: [&str; 3] = ["original-top", "romanization-top", "original-only"];
 
@@ -31,6 +33,26 @@ mod imp {
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub online_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub lyrembed_status: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub romanize_status: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub layout_hint: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub lyrembed_path_row: TemplateChild<adw::EntryRow>,
+        #[template_child]
+        pub cdimport_status: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub cdimport_library: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub cdimport_path_row: TemplateChild<adw::EntryRow>,
+        #[template_child]
+        pub tag_editor_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub tag_editor_command_row: TemplateChild<adw::EntryRow>,
+        #[template_child]
+        pub ear_tag_status: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub wikidata_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -100,6 +122,7 @@ mod imp {
             settings
                 .bind("fanart-api-key", &*self.fanart_key_row, "text")
                 .build();
+            self.setup_integrations(&settings);
             // Answering here counts as answering the Artists view's question.
             self.online_row.connect_active_notify(glib::clone!(
                 #[weak]
@@ -122,6 +145,62 @@ mod imp {
                 .build();
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();
+        }
+    }
+
+    impl PreferencesDialog {
+        fn setup_integrations(&self, settings: &gio::Settings) {
+            // Paths apply when the entry is confirmed (Enter), not per key.
+            for (row, key) in [
+                (&*self.lyrembed_path_row, "lyrembed-path"),
+                (&*self.cdimport_path_row, "cdimport-path"),
+                (&*self.tag_editor_command_row, "tag-editor-command"),
+            ] {
+                row.set_text(&settings.string(key));
+                row.set_show_apply_button(true);
+                row.connect_apply(glib::clone!(
+                    #[weak]
+                    settings,
+                    move |row| {
+                        let _ = settings.set_string(key, row.text().trim());
+                    }
+                ));
+            }
+            settings
+                .bind("tag-editor", &*self.tag_editor_row, "selected")
+                .mapping(|value, _| {
+                    let editor = value.get::<String>()?;
+                    let index = TAG_EDITORS.iter().position(|e| *e == editor)?;
+                    Some((index as u32).to_value())
+                })
+                .set_mapping(|value, _| {
+                    let index = value.get::<u32>().ok()? as usize;
+                    TAG_EDITORS.get(index).map(|e| e.to_variant())
+                })
+                .build();
+            self.tag_editor_row
+                .bind_property("selected", &*self.tag_editor_command_row, "sensitive")
+                .transform_to(|_, selected: u32| Some(selected == 4))
+                .sync_create()
+                .build();
+
+            let obj = self.obj();
+            let tools = crate::application::GatefoldApplication::get().tools();
+            tools.connect_local(
+                "detected",
+                false,
+                glib::clone!(
+                    #[weak]
+                    obj,
+                    #[upgrade_or]
+                    None,
+                    move |_| {
+                        obj.show_tools();
+                        None
+                    }
+                ),
+            );
+            obj.show_tools();
         }
     }
 
@@ -248,6 +327,56 @@ impl PreferencesDialog {
         if let Err(err) = library_folders::store(self.settings(), folders) {
             tracing::warn!("Failed to save library folders: {err}");
         }
+    }
+
+    /// Found / version / path of each tool, or how to install it (§10.0).
+    fn show_tools(&self) {
+        use gatefold_tools::{cdimport, lyrembed};
+        let imp = self.imp();
+        let detected = crate::application::GatefoldApplication::get()
+            .tools()
+            .detected();
+        let describe = |tool: &Option<crate::tools::ToolInfo>, install: &str| match tool {
+            Some(tool) => match tool.version {
+                // Translators: {version} and {path} of a found program.
+                Some(version) => gettext("Version {version} · {path}")
+                    .replace("{version}", &version.to_string())
+                    .replace("{path}", &tool.path.display().to_string()),
+                None => tool.path.display().to_string(),
+            },
+            // Translators: {} is an install command, e.g. "pipx install lyrembed".
+            None => gettext("Not installed. Install it with “{}”").replace("{}", install),
+        };
+        imp.lyrembed_status
+            .set_subtitle(&describe(&detected.lyrembed, lyrembed::INSTALL_COMMAND));
+        imp.cdimport_status
+            .set_subtitle(&describe(&detected.cdimport, cdimport::INSTALL_COMMAND));
+
+        let romanize = if detected.romanize_stdio {
+            gettext("Available")
+        } else {
+            // §5.1: without "romanize --stdio", lyrics show as tagged.
+            gettext(
+                "Not available: needs a lyrembed with “romanize --stdio”. Lyrics show as tagged; lyrembed's own romanization still works.",
+            )
+        };
+        imp.romanize_status.set_subtitle(&romanize);
+        imp.layout_hint
+            .set_visible(detected.lyrembed.is_some() && !lyrembed::Config::read().keeps_original());
+
+        let library = cdimport::Config::read().library_dir;
+        imp.cdimport_library
+            .set_visible(detected.cdimport.is_some());
+        imp.cdimport_library.set_subtitle(
+            &library
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| gettext("Asked on first use")),
+        );
+        imp.ear_tag_status.set_subtitle(&if detected.ear_tag {
+            gettext("Installed")
+        } else {
+            gettext("Not installed. Get it from GNOME Software.")
+        });
     }
 
     fn toast(&self, message: &str) {

@@ -25,7 +25,7 @@ mkdir -p "$state/data" "$state/cache"
 export GATEFOLD_HEADLESS_DATA="$state/data" GATEFOLD_HEADLESS_CACHE="$state/cache"
 exec dbus-run-session -- sh -c '
     export XDG_DATA_HOME="$GATEFOLD_HEADLESS_DATA" XDG_CACHE_HOME="$GATEFOLD_HEADLESS_CACHE"
-    export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1
+    export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1
     # No portals or gvfs inside the private session.
     export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none
     export WAYLAND_DISPLAY="gatefold-headless-$$"

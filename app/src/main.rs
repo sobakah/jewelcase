@@ -10,6 +10,7 @@ mod objects;
 mod player;
 mod preferences_dialog;
 mod theme;
+mod tools;
 mod widgets;
 mod window;
 

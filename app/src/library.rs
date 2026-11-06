@@ -30,7 +30,7 @@ const WATCH_DEBOUNCE: Duration = Duration::from_secs(3);
 
 enum ScanMessage {
     Progress(ScanProgress),
-    Done(Result<ScanSummary, String>),
+    Done(Result<ScanSummary, String>, Aliases),
 }
 
 mod imp {
@@ -53,6 +53,8 @@ mod imp {
         pub artists: OnceCell<gio::ListStore>,
         pub metadata: OnceCell<Metadata>,
         pub lookups: RefCell<HashSet<i64>>,
+        /// lyrembed's alias groups, from the last scan (search, artist pages).
+        pub aliases: RefCell<Aliases>,
         pub db: OnceCell<RefCell<Database>>,
         pub settings: OnceCell<gio::Settings>,
         pub rescan_pending: Cell<bool>,
@@ -255,6 +257,11 @@ impl Library {
 
     // Artists (CONCEPT.md §3.3, §4.2, §8) -----------------------------------
 
+    /// lyrembed's alias groups (empty without lyrembed).
+    pub fn aliases(&self) -> std::cell::Ref<'_, Aliases> {
+        self.imp().aliases.borrow()
+    }
+
     /// Album artists, by sort name.
     pub fn artists(&self) -> &gio::ListStore {
         self.imp().artists.get().expect("set in constructed()")
@@ -451,20 +458,31 @@ impl Library {
         self.set_scan_status(&gettext("Looking for music…"));
 
         let folders = self.folders();
+        let lyrembed_override = self.settings().string("lyrembed-path").to_string();
         let (tx, rx) = async_channel::unbounded();
         std::thread::spawn(move || {
+            // Not just PATH: from the GNOME menu, ~/.local/bin is often
+            // missing there (§10.0).
+            let lyrembed = gatefold_tools::find_program(
+                "lyrembed",
+                Some(std::path::Path::new(&lyrembed_override)),
+            )
+            .or_else(|| gatefold_tools::find_program("lyrembed", None));
+            let aliases = lyrembed
+                .as_deref()
+                .map(Aliases::from_program)
+                .unwrap_or_default();
             let result = Database::open(&config::database_path())
                 .map_err(|e| e.to_string())
                 .and_then(|mut db| {
                     let covers = CoverCache::new(config::cover_dir());
-                    let aliases = Aliases::from_lyrembed();
                     let progress = |p| {
                         let _ = tx.send_blocking(ScanMessage::Progress(p));
                     };
                     scanner::scan(&mut db, &folders, &aliases, &covers, &progress)
                         .map_err(|e| e.to_string())
                 });
-            let _ = tx.send_blocking(ScanMessage::Done(result));
+            let _ = tx.send_blocking(ScanMessage::Done(result, aliases));
         });
 
         glib::spawn_future_local(glib::clone!(
@@ -475,7 +493,8 @@ impl Library {
                     match message {
                         ScanMessage::Progress(ScanProgress::AlbumsReady) => library.reload(),
                         ScanMessage::Progress(progress) => library.show_progress(progress),
-                        ScanMessage::Done(result) => {
+                        ScanMessage::Done(result, aliases) => {
+                            library.imp().aliases.replace(aliases);
                             library.scan_done(result);
                             break;
                         }

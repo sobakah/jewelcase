@@ -33,6 +33,8 @@ mod imp {
         #[template_child]
         pub name: TemplateChild<gtk::Label>,
         #[template_child]
+        pub latin_name: TemplateChild<gtk::Label>,
+        #[template_child]
         pub counts: TemplateChild<gtk::Label>,
         #[template_child]
         pub links: TemplateChild<gtk::Box>,
@@ -79,6 +81,19 @@ mod imp {
                 if let Some(artist) = page.imp().artist.borrow().clone() {
                     super::super::identify_dialog::show(page, &artist);
                 }
+            });
+            klass.install_action("artist.edit-tags", None, |page, _, _| {
+                // All tracks of the artist's own albums, e.g. to set
+                // ALBUMARTISTS for a real split (§3.3, §10.3).
+                let library = GatefoldApplication::get().library();
+                let files: Vec<std::path::PathBuf> = library
+                    .artist_albums(page.artist_id())
+                    .iter()
+                    .filter(|(_, role)| *role == AlbumRole::Credit)
+                    .flat_map(|(album, _)| library.album_tracks(album.id))
+                    .map(|t| t.track().record.path.clone())
+                    .collect();
+                GatefoldApplication::get().tools().edit_tags(files);
             });
             klass.install_action("artist.lookup", None, |page, _, _| {
                 GatefoldApplication::get()
@@ -212,6 +227,10 @@ impl ArtistPage {
         let info = artist.artist();
         self.set_title(&info.name);
         imp.name.set_label(&info.name);
+        let latin = library.aliases().latin_name(&info.name);
+        imp.latin_name.set_visible(latin.is_some());
+        imp.latin_name
+            .set_label(latin.as_deref().unwrap_or_default());
         imp.avatar.set_text(Some(&info.name));
         let portrait = info
             .portrait_key

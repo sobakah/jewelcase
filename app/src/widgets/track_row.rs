@@ -244,9 +244,20 @@ impl TrackRow {
                 .player()
                 .add_to_queue(vec![track.clone()]);
         });
+        let edit_tags = gtk::Button::builder()
+            .label(gettext("Edit Tags…"))
+            .css_classes(["pill", "small"])
+            .build();
+        let path = self.track().track().record.path.clone();
+        edit_tags.connect_clicked(move |_| {
+            GatefoldApplication::get()
+                .tools()
+                .edit_tags(vec![path.clone()]);
+        });
         let actions = gtk::Box::builder().spacing(6).build();
         actions.append(&play_next);
         actions.append(&add_to_queue);
+        actions.append(&edit_tags);
 
         let details = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)

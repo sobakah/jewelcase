@@ -72,6 +72,18 @@ template $GatefoldArtistPage: Adw.NavigationPage {
                   ]
                 }
 
+                // A Latin spelling under a native-script name (lyrembed aliases).
+                Gtk.Label latin_name {
+                  wrap: true;
+                  xalign: 0;
+                  visible: false;
+
+                  styles [
+                    "title-4",
+                    "dim-label",
+                  ]
+                }
+
                 Gtk.Label counts {
                   xalign: 0;
 
@@ -183,6 +195,13 @@ menu artist_menu {
     item {
       label: _("_Look Up Again");
       action: "artist.lookup";
+    }
+  }
+
+  section {
+    item {
+      label: _("_Edit Album Artist Tags…");
+      action: "artist.edit-tags";
     }
   }
 }

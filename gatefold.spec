@@ -47,6 +47,8 @@ Requires:       gstreamer1-plugin-libav
 Requires:       glycin-loaders
 Requires:       bubblewrap
 Recommends:     gstreamer1-plugins-ugly-free
+# Ear Tag, the default tag editor, is a Flatpak (CONCEPT.md §10.3).
+Recommends:     flatpak
 
 %description
 Gatefold is a local-first music player for people who listen to albums,
@@ -90,3 +92,4 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Library scanner, album grid and panel, playback, queue, MPRIS (phase 1)
 - Artists: grid, pages, online lookups, portraits (phase 2)
 - Player: cover colors, adaptive layouts, lyrics, queue sections (phase 3)
+- Companion tools: lyrembed, cdimport, tag editor (phase 4)
