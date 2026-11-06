@@ -74,6 +74,8 @@ mod imp {
         pub page_process: RefCell<Option<gio::Subprocess>>,
         pub page_tool: Cell<Option<PageTool>>,
         pub page_url: RefCell<Option<String>>,
+        /// A page to open once the running one has closed.
+        pub pending_page: RefCell<Option<(PageTool, Vec<OsString>, String)>>,
         pub auto_queue: RefCell<VecDeque<PathBuf>>,
         pub auto_running: Cell<bool>,
         pub unfinished: RefCell<Vec<PathBuf>>,
@@ -232,7 +234,18 @@ impl Tools {
     fn open_page(&self, tool: PageTool, argv: Vec<OsString>, status: String) {
         let imp = self.imp();
         if imp.page_process.borrow().is_some() {
-            self.message(&gettext("Another tool page is still open"));
+            // One at a time: offer to close the running one first.
+            let open = imp.page_tool.get();
+            glib::spawn_future_local(glib::clone!(
+                #[weak(rename_to = tools)]
+                self,
+                async move {
+                    if tools.confirm_replace_page(open).await {
+                        tools.imp().pending_page.replace(Some((tool, argv, status)));
+                        tools.stop_page();
+                    }
+                }
+            ));
             return;
         }
         let process = self.spawn(
@@ -280,6 +293,32 @@ impl Tools {
         if tool == PageTool::Cdimport {
             self.check_unfinished_imports();
         }
+        if let Some((tool, argv, status)) = imp.pending_page.take() {
+            self.open_page(tool, argv, status);
+        }
+    }
+
+    async fn confirm_replace_page(&self, open: Option<PageTool>) -> bool {
+        let name = match open {
+            Some(PageTool::Cdimport) => "cdimport",
+            _ => "lyrembed",
+        };
+        let dialog = adw::AlertDialog::builder()
+            // Translators: {} is a program name (lyrembed, cdimport).
+            .heading(gettext("Close the Open {} Page?").replace("{}", name))
+            .body(gettext(
+                "Only one tool page can be open at a time. Changes you haven't saved there are lost.",
+            ))
+            .close_response("cancel")
+            .default_response("replace")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", &gettext("_Cancel")),
+            ("replace", &gettext("_Close and Open New")),
+        ]);
+        dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
+        let window = GatefoldApplication::get().active_window();
+        dialog.choose_future(window.as_ref()).await == "replace"
     }
 
     /// Reopens the page's address (if the tab was lost).
@@ -300,11 +339,31 @@ impl Tools {
         });
     }
 
-    /// Stops the tool with a page (SIGINT).
+    /// Stops the tool with a page (SIGINT; forced if it doesn't stop).
     pub fn stop_page(&self) {
-        if let Some(process) = self.imp().page_process.borrow().as_ref() {
-            process.send_signal(SIGINT);
-        }
+        let Some(process) = self.imp().page_process.borrow().clone() else {
+            return;
+        };
+        process.send_signal(SIGINT);
+        glib::timeout_add_seconds_local_once(
+            3,
+            glib::clone!(
+                #[weak(rename_to = tools)]
+                self,
+                move || {
+                    let still_running = tools
+                        .imp()
+                        .page_process
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|p| p == &process);
+                    if still_running {
+                        tracing::info!("The tool page didn't stop; ending it");
+                        process.force_exit();
+                    }
+                }
+            ),
+        );
     }
 
     // lyrembed (§10.1) -------------------------------------------------------

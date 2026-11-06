@@ -1073,6 +1073,53 @@ impl Database {
         Ok(())
     }
 
+    /// Each album's genres from its songs' tags, most common first. Case
+    /// variants count as one ("K-Pop", "K-POP"); the most used spelling wins.
+    pub fn album_genres(&self) -> Result<HashMap<i64, Vec<String>>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT album_id, genres FROM track WHERE album_id IS NOT NULL AND genres != ''",
+        )?;
+        // album → lowercase genre → (count, spelling → count)
+        let mut counts: HashMap<i64, HashMap<String, GenreCount>> = HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (album, genres) = row?;
+            for genre in split_list(genres) {
+                let genre = genre.trim().to_owned();
+                if genre.is_empty() {
+                    continue;
+                }
+                let entry = counts
+                    .entry(album)
+                    .or_default()
+                    .entry(genre.to_lowercase())
+                    .or_default();
+                entry.0 += 1;
+                *entry.1.entry(genre).or_default() += 1;
+            }
+        }
+        Ok(counts
+            .into_iter()
+            .map(|(album, genres)| {
+                let mut genres: Vec<(u32, String)> = genres
+                    .into_values()
+                    .map(|(count, spellings)| {
+                        let spelling = spellings
+                            .into_iter()
+                            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+                            .map(|(s, _)| s)
+                            .unwrap_or_default();
+                        (count, spelling)
+                    })
+                    .collect();
+                genres.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                (album, genres.into_iter().map(|(_, g)| g).collect())
+            })
+            .collect())
+    }
+
     /// Records that a song was played; keeps the newest `HISTORY_KEEP`.
     pub fn add_history(&mut self, track_id: i64, now: i64) -> Result<()> {
         let tx = self.conn.transaction()?;
@@ -1155,6 +1202,9 @@ const TRACK_ALBUM_COLUMNS: &str = "t.album_id, a.title, a.artist_credit, a.cover
 const ALBUM_COLUMNS: &str = "id, group_key, title, sort_title, edition, artist_credit,
     artist_sort, year, release_type, soundtrack, compilation, track_count, duration_ms,
     cover_key, added";
+
+/// How often a genre occurs, and how often in each spelling.
+type GenreCount = (u32, HashMap<String, u32>);
 
 /// Play history entries kept in the database.
 const HISTORY_KEEP: i64 = 200;
@@ -1652,6 +1702,22 @@ mod tests {
         assert_eq!(db.search("beyonce mix", 10).unwrap().playlists.len(), 1);
         assert!(db.search("beyonce hello", 10).unwrap().is_empty());
         assert!(db.search("", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn album_genres_merge_case_variants() {
+        let mut db = Database::open_in_memory().unwrap();
+        let mut a = file("/m/X/A/01.flac", "A", "One", 1);
+        a.tags.genres = vec!["K-Pop".into(), "Dance".into()];
+        let mut b = file("/m/X/A/02.flac", "A", "Two", 2);
+        b.tags.genres = vec!["K-POP".into()];
+        let mut c = file("/m/X/A/03.flac", "A", "Three", 3);
+        c.tags.genres = vec!["K-Pop".into()];
+        db.upsert_tracks(&[a, b, c], 1).unwrap();
+        rebuild(&mut db);
+        let genres = db.album_genres().unwrap();
+        assert_eq!(genres.len(), 1);
+        assert_eq!(genres.values().next().unwrap(), &["K-Pop", "Dance"]);
     }
 
     #[test]

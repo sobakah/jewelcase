@@ -55,6 +55,8 @@ mod imp {
         pub playlists: OnceCell<gio::ListStore>,
         pub metadata: OnceCell<Metadata>,
         pub lookups: RefCell<HashSet<i64>>,
+        /// Each album's genres, most common first (filter, album panel).
+        pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
         /// lyrembed's alias groups, from the last scan (search, artist pages).
         pub aliases: RefCell<Aliases>,
         pub db: OnceCell<RefCell<Database>>,
@@ -251,6 +253,12 @@ impl Library {
             })
             .collect();
 
+        let genres = self
+            .db()
+            .and_then(|db| db.album_genres().ok())
+            .unwrap_or_default();
+        self.imp().album_genres.replace(genres);
+
         crate::covers::clear();
         self.reload_artists();
         self.reload_playlists();
@@ -264,6 +272,37 @@ impl Library {
     }
 
     // Artists (CONCEPT.md §3.3, §4.2, §8) -----------------------------------
+
+    /// An album group's genres (all its versions), most common first.
+    pub fn genres_of(&self, album: &AlbumObject) -> Vec<String> {
+        let all = self.imp().album_genres.borrow();
+        let mut genres: Vec<String> = Vec::new();
+        for version in album.versions() {
+            for genre in all.get(&version.id).into_iter().flatten() {
+                if !genres.iter().any(|g| g.eq_ignore_ascii_case(genre)) {
+                    genres.push(genre.clone());
+                }
+            }
+        }
+        genres
+    }
+
+    /// All genres in the library, by how many albums have them.
+    pub fn all_genres(&self) -> Vec<String> {
+        let all = self.imp().album_genres.borrow();
+        let mut counts: Vec<(String, u32)> = Vec::new();
+        for genre in all.values().flatten() {
+            match counts
+                .iter_mut()
+                .find(|(g, _)| g.eq_ignore_ascii_case(genre))
+            {
+                Some((_, count)) => *count += 1,
+                None => counts.push((genre.clone(), 1)),
+            }
+        }
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        counts.into_iter().map(|(g, _)| g).collect()
+    }
 
     /// lyrembed's alias groups (empty without lyrembed).
     pub fn aliases(&self) -> std::cell::Ref<'_, Aliases> {

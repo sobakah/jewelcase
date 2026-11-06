@@ -1,8 +1,9 @@
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::cmp::Ordering;
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
+use gettextrs::gettext;
 use gtk::{gio, glib};
 
 use crate::application::GatefoldApplication;
@@ -80,6 +81,10 @@ mod imp {
         pub playlist_panel: TemplateChild<PlaylistPanel>,
         pub settings: OnceCell<gio::Settings>,
         pub sorter: OnceCell<gtk::CustomSorter>,
+        /// The album genre shown, or all (None).
+        pub genre_filter: RefCell<Option<String>>,
+        pub genre_filter_model: OnceCell<gtk::CustomFilter>,
+        pub genre_menu: gio::Menu,
     }
 
     #[glib::object_subclass]
@@ -314,8 +319,29 @@ impl GatefoldWindow {
             }
         ));
         let sorted = gtk::SortListModel::new(Some(library.albums().clone()), Some(sorter.clone()));
+        // Genre filter (win.album-genre, from the sort menu).
+        let filter = gtk::CustomFilter::new(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            true,
+            move |item| {
+                let Some(genre) = window.imp().genre_filter.borrow().clone() else {
+                    return true;
+                };
+                let album = item.downcast_ref::<AlbumObject>().expect("albums");
+                GatefoldApplication::get()
+                    .library()
+                    .genres_of(album)
+                    .iter()
+                    .any(|g| g.eq_ignore_ascii_case(&genre))
+            }
+        ));
+        let filtered = gtk::FilterListModel::new(Some(sorted), Some(filter.clone()));
+        let _ = imp.genre_filter_model.set(filter);
         imp.album_grid
-            .set_model(Some(&gtk::NoSelection::new(Some(sorted))));
+            .set_model(Some(&gtk::NoSelection::new(Some(filtered))));
+        self.setup_genre_menu();
 
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
@@ -890,8 +916,84 @@ impl GatefoldWindow {
         }
     }
 
+    /// "Genre" in the sort menu: All Genres, then the library's genres.
+    fn setup_genre_menu(&self) {
+        let imp = self.imp();
+        let action = gio::SimpleAction::new_stateful(
+            "album-genre",
+            Some(glib::VariantTy::STRING),
+            &"".to_variant(),
+        );
+        action.connect_change_state(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |action, value| {
+                let Some(genre) = value.and_then(|v| v.get::<String>()) else {
+                    return;
+                };
+                action.set_state(&genre.to_variant());
+                window.set_genre_filter((!genre.is_empty()).then_some(genre));
+            }
+        ));
+        self.add_action(&action);
+        if let Some(menu) = imp.sort_button.menu_model().and_downcast::<gio::Menu>() {
+            menu.append_submenu(Some(&gettext("_Genre")), &imp.genre_menu);
+        }
+        self.fill_genre_menu();
+    }
+
+    fn fill_genre_menu(&self) {
+        let imp = self.imp();
+        let menu = &imp.genre_menu;
+        menu.remove_all();
+        let all = gio::Menu::new();
+        all.append(Some(&gettext("All Genres")), Some("win.album-genre::"));
+        menu.append_section(None, &all);
+        let genres = gio::Menu::new();
+        let library_genres = GatefoldApplication::get().library().all_genres();
+        for genre in &library_genres {
+            let item = gio::MenuItem::new(Some(genre), None);
+            item.set_action_and_target_value(Some("win.album-genre"), Some(&genre.to_variant()));
+            genres.append_item(&item);
+        }
+        menu.append_section(None, &genres);
+        // A filtered genre that's gone: show everything again.
+        let current = imp.genre_filter.borrow().clone();
+        if let Some(current) = current
+            && !library_genres
+                .iter()
+                .any(|g| g.eq_ignore_ascii_case(&current))
+        {
+            gio::prelude::ActionGroupExt::change_action_state(
+                self,
+                "album-genre",
+                &"".to_variant(),
+            );
+        }
+    }
+
+    fn set_genre_filter(&self, genre: Option<String>) {
+        let imp = self.imp();
+        let active = genre.is_some();
+        imp.genre_filter.replace(genre);
+        if let Some(filter) = imp.genre_filter_model.get() {
+            filter.changed(gtk::FilterChange::Different);
+        }
+        // The sort button shows that a filter is on.
+        if active {
+            imp.sort_button.add_css_class("accent");
+            imp.sort_button
+                .set_tooltip_text(Some(&gettext("Sort and Filter Albums (Filtered)")));
+        } else {
+            imp.sort_button.remove_css_class("accent");
+            imp.sort_button
+                .set_tooltip_text(Some(&gettext("Sort and Filter Albums")));
+        }
+    }
+
     fn library_reloaded(&self) {
         let imp = self.imp();
+        self.fill_genre_menu();
         self.announce_imported_albums();
         // Leave the page of an artist that's no longer in the library.
         let library = GatefoldApplication::get().library();

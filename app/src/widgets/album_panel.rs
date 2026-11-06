@@ -203,6 +203,10 @@ impl AlbumPanel {
             meta.push(year.to_string());
         }
         meta.push(release_type_name(info));
+        let genres = GatefoldApplication::get().library().genres_of(&album);
+        if !genres.is_empty() {
+            meta.push(genres.into_iter().take(3).collect::<Vec<_>>().join(", "));
+        }
         meta.push(format::song_count(info.track_count));
         meta.push(format::length(info.duration_ms));
         imp.meta.set_label(&meta.join(" · "));

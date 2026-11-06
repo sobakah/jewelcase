@@ -101,9 +101,7 @@ impl QueueView {
                             Vec::new()
                         };
                         ids.extend(player.queued_track_ids());
-                        GatefoldApplication::get()
-                            .library()
-                            .create_playlist(&name, &ids);
+                        super::playlist_picker::create_or_add(&button, &name, &ids).await;
                     }
                 });
             }

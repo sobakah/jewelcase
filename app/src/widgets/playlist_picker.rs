@@ -69,6 +69,44 @@ pub async fn ask_name_with_option(
     (response == "ok" && !name.is_empty()).then_some((name, checked))
 }
 
+/// Saves `tracks` as a new playlist `name`; if one with that name exists,
+/// asks whether to add them to it instead (or create another anyway).
+pub async fn create_or_add(parent: &impl IsA<gtk::Widget>, name: &str, tracks: &[i64]) {
+    let library = GatefoldApplication::get().library();
+    let existing = {
+        let store = library.playlists();
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
+            .find(|p| p.playlist().name.trim().to_lowercase() == name.trim().to_lowercase())
+    };
+    let Some(existing) = existing else {
+        library.create_playlist(name, tracks);
+        return;
+    };
+    let dialog = adw::AlertDialog::builder()
+        // Translators: {} is a playlist name.
+        .heading(gettext("“{}” Already Exists").replace("{}", &existing.playlist().name))
+        .body(gettext(
+            "Add the songs to that playlist, or create another playlist with the same name?",
+        ))
+        .close_response("cancel")
+        .default_response("add")
+        .build();
+    dialog.add_responses(&[
+        ("cancel", &gettext("_Cancel")),
+        ("new", &gettext("Create _New")),
+        ("add", &gettext("_Add to Playlist")),
+    ]);
+    dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
+    match dialog.choose_future(Some(parent)).await.as_str() {
+        "add" => library.add_to_playlist(existing.id(), tracks, true),
+        "new" => {
+            library.create_playlist(name, tracks);
+        }
+        _ => {}
+    }
+}
+
 /// Lets the user pick a playlist (or create one) for `tracks`.
 pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
     if tracks.is_empty() {
@@ -137,9 +175,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                             ask_name(&dialog, &gettext("New Playlist"), "", &gettext("_Create"))
                                 .await;
                         if let Some(name) = name {
-                            GatefoldApplication::get()
-                                .library()
-                                .create_playlist(&name, &tracks);
+                            create_or_add(&dialog, &name, &tracks).await;
                             dialog.close();
                         }
                     });
