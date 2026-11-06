@@ -14,6 +14,7 @@ mod playlist_tile;
 mod portrait_dialog;
 mod queue_view;
 mod search_view;
+mod track_info;
 mod track_row;
 
 pub use album_panel::AlbumPanel;

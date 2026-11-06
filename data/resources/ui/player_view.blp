@@ -1,6 +1,5 @@
 using Gtk 4.0;
 using Adw 1;
-
 // The full player in the expanded bottom sheet (CONCEPT.md §4.3).
 // Wide: lyrics and queue panes sit next to the cover. Narrow: a pane
 // replaces the cover, and a small cover moves into the header. The
@@ -73,7 +72,6 @@ template $GatefoldPlayerView: Adw.Bin {
 
         // The first layout ("wide") is the default.
         content: Adw.MultiLayoutView layout_view {
-
           Adw.Layout {
             name: "wide";
 
@@ -82,11 +80,17 @@ template $GatefoldPlayerView: Adw.Bin {
               margin-start: 24;
               margin-end: 24;
               margin-bottom: 24;
+              // Lyrics open to the left of the player, the queue to the
+              // right; the player itself stays in the middle.
+              Adw.LayoutSlot {
+                id: "lyrics";
+              }
 
               Gtk.Box {
                 orientation: vertical;
                 spacing: 18;
                 hexpand: true;
+                width-request: 360;
 
                 Adw.LayoutSlot {
                   id: "cover";
@@ -96,10 +100,6 @@ template $GatefoldPlayerView: Adw.Bin {
                 Adw.LayoutSlot {
                   id: "info";
                 }
-              }
-
-              Adw.LayoutSlot {
-                id: "lyrics";
               }
 
               Adw.LayoutSlot {
@@ -240,7 +240,21 @@ template $GatefoldPlayerView: Adw.Bin {
             }
 
             Gtk.CenterBox {
-              center-widget: Gtk.Box {
+              start-widget: Gtk.ToggleButton lyrics_button {
+                tooltip-text: _("Lyrics (Ctrl+L)");
+                valign: center;
+
+                child: Adw.ButtonContent lyrics_content {
+                  icon-name: "gatefold-lyrics-symbolic";
+                  label: _("Lyrics");
+                };
+
+                styles [
+                  "flat",
+                ]
+              };
+
+              center-widget: Gtk.Box transport {
                 spacing: 18;
 
                 Gtk.ToggleButton {
@@ -303,37 +317,62 @@ template $GatefoldPlayerView: Adw.Bin {
                   ]
                 }
               };
-            }
 
-            Gtk.Box {
-              halign: end;
-              spacing: 6;
+              end-widget: Gtk.Box {
+                spacing: 6;
+                valign: center;
+                // More about the song: format, bitrate, release, tags.
+                Gtk.MenuButton info_button {
+                  icon-name: "info-outline-symbolic";
+                  tooltip-text: _("Song Info");
+                  direction: up;
 
-              Gtk.ToggleButton lyrics_button {
-                tooltip-text: _("Lyrics (Ctrl+L)");
+                  popover: Gtk.Popover info_popover {};
 
-                child: Adw.ButtonContent {
-                  icon-name: "gatefold-lyrics-symbolic";
-                  label: _("Lyrics");
-                };
+                  styles [
+                    "flat",
+                    "circular",
+                  ]
+                }
 
-                styles [
-                  "flat",
-                ]
-              }
+                Gtk.MenuButton volume_button {
+                  icon-name: "audio-volume-high-symbolic";
+                  tooltip-text: _("Volume");
+                  direction: up;
 
-              Gtk.ToggleButton queue_button {
-                tooltip-text: _("Queue (Ctrl+U)");
+                  popover: Gtk.Popover {
+                    child: Gtk.Scale volume_scale {
+                      width-request: 200;
+                      draw-value: false;
 
-                child: Adw.ButtonContent {
-                  icon-name: "view-list-symbolic";
-                  label: _("Queue");
-                };
+                      adjustment: Gtk.Adjustment volume_adjustment {
+                        lower: 0;
+                        upper: 1;
+                        step-increment: 0.05;
+                        page-increment: 0.1;
+                      };
+                    };
+                  };
 
-                styles [
-                  "flat",
-                ]
-              }
+                  styles [
+                    "flat",
+                    "circular",
+                  ]
+                }
+
+                Gtk.ToggleButton queue_button {
+                  tooltip-text: _("Queue (Ctrl+U)");
+
+                  child: Adw.ButtonContent queue_content {
+                    icon-name: "view-list-symbolic";
+                    label: _("Queue");
+                  };
+
+                  styles [
+                    "flat",
+                  ]
+                }
+              };
             }
           }
         };

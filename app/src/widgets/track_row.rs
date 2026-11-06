@@ -245,62 +245,7 @@ impl TrackRow {
 
     fn build_details(&self) -> gtk::Widget {
         let track = self.track();
-        let tags = &track.track().record.tags;
-        let grid = gtk::Grid::builder()
-            .column_spacing(12)
-            .row_spacing(3)
-            .build();
-        let mut row = 0;
-        let mut add = |key: String, value: String| {
-            grid.attach(
-                &gtk::Label::builder()
-                    .label(key)
-                    .xalign(1.0)
-                    .yalign(0.0)
-                    .css_classes(["dim-label", "caption"])
-                    .build(),
-                0,
-                row,
-                1,
-                1,
-            );
-            grid.attach(
-                &gtk::Label::builder()
-                    .label(value)
-                    .xalign(0.0)
-                    .wrap(true)
-                    .selectable(true)
-                    .hexpand(true)
-                    .css_classes(["caption"])
-                    .build(),
-                1,
-                row,
-                1,
-                1,
-            );
-            row += 1;
-        };
-        if let Some(artist) = &tags.artist {
-            add(gettext("Artist"), artist.clone());
-        }
-        if let Some(composer) = &tags.composer {
-            add(gettext("Composer"), composer.clone());
-        }
-        if !tags.genres.is_empty() {
-            add(gettext("Genre"), tags.genres.join(", "));
-        }
-        if let Some(bpm) = tags.bpm {
-            add(gettext("BPM"), format!("{bpm:.0}"));
-        }
-        add(gettext("Format"), format::audio_format(tags));
-        if let Some(lyrics) = &tags.lyrics {
-            let kind = if lyrics.synced {
-                gettext("Synced lyrics")
-            } else {
-                gettext("Lyrics")
-            };
-            add(kind, lyrics.excerpt.clone());
-        }
+        let grid = super::track_info::grid(track, false);
 
         let play_next = gtk::Button::builder()
             .label(gettext("Play Next"))

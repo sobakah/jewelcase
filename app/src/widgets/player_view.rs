@@ -82,6 +82,20 @@ mod imp {
         pub lyrics_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub queue_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
+        pub info_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub info_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub transport: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub lyrics_content: TemplateChild<adw::ButtonContent>,
+        #[template_child]
+        pub queue_content: TemplateChild<adw::ButtonContent>,
+        #[template_child]
+        pub volume_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub volume_adjustment: TemplateChild<gtk::Adjustment>,
         pub width: Cell<Width>,
         /// Avoids re-entrant toggling while panes are updated.
         pub updating: Cell<bool>,
@@ -187,6 +201,51 @@ impl PlayerView {
             }
         ));
 
+        // Song Info: built for the current song whenever it opens.
+        imp.info_popover.connect_show(|popover| {
+            let player = GatefoldApplication::get().player();
+            let child: gtk::Widget = match player.current_track() {
+                Some(track) => super::track_info::grid(&track, true).upcast(),
+                None => gtk::Label::new(Some(&gettext("Not Playing"))).upcast(),
+            };
+            child.set_margin_top(6);
+            child.set_margin_bottom(6);
+            child.set_margin_start(6);
+            child.set_margin_end(6);
+            popover.set_child(Some(&child));
+        });
+
+        // Volume, shared with MPRIS and the saved setting.
+        imp.volume_adjustment.set_value(player.volume());
+        self.update_volume_icon(player.volume());
+        imp.volume_adjustment.connect_value_changed(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[weak]
+            player,
+            move |adjustment| {
+                let volume = adjustment.value();
+                if (player.volume() - volume).abs() > f64::EPSILON {
+                    player.set_volume(volume);
+                }
+                view.update_volume_icon(volume);
+            }
+        ));
+        player.settings().connect_changed(
+            Some("volume"),
+            glib::clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |settings, key| {
+                    let volume = settings.double(key);
+                    let adjustment = &view.imp().volume_adjustment;
+                    if (adjustment.value() - volume).abs() > f64::EPSILON {
+                        adjustment.set_value(volume);
+                    }
+                }
+            ),
+        );
+
         for button in [&*imp.lyrics_button, &*imp.queue_button] {
             button.connect_toggled(glib::clone!(
                 #[weak(rename_to = view)]
@@ -235,7 +294,24 @@ impl PlayerView {
     }
 
     fn set_width(&self, width: Width) {
-        self.imp().width.set(width);
+        let imp = self.imp();
+        imp.width.set(width);
+        // Narrow: icon-only pane buttons, tighter transport, and no info or
+        // volume (the system volume and MPRIS remain).
+        let narrow = width == Width::Narrow;
+        imp.lyrics_content.set_label(&if narrow {
+            String::new()
+        } else {
+            gettext("Lyrics")
+        });
+        imp.queue_content.set_label(&if narrow {
+            String::new()
+        } else {
+            gettext("Queue")
+        });
+        imp.transport.set_spacing(if narrow { 6 } else { 18 });
+        imp.info_button.set_visible(!narrow);
+        imp.volume_button.set_visible(!narrow);
         self.update_panes();
     }
 
@@ -300,6 +376,24 @@ impl PlayerView {
             imp.queue_view.set_visible(queue);
             imp.header_track.set_visible(false);
         }
+    }
+
+    fn update_volume_icon(&self, volume: f64) {
+        let icon = if volume <= 0.0 {
+            "audio-volume-muted-symbolic"
+        } else if volume < 0.34 {
+            "audio-volume-low-symbolic"
+        } else if volume < 0.67 {
+            "audio-volume-medium-symbolic"
+        } else {
+            "audio-volume-high-symbolic"
+        };
+        let button = &self.imp().volume_button;
+        button.set_icon_name(icon);
+        // Translators: {} is the volume in percent.
+        button.set_tooltip_text(Some(
+            &gettext("Volume: {} %").replace("{}", &format!("{:.0}", volume * 100.0)),
+        ));
     }
 
     fn update_track(&self, player: &Player) {

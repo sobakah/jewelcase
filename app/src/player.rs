@@ -149,7 +149,7 @@ impl Player {
         player
     }
 
-    fn settings(&self) -> &gio::Settings {
+    pub fn settings(&self) -> &gio::Settings {
         self.imp().settings.get().expect("set in new()")
     }
 
