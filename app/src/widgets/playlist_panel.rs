@@ -8,7 +8,7 @@ use adw::subclass::prelude::*;
 use gatefold_core::db::PlaylistItem;
 use gettextrs::{gettext, ngettext};
 use gtk::glib::subclass::Signal;
-use gtk::{gdk, gio, glib};
+use gtk::{gio, glib};
 
 use super::CoverImage;
 use super::playlist_picker::ask_name;
@@ -382,24 +382,12 @@ impl PlaylistPanel {
             row.set_tooltip_text(Some(&gettext("This song isn't in your library")));
         }
 
-        // Drag and drop to reorder.
-        let position = entry.position;
-        let drag = gtk::DragSource::builder()
-            .actions(gdk::DragAction::MOVE)
-            .content(&gdk::ContentProvider::for_value(&position.to_value()))
-            .build();
-        row.add_controller(drag);
-        let drop = gtk::DropTarget::new(u32::static_type(), gdk::DragAction::MOVE);
-        drop.connect_drop(move |_, value, _, _| {
-            let Ok(from) = value.get::<u32>() else {
-                return false;
-            };
+        // Drag and drop to reorder, animated.
+        super::reorder::attach(&row, entry.position, move |from, to| {
             GatefoldApplication::get()
                 .library()
-                .move_playlist_item(playlist_id, from, position);
-            true
+                .move_playlist_item(playlist_id, from, to);
         });
-        row.add_controller(drop);
         row
     }
 

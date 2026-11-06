@@ -13,6 +13,7 @@ pub mod playlist_picker;
 mod playlist_tile;
 mod portrait_dialog;
 mod queue_view;
+mod reorder;
 mod search_view;
 mod track_info;
 mod track_row;

@@ -14,13 +14,40 @@ pub async fn ask_name(
     initial: &str,
     confirm: &str,
 ) -> Option<String> {
+    ask_name_with_option(parent, heading, initial, confirm, None)
+        .await
+        .map(|(name, _)| name)
+}
+
+/// Like `ask_name`, with a check box (`option`: its label and default).
+pub async fn ask_name_with_option(
+    parent: &impl IsA<gtk::Widget>,
+    heading: &str,
+    initial: &str,
+    confirm: &str,
+    option: Option<(&str, bool)>,
+) -> Option<(String, bool)> {
     let entry = gtk::Entry::builder()
         .text(initial)
         .activates_default(true)
         .build();
+    let check = option.map(|(label, active)| {
+        gtk::CheckButton::builder()
+            .label(label)
+            .active(active)
+            .build()
+    });
+    let extra = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .build();
+    extra.append(&entry);
+    if let Some(check) = &check {
+        extra.append(check);
+    }
     let dialog = adw::AlertDialog::builder()
         .heading(heading)
-        .extra_child(&entry)
+        .extra_child(&extra)
         .close_response("cancel")
         .default_response("ok")
         .build();
@@ -38,7 +65,8 @@ pub async fn ask_name(
     entry.grab_focus();
     let response = dialog.choose_future(Some(parent)).await;
     let name = entry.text().trim().to_owned();
-    (response == "ok" && !name.is_empty()).then_some(name)
+    let checked = check.is_some_and(|c| c.is_active());
+    (response == "ok" && !name.is_empty()).then_some((name, checked))
 }
 
 /// Lets the user pick a playlist (or create one) for `tracks`.

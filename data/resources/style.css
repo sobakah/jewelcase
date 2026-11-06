@@ -101,11 +101,15 @@
 
 .lyrics-view .lyric-line.synced {
   opacity: 0.45;
-  transition: opacity 250ms ease-out;
+  transform: scale(0.97);
+  transition: opacity 220ms ease-out,
+              transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* The current line: brighter and bigger, popping in with a small bounce. */
 .lyrics-view .lyric-line.synced.active {
   opacity: 1;
+  transform: scale(1.1);
 }
 
 /* Queue (CONCEPT.md §6.2). */
@@ -113,8 +117,30 @@
   background-color: color-mix(in srgb, var(--accent-bg-color) 18%, transparent);
 }
 
-.queue-view .drag-handle {
+.queue-view .drag-handle,
+.reorderable .drag-handle {
   -gtk-icon-size: 16px;
+  min-width: 24px;
+  min-height: 32px;
+}
+
+/* Reordering (reorder.rs): rows make room where the dragged row would
+   land, and the dragged row fades while it's carried. Quick, not slow. */
+.reorderable > row {
+  transition: margin 140ms cubic-bezier(0.25, 0.9, 0.3, 1),
+              opacity 140ms ease-out;
+}
+
+.reorderable > row.drop-before {
+  margin-top: 40px;
+}
+
+.reorderable > row.drop-after {
+  margin-bottom: 40px;
+}
+
+.reorderable > row.dragging {
+  opacity: 0.35;
 }
 
 /* Companion tool status (CONCEPT.md §10.0), styled like a banner. */

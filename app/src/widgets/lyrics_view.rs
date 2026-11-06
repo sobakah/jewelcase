@@ -471,7 +471,9 @@ impl LyricsView {
             &imp.scroller,
             adjustment.value(),
             target,
-            adw::SpringParams::new(1.0, 1.0, 120.0),
+            // Slightly underdamped: a quick move that settles with a small
+            // overshoot, so line changes feel tactile.
+            adw::SpringParams::new(0.78, 1.0, 190.0),
             target_fn,
         );
         animation.set_epsilon(0.5);

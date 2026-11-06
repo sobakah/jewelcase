@@ -22,6 +22,9 @@ use crate::objects::{QueueEntry, TrackObject};
 const TICK: Duration = Duration::from_millis(150);
 /// The queue is saved this long after its last change (§6.2).
 const SAVE_DELAY: Duration = Duration::from_secs(2);
+/// A song counts as played (for the history) after half of it, or this long.
+const HISTORY_MIN_MS: u64 = 30_000;
+
 /// "Previous" restarts the track instead when it has played this long.
 const RESTART_THRESHOLD_MS: u64 = 3000;
 
@@ -87,6 +90,8 @@ mod imp {
                 vec![
                     // The queue's items or order changed.
                     Signal::builder("queue-changed").build(),
+                    // A song was added to the play history.
+                    Signal::builder("history-changed").build(),
                     // The position jumped (seek or new track); for MPRIS.
                     Signal::builder("seeked").build(),
                     // A message for the user (toast).
@@ -382,6 +387,44 @@ impl Player {
             .collect()
     }
 
+    /// The last `limit` played songs, oldest first.
+    pub fn history(&self, limit: usize) -> Vec<TrackObject> {
+        let library = self.library();
+        let ids = library
+            .db()
+            .and_then(|db| db.history(limit).ok())
+            .unwrap_or_default();
+        let tracks = library.tracks(&ids);
+        ids.iter()
+            .filter_map(|id| tracks.get(id).cloned().map(TrackObject::new))
+            .collect()
+    }
+
+    fn record_history(&self, track_id: i64) {
+        let recorded = self
+            .library()
+            .db()
+            .map(|mut db| db.add_history(track_id, crate::metadata::now()));
+        match recorded {
+            Some(Ok(())) => self.emit_by_name::<()>("history-changed", &[]),
+            Some(Err(err)) => tracing::warn!("Cannot record the play history: {err}"),
+            None => {}
+        }
+    }
+
+    /// Plays `track` right away; the rest of the queue stays.
+    pub fn play_now(&self, track: TrackObject) {
+        let id = track.id();
+        self.cache_tracks(vec![track]);
+        let had_current = self.imp().queue.borrow().current().is_some();
+        self.imp().queue.borrow_mut().play_next(&[id]);
+        if had_current {
+            self.imp().queue.borrow_mut().advance(false);
+        }
+        self.load_current(true, 0);
+        self.queue_changed();
+    }
+
     /// Removes the queue entry at `offset` in the queue model (> 0).
     pub fn remove_upcoming(&self, offset: usize) {
         let index = self.imp().queue.borrow().current_index().unwrap_or(0) + offset;
@@ -632,7 +675,14 @@ impl Player {
         let changed = imp.current_track.borrow().as_ref().map(TrackObject::id)
             != track.as_ref().map(TrackObject::id);
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
-        imp.current_track.replace(track);
+        let previous = imp.current_track.replace(track);
+        // Leaving a song that really played: it goes into the history.
+        if changed && let Some(previous) = previous {
+            let played = imp.position.get();
+            if played > 0 && played >= (previous.duration_ms() / 2).min(HISTORY_MIN_MS) {
+                self.record_history(previous.id());
+            }
+        }
         if imp.duration.replace(duration) != duration {
             self.notify_duration();
         }

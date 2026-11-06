@@ -342,34 +342,40 @@ impl Queue {
     }
 
     /// Moves an upcoming item to another upcoming position (drag & drop).
-    /// Items dropped into or right after the "Next up" block become part of
-    /// it; items dropped among the album's tracks become context again.
-    /// Returns false for invalid moves (the current item stays put).
+    /// An item stays in its section: songs added with "Play next" / "Add
+    /// to queue" move within the "Next up" block, the album's songs within
+    /// the rest, so an album stays together. A drop beyond the section's
+    /// edge lands at that edge. Returns false for invalid moves (the
+    /// current item stays put) and moves that change nothing.
     pub fn move_item(&mut self, from: usize, to: usize) -> bool {
         let first_upcoming = self.current.map_or(0, |c| c + 1);
         let len = self.items.len();
         if from == to || from < first_upcoming || to < first_upcoming || from >= len || to >= len {
             return false;
         }
-        let mut item = self.items.remove(from);
+        let item = self.items.remove(from);
         // The "Next up" block as it is without the moved item.
         let block_end = user_block_end(&self.items, first_upcoming);
-        item.origin = if to <= block_end {
-            Origin::User
-        } else {
-            Origin::Context
+        let to = match item.origin {
+            Origin::User => to.clamp(first_upcoming, block_end),
+            Origin::Context => to.max(block_end),
         };
         self.items.insert(to, item);
+        if to == from {
+            return false;
+        }
 
         if let Some(order) = self.unshuffled.as_mut() {
             // Follow the item before the new position, so turning shuffle
             // off keeps the move.
             order.retain(|&uid| uid != item.uid);
-            let before = self.items[to - 1].uid;
-            let at = order
-                .iter()
-                .position(|&uid| uid == before)
-                .map_or(order.len(), |p| p + 1);
+            let at = match to.checked_sub(1).map(|i| self.items[i].uid) {
+                Some(before) => order
+                    .iter()
+                    .position(|&uid| uid == before)
+                    .map_or(order.len(), |p| p + 1),
+                None => 0,
+            };
             order.insert(at, item.uid);
         }
         true
@@ -540,20 +546,41 @@ mod tests {
     }
 
     #[test]
-    fn moving_items_updates_next_up() {
+    fn moved_items_stay_in_their_section() {
         let mut queue = album(Some(0));
-        queue.add(&[10]);
-        // [1*, 10u, 2, 3, 4, 5]
-        assert!(queue.move_item(4, 1));
-        assert_eq!(ids(&queue), [1, 4, 10, 2, 3, 5]);
-        assert_eq!(queue.items()[1].origin, Origin::User);
-        // Back among the album tracks: context again.
-        assert!(queue.move_item(1, 4));
-        assert_eq!(ids(&queue), [1, 10, 2, 3, 4, 5]);
-        assert_eq!(queue.items()[4].origin, Origin::Context);
+        queue.add(&[10, 11]);
+        // [1*, 10u, 11u, 2, 3, 4, 5]
+        // An album track dragged to the top lands at the top of the album.
+        assert!(queue.move_item(5, 1));
+        assert_eq!(ids(&queue), [1, 10, 11, 4, 2, 3, 5]);
+        assert_eq!(queue.items()[3].origin, Origin::Context);
+        // Down and back up again: still album, no "Next up" entry.
+        assert!(queue.move_item(3, 6));
+        assert!(queue.move_item(6, 1));
+        assert_eq!(ids(&queue), [1, 10, 11, 4, 2, 3, 5]);
+        assert!(
+            queue.items()[3..]
+                .iter()
+                .all(|i| i.origin == Origin::Context)
+        );
+        // A "Next up" song dragged among the album stays at the block's end.
+        assert!(queue.move_item(1, 5));
+        assert_eq!(ids(&queue), [1, 11, 10, 4, 2, 3, 5]);
+        assert_eq!(queue.items()[2].origin, Origin::User);
+        // Dropping where it already is changes nothing.
+        assert!(!queue.move_item(2, 6));
         // The current item can't move, and nothing moves before it.
         assert!(!queue.move_item(0, 2));
         assert!(!queue.move_item(3, 0));
+    }
+
+    #[test]
+    fn without_next_up_album_tracks_reorder_freely() {
+        let mut queue = album(Some(0));
+        // [1*, 2, 3, 4, 5]
+        assert!(queue.move_item(4, 1));
+        assert_eq!(ids(&queue), [1, 5, 2, 3, 4]);
+        assert!(queue.items().iter().all(|i| i.origin == Origin::Context));
     }
 
     #[test]

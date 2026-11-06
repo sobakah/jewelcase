@@ -22,6 +22,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/002_barcode_and_album_order.sql")),
     M::up(include_str!("db/003_artists.sql")),
     M::up(include_str!("db/004_playlists_search.sql")),
+    M::up(include_str!("db/005_play_history.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1072,6 +1073,33 @@ impl Database {
         Ok(())
     }
 
+    /// Records that a song was played; keeps the newest `HISTORY_KEEP`.
+    pub fn add_history(&mut self, track_id: i64, now: i64) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO play_history (track_id, played) VALUES (?1, ?2)",
+            params![track_id, now],
+        )?;
+        tx.execute(
+            "DELETE FROM play_history WHERE id <= (SELECT max(id) FROM play_history) - ?1",
+            params![HISTORY_KEEP],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The last `limit` played songs, oldest first.
+    pub fn history(&self, limit: usize) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT track_id FROM play_history ORDER BY id DESC LIMIT ?1")?;
+        let mut ids = stmt
+            .query_map(params![limit as i64], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?;
+        ids.reverse();
+        Ok(ids)
+    }
+
     pub fn load_queue(&self) -> Result<Option<QueueSnapshot>> {
         let state = self
             .conn
@@ -1127,6 +1155,9 @@ const TRACK_ALBUM_COLUMNS: &str = "t.album_id, a.title, a.artist_credit, a.cover
 const ALBUM_COLUMNS: &str = "id, group_key, title, sort_title, edition, artist_credit,
     artist_sort, year, release_type, soundtrack, compilation, track_count, duration_ms,
     cover_key, added";
+
+/// Play history entries kept in the database.
+const HISTORY_KEEP: i64 = 200;
 
 const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, artist, album,
     album_artist, album_artists, album_artist_sort, disc, number, year, genres, composer,
@@ -1621,6 +1652,30 @@ mod tests {
         assert_eq!(db.search("beyonce mix", 10).unwrap().playlists.len(), 1);
         assert!(db.search("beyonce hello", 10).unwrap().is_empty());
         assert!(db.search("", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_keeps_order_and_follows_removed_tracks() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/Adele/25/01.flac", "25", "Hello", 1),
+                file("/m/Adele/25/02.flac", "25", "Send My Love", 2),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let ids = track_ids(&db);
+        let (hello, send) = (ids["Hello"], ids["Send My Love"]);
+        db.add_history(hello, 10).unwrap();
+        db.add_history(send, 11).unwrap();
+        db.add_history(hello, 12).unwrap();
+        assert_eq!(db.history(10).unwrap(), [hello, send, hello]);
+        assert_eq!(db.history(2).unwrap(), [send, hello]);
+        db.delete_tracks(&[PathBuf::from("/m/Adele/25/01.flac")])
+            .unwrap();
+        assert_eq!(db.history(10).unwrap(), [send]);
     }
 
     #[test]
