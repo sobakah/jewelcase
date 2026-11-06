@@ -32,14 +32,19 @@ pub fn attach(row: &gtk::ListBoxRow, index: u32, on_move: impl Fn(u32, u32) + 's
     row.add_controller(drag);
 
     let drop = gtk::DropTarget::new(u32::static_type(), gdk::DragAction::MOVE);
+    // The gap opens above the row under the pointer; only the last row
+    // also offers "after it", in its lower quarter. One direction per row
+    // keeps rows from flipping back and forth as the pointer moves.
+    let after = |row: &gtk::ListBoxRow, y: f64| {
+        row.next_sibling().is_none() && y > f64::from(row.height()) * 0.75
+    };
     let update_gap = glib::clone!(
         #[weak]
         row,
         #[upgrade_or]
         gdk::DragAction::empty(),
         move |y: f64| {
-            let before = y < f64::from(row.height()) / 2.0;
-            set_gap(&row, Some(before));
+            set_gap(&row, Some(!after(&row, y)));
             gdk::DragAction::MOVE
         }
     );
@@ -57,12 +62,12 @@ pub fn attach(row: &gtk::ListBoxRow, index: u32, on_move: impl Fn(u32, u32) + 's
         #[upgrade_or]
         false,
         move |_, value, _, y| {
+            let place_after = after(&row, y);
             set_gap(&row, None);
             let Ok(from) = value.get::<u32>() else {
                 return false;
             };
-            let before = y < f64::from(row.height()) / 2.0;
-            let mut to = if before { index } else { index + 1 };
+            let mut to = if place_after { index + 1 } else { index };
             if from < to {
                 to -= 1;
             }

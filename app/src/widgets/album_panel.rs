@@ -315,6 +315,29 @@ impl AlbumPanel {
         imp.rows.replace(rows);
     }
 
+    /// Points out one song: highlighted for a moment and scrolled to
+    /// (e.g. opened from "Appears On").
+    pub fn highlight_track(&self, track_id: i64) {
+        let Some(row) = self
+            .imp()
+            .rows
+            .borrow()
+            .iter()
+            .find(|r| r.track().id() == track_id)
+            .cloned()
+        else {
+            return;
+        };
+        // After the panel has opened and laid out its rows.
+        glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+            row.add_css_class("highlighted");
+            row.grab_focus();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2500), move || {
+                row.remove_css_class("highlighted");
+            });
+        });
+    }
+
     fn update_playing(&self) {
         let current = GatefoldApplication::get()
             .player()

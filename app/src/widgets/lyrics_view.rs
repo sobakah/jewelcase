@@ -20,6 +20,12 @@ use crate::objects::TrackObject;
 /// Auto-scroll waits this long after the user scrolled.
 const SCROLL_PAUSE: Duration = Duration::from_secs(3);
 
+/// A count-in shows when the first line starts this late.
+const COUNT_IN_FROM_MS: u64 = 5000;
+
+/// How long scrolling to the next line takes.
+const SCROLL_MS: u32 = 650;
+
 mod imp {
     use super::*;
 
@@ -37,7 +43,7 @@ mod imp {
         pub paused_until: Cell<Option<Instant>>,
         /// True while our own animation moves the scrollbar.
         pub auto_scrolling: Cell<bool>,
-        pub animation: RefCell<Option<adw::SpringAnimation>>,
+        pub animation: RefCell<Option<adw::TimedAnimation>>,
         pub settings: gio::Settings,
         pub lines: RefCell<Vec<Line>>,
         /// The last loaded state, to skip rebuilding unchanged lyrics.
@@ -45,6 +51,9 @@ mod imp {
         /// The current track's album folder, for lyrembed.
         pub album_dir: RefCell<Option<std::path::PathBuf>>,
         pub status_actions: gtk::Box,
+        /// Before a late first line: three dots that fill over its last
+        /// three seconds, and the time it starts.
+        pub count_in: RefCell<Option<(u64, gtk::Box)>>,
     }
 
     impl Default for LyricsView {
@@ -83,6 +92,7 @@ mod imp {
                     .spacing(12)
                     .halign(gtk::Align::Center)
                     .build(),
+                count_in: RefCell::default(),
             }
         }
     }
@@ -342,6 +352,30 @@ impl LyricsView {
         let layout = imp.settings.string("lyrics-layout");
         let synced = imp.synced.get();
         let mut rows = Vec::new();
+        // A count-in when the singing starts late.
+        let first = imp.lines.borrow().iter().find_map(|l| l.time_ms);
+        let count_in = first
+            .filter(|&t| synced && t >= COUNT_IN_FROM_MS)
+            .map(|first| {
+                let dots = gtk::Box::builder()
+                    .spacing(12)
+                    .halign(gtk::Align::Center)
+                    .margin_top(12)
+                    .margin_bottom(12)
+                    .css_classes(["count-in"])
+                    .build();
+                for _ in 0..3 {
+                    dots.append(
+                        &gtk::Box::builder()
+                            .valign(gtk::Align::Center)
+                            .css_classes(["count-dot"])
+                            .build(),
+                    );
+                }
+                imp.lines_box.append(&dots);
+                (first, dots)
+            });
+        imp.count_in.replace(count_in);
         for line in imp.lines.borrow().iter() {
             let (big, small) = match (layout.as_str(), &line.secondary) {
                 ("romanization-top", Some(secondary)) => {
@@ -407,6 +441,7 @@ impl LyricsView {
         if !imp.synced.get() {
             return;
         }
+        self.update_count_in(position_ms);
         let active = {
             let rows = imp.rows.borrow();
             rows.iter()
@@ -427,6 +462,37 @@ impl LyricsView {
         {
             button.add_css_class("active");
             self.scroll_to(button);
+        }
+    }
+
+    /// Fills one dot per second over the last three before the first line.
+    fn update_count_in(&self, position_ms: u64) {
+        let imp = self.imp();
+        let count_in = imp.count_in.borrow();
+        let Some((first, dots)) = count_in.as_ref() else {
+            return;
+        };
+        let remaining = first.saturating_sub(position_ms);
+        let filled = if remaining == 0 || remaining > 3000 {
+            0
+        } else {
+            3 - (remaining - 1) / 1000
+        };
+        let mut dot = dots.first_child();
+        let mut index = 0;
+        while let Some(widget) = dot {
+            if index < filled {
+                widget.add_css_class("filled");
+            } else {
+                widget.remove_css_class("filled");
+            }
+            index += 1;
+            dot = widget.next_sibling();
+        }
+        if remaining == 0 {
+            dots.add_css_class("done");
+        } else {
+            dots.remove_css_class("done");
         }
     }
 
@@ -467,16 +533,15 @@ impl LyricsView {
                 imp.auto_scrolling.set(false);
             }
         ));
-        let animation = adw::SpringAnimation::new(
-            &imp.scroller,
-            adjustment.value(),
-            target,
-            // Slightly underdamped: a quick move that settles with a small
-            // overshoot, so line changes feel tactile.
-            adw::SpringParams::new(0.78, 1.0, 190.0),
-            target_fn,
-        );
-        animation.set_epsilon(0.5);
+        // A smooth glide that eases in and out; no overshoot.
+        let animation = adw::TimedAnimation::builder()
+            .widget(&imp.scroller)
+            .value_from(adjustment.value())
+            .value_to(target)
+            .duration(SCROLL_MS)
+            .easing(adw::Easing::EaseInOutCubic)
+            .target(&target_fn)
+            .build();
         animation.play();
         imp.animation.replace(Some(animation));
     }

@@ -507,6 +507,7 @@ impl ArtistPage {
             cover.set_cover(track.cover_key());
             cover.set_valign(gtk::Align::Center);
             row.add_prefix(&cover);
+            row.add_suffix(&appears_on_actions(track));
             row.add_suffix(
                 &gtk::Label::builder()
                     .label(format::duration(track.duration_ms()))
@@ -531,6 +532,7 @@ impl ArtistPage {
                     .and_then(|id| library.album_group(id))
                 {
                     page.show_album(&album);
+                    page.imp().album_panel.highlight_track(track.id());
                 }
             }
         ));
@@ -621,4 +623,55 @@ impl ArtistPage {
 /// artist's music instead of showing the page.
 fn spotify_uri(id: &str) -> String {
     format!("https://open.spotify.com/artist/{id}")
+}
+
+/// Play (its album, from this song), Add to Queue and Add to Playlist for
+/// an "Appears On" song.
+fn appears_on_actions(track: &TrackObject) -> gtk::Box {
+    let button = |icon: &str, tooltip: String| {
+        gtk::Button::builder()
+            .icon_name(icon)
+            .tooltip_text(tooltip)
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular"])
+            .build()
+    };
+    let play = button("media-playback-start-symbolic", gettext("Play"));
+    play.connect_clicked(glib::clone!(
+        #[strong]
+        track,
+        move |_| {
+            let Some(album_id) = track.track().album_id else {
+                return;
+            };
+            let library = GatefoldApplication::get().library();
+            let index = library
+                .album_tracks(album_id)
+                .iter()
+                .position(|t| t.id() == track.id());
+            GatefoldApplication::get()
+                .player()
+                .play_album(album_id, index, false);
+        }
+    ));
+    let queue = button("list-add-symbolic", gettext("Add to Queue"));
+    queue.connect_clicked(glib::clone!(
+        #[strong]
+        track,
+        move |_| {
+            GatefoldApplication::get()
+                .player()
+                .add_to_queue(vec![track.clone()]);
+        }
+    ));
+    let playlist = button("view-list-bullet-symbolic", gettext("Add to Playlist…"));
+    let track_id = track.id();
+    playlist.connect_clicked(move |button| {
+        super::playlist_picker::show(button, vec![track_id]);
+    });
+    let actions = gtk::Box::builder().spacing(3).build();
+    actions.append(&play);
+    actions.append(&queue);
+    actions.append(&playlist);
+    actions
 }

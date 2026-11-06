@@ -204,6 +204,7 @@ impl QueueView {
                 None,
                 move |_| {
                     view.fill_history();
+                    view.scroll_to_now_playing();
                     None
                 }
             ),
@@ -239,12 +240,15 @@ impl QueueView {
         glib::idle_add_local_once(move || {
             let Some(view) = view.upgrade() else { return };
             let imp = view.imp();
-            let offset = if imp.history_box.is_visible() {
+            // "Now Playing" sits below the latest history, but never lower
+            // than the middle of the view.
+            let adjustment = imp.scroller.vadjustment();
+            let history = if imp.history_box.is_visible() {
                 f64::from(imp.history_box.height() + 12)
             } else {
                 0.0
             };
-            imp.scroller.vadjustment().set_value(offset);
+            adjustment.set_value((history - adjustment.page_size() / 2.0).max(0.0));
         });
     }
 }
