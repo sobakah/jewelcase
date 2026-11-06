@@ -23,3 +23,15 @@ pub const RESOURCE_BASE_PATH: &str = "/io/github/sobakah/Gatefold/";
 pub fn is_development() -> bool {
     PROFILE == "development"
 }
+
+/// `~/.local/share/<app id>/library.sqlite` (CONCEPT.md §12).
+pub fn database_path() -> std::path::PathBuf {
+    gtk::glib::user_data_dir()
+        .join(APP_ID)
+        .join("library.sqlite")
+}
+
+/// `~/.cache/<app id>/covers/` (CONCEPT.md §4.3).
+pub fn cover_dir() -> std::path::PathBuf {
+    gtk::glib::user_cache_dir().join(APP_ID).join("covers")
+}

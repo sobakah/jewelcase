@@ -27,4 +27,38 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       };
     }
   }
+
+  Adw.PreferencesPage {
+    title: _("Playback");
+    icon-name: "media-playback-start-symbolic";
+
+    Adw.PreferencesGroup {
+      title: _("Volume");
+
+      Adw.ComboRow replaygain_row {
+        title: _("_ReplayGain");
+        subtitle: _("Evens out loudness using the volume tags in your files");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Off"),
+            _("Automatic"),
+            _("Track"),
+            _("Album"),
+          ]
+        };
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Queue");
+
+      Adw.SwitchRow restore_queue_row {
+        title: _("Restore _Queue on Start");
+        subtitle: _("Reopen the last queue, paused where it stopped");
+        use-underline: true;
+      }
+    }
+  }
 }

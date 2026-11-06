@@ -1,7 +1,8 @@
 using Gtk 4.0;
 using Adw 1;
 
-// The full player in the expanded bottom sheet, sleek layout (CONCEPT.md §4.3).
+// The full player in the expanded bottom sheet (CONCEPT.md §4.3). The
+// Queue toggle swaps the cover for the queue; lyrics arrive in phase 3.
 template $GatefoldPlayerView: Adw.Bin {
   styles [
     "player-view",
@@ -22,46 +23,92 @@ template $GatefoldPlayerView: Adw.Bin {
 
     content: Gtk.Box {
       orientation: vertical;
-      valign: center;
       spacing: 18;
       margin-start: 24;
       margin-end: 24;
       margin-bottom: 24;
 
-      Adw.Clamp {
-        maximum-size: 420;
+      Gtk.Stack pane_stack {
+        vexpand: true;
+        transition-type: crossfade;
 
-        child: Gtk.AspectFrame {
-          ratio: 1;
-          obey-child: false;
+        Gtk.StackPage {
+          name: "cover";
 
-          child: Gtk.Image {
-            icon-name: "folder-music-symbolic";
-            pixel-size: 96;
-            accessible-role: presentation;
-
-            styles [
-              "cover",
-              "cover-placeholder",
-            ]
+          child: $GatefoldCoverImage cover {
+            min-size: 96;
+            natural-size: 480;
+            kind: "player";
+            shrinkable: true;
           };
-        };
+        }
+
+        Gtk.StackPage {
+          name: "queue";
+
+          child: Adw.Clamp {
+            maximum-size: 560;
+
+            child: Gtk.Box {
+              orientation: vertical;
+              spacing: 6;
+
+              Gtk.Box {
+                Gtk.Label {
+                  label: _("Queue");
+                  xalign: 0;
+                  hexpand: true;
+
+                  styles [
+                    "heading",
+                  ]
+                }
+
+                Gtk.Button {
+                  label: _("_Clear");
+                  use-underline: true;
+                  tooltip-text: _("Clear Upcoming Songs");
+                  action-name: "player.clear-queue";
+
+                  styles [
+                    "flat",
+                  ]
+                }
+              }
+
+              Gtk.ScrolledWindow {
+                vexpand: true;
+                hscrollbar-policy: never;
+
+                child: Gtk.ListBox queue_list {
+                  selection-mode: none;
+                  valign: start;
+
+                  styles [
+                    "boxed-list",
+                  ]
+                };
+              }
+            };
+          };
+        }
       }
 
       Gtk.Box {
         orientation: vertical;
         spacing: 3;
 
-        Gtk.Label {
+        Gtk.Label title {
           label: _("Not Playing");
           ellipsize: end;
+          selectable: true;
 
           styles [
             "title-2",
           ]
         }
 
-        Gtk.Label {
+        Gtk.Label subtitle {
           label: _("Pick an album to start");
           ellipsize: end;
 
@@ -77,7 +124,7 @@ template $GatefoldPlayerView: Adw.Bin {
         child: Gtk.Box {
           spacing: 6;
 
-          Gtk.Label {
+          Gtk.Label position_label {
             label: "0:00";
             width-chars: 5;
 
@@ -87,17 +134,18 @@ template $GatefoldPlayerView: Adw.Bin {
             ]
           }
 
-          Gtk.Scale {
+          Gtk.Scale seek {
             hexpand: true;
-            sensitive: false;
 
-            adjustment: Gtk.Adjustment {
+            adjustment: Gtk.Adjustment seek_adjustment {
               lower: 0;
               upper: 1;
+              step-increment: 5000;
+              page-increment: 30000;
             };
           }
 
-          Gtk.Label {
+          Gtk.Label duration_label {
             label: "0:00";
             width-chars: 5;
 
@@ -137,7 +185,7 @@ template $GatefoldPlayerView: Adw.Bin {
           ]
         }
 
-        Gtk.Button {
+        Gtk.Button play_button {
           icon-name: "media-playback-start-symbolic";
           tooltip-text: _("Play");
           action-name: "player.play-pause";
@@ -161,9 +209,9 @@ template $GatefoldPlayerView: Adw.Bin {
           ]
         }
 
-        Gtk.Button {
-          icon-name: "media-playlist-repeat-symbolic";
-          tooltip-text: _("Repeat");
+        Gtk.Button repeat_button {
+          icon-name: "media-playlist-consecutive-symbolic";
+          tooltip-text: _("Repeat: Off");
           action-name: "player.repeat";
           valign: center;
 
@@ -180,6 +228,7 @@ template $GatefoldPlayerView: Adw.Bin {
 
         Gtk.ToggleButton {
           action-name: "player.show-lyrics";
+          tooltip-text: _("Lyrics arrive in a later version");
 
           child: Adw.ButtonContent {
             icon-name: "gatefold-lyrics-symbolic";
@@ -191,9 +240,7 @@ template $GatefoldPlayerView: Adw.Bin {
           ]
         }
 
-        Gtk.ToggleButton {
-          action-name: "player.show-queue";
-
+        Gtk.ToggleButton queue_button {
           child: Adw.ButtonContent {
             icon-name: "view-list-symbolic";
             label: _("Queue");

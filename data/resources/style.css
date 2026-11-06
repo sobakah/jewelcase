@@ -9,13 +9,44 @@
   color: alpha(currentColor, 0.5);
 }
 
-.mini-player .cover {
-  min-width: 48px;
-  min-height: 48px;
-  border-radius: 6px;
-}
-
 .player-view .play-button {
   min-width: 56px;
   min-height: 56px;
+}
+
+/* Album grid (CONCEPT.md §4.1): tiles fill the row; covers adapt. */
+.album-grid {
+  padding: 12px;
+}
+
+.album-grid > child {
+  padding: 9px;
+  border-radius: 15px;
+}
+
+.album-tile .album-title {
+  font-weight: bold;
+}
+
+.mini-player .cover {
+  border-radius: 6px;
+}
+
+.mini-progress {
+  min-height: 2px;
+}
+
+.mini-progress trough,
+.mini-progress progress {
+  min-height: 2px;
+  border-radius: 0;
+}
+
+.track-row.playing .title,
+.track-row.playing label {
+  font-weight: bold;
+}
+
+.expand-button:checked {
+  transform: rotate(180deg);
 }

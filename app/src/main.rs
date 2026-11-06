@@ -1,6 +1,12 @@
 mod application;
 mod config;
+mod covers;
+mod format;
+mod library;
 mod library_folders;
+mod mpris;
+mod objects;
+mod player;
 mod preferences_dialog;
 mod widgets;
 mod window;

@@ -17,6 +17,18 @@ gatefold-core = { path = "core" }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_10"] }
 gettext-rs = { version = "0.8", features = ["gettext-system"] }
 gtk = { package = "gtk4", version = "0.11", features = ["v4_24"] }
+async-channel = "2"
+glycin = { version = "4", default-features = false, features = ["async-io"] }
+gst = { package = "gstreamer", version = "0.25", features = ["v1_28"] }
+gst-audio = { package = "gstreamer-audio", version = "0.25", features = ["v1_28"] }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+futures-lite = "2"
+lofty = "0.25"
+mpris-server = "0.10"
+notify = "8"
+rand = "0.9"
+rusqlite = "0.37"
+rusqlite_migration = "2"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

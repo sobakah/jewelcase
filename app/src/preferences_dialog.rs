@@ -10,6 +10,9 @@ use gtk::{gio, glib};
 use crate::config::APP_ID;
 use crate::library_folders;
 
+/// The `replaygain` setting values, in the order of the combo row.
+const REPLAYGAIN_MODES: [&str; 4] = ["off", "auto", "track", "album"];
+
 mod imp {
     use super::*;
 
@@ -18,6 +21,10 @@ mod imp {
     pub struct PreferencesDialog {
         #[template_child]
         pub folders_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub replaygain_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         pub folder_rows: RefCell<Vec<adw::ActionRow>>,
         pub settings: OnceCell<gio::Settings>,
     }
@@ -54,6 +61,21 @@ mod imp {
                     move |_, _| obj.refresh_folders()
                 ),
             );
+            settings
+                .bind("restore-queue", &*self.restore_queue_row, "active")
+                .build();
+            settings
+                .bind("replaygain", &*self.replaygain_row, "selected")
+                .mapping(|value, _| {
+                    let mode = value.get::<String>()?;
+                    let index = REPLAYGAIN_MODES.iter().position(|m| *m == mode)?;
+                    Some((index as u32).to_value())
+                })
+                .set_mapping(|value, _| {
+                    let index = value.get::<u32>().ok()? as usize;
+                    REPLAYGAIN_MODES.get(index).map(|m| m.to_variant())
+                })
+                .build();
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();
         }

@@ -1,6 +1,7 @@
 blueprints = custom_target(
   'blueprints',
   input: files(
+    'ui/album_panel.blp',
     'ui/mini_player.blp',
     'ui/player_view.blp',
     'ui/preferences_dialog.blp',

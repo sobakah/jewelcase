@@ -9,16 +9,28 @@ template $GatefoldWindow: Adw.ApplicationWindow {
   height-request: 294;
   title: _("Gatefold");
 
+  // Only the last matching breakpoint applies, so the narrow one repeats
+  // the album panel setter.
+  Adw.Breakpoint {
+    condition ("max-width: 700sp")
+
+    setters {
+      split_view.collapsed: true;
+    }
+  }
+
   Adw.Breakpoint {
     condition ("max-width: 550sp")
 
     setters {
       header_bar.show-title: false;
       switcher_bar.reveal: true;
+      split_view.collapsed: true;
     }
   }
 
-  content: Adw.BottomSheet bottom_sheet {
+  content: Adw.ToastOverlay toast_overlay {
+  child: Adw.BottomSheet bottom_sheet {
     content: Adw.ToolbarView {
       [top]
       Adw.HeaderBar header_bar {
@@ -26,6 +38,13 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           stack: stack;
           policy: wide;
         };
+
+        [start]
+        Gtk.MenuButton sort_button {
+          icon-name: "view-sort-descending-symbolic";
+          tooltip-text: _("Sort Albums");
+          menu-model: sort_menu;
+        }
 
         [end]
         Gtk.MenuButton {
@@ -51,9 +70,14 @@ template $GatefoldWindow: Adw.ApplicationWindow {
 
           child: Gtk.SearchEntry search_entry {
             hexpand: true;
-            placeholder-text: _("Search artists, albums, songs and playlists");
+            placeholder-text: _("Filter albums by title or artist");
           };
         };
+      }
+
+      [top]
+      Adw.Banner scan_banner {
+        revealed: false;
       }
 
       content: Adw.ViewStack stack {
@@ -62,21 +86,66 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           title: _("Albums");
           icon-name: "media-optical-symbolic";
 
-          child: Adw.StatusPage {
-            icon-name: "folder-music-symbolic";
-            title: _("No Albums Yet");
-            description: _("Gatefold shows the albums in your music folders. Scanning arrives in a later version.");
+          child: Gtk.Stack albums_stack {
+            transition-type: crossfade;
 
-            child: Gtk.Button {
-              halign: center;
-              label: _("_Choose Music Folders…");
-              use-underline: true;
-              action-name: "app.preferences";
+            Gtk.StackPage {
+              name: "empty";
 
-              styles [
-                "pill",
-              ]
-            };
+              child: Adw.StatusPage {
+                icon-name: "folder-music-symbolic";
+                title: _("No Albums Yet");
+                description: _("Gatefold shows the albums in your music folders.");
+
+                child: Gtk.Button {
+                  halign: center;
+                  label: _("_Choose Music Folders…");
+                  use-underline: true;
+                  action-name: "app.preferences";
+
+                  styles [
+                    "pill",
+                  ]
+                };
+              };
+            }
+
+            Gtk.StackPage {
+              name: "no-results";
+
+              child: Adw.StatusPage {
+                icon-name: "edit-find-symbolic";
+                title: _("No Matching Albums");
+              };
+            }
+
+            Gtk.StackPage {
+              name: "albums";
+
+              child: Adw.OverlaySplitView split_view {
+                sidebar-position: end;
+                show-sidebar: false;
+                min-sidebar-width: 320;
+                max-sidebar-width: 440;
+                sidebar-width-fraction: 0.38;
+
+                content: Gtk.ScrolledWindow {
+                  hscrollbar-policy: never;
+
+                  child: Gtk.GridView album_grid {
+                    max-columns: 12;
+                    min-columns: 2;
+                    single-click-activate: true;
+
+                    styles [
+                      "album-grid",
+                    ]
+                  };
+                };
+
+                sidebar: $GatefoldAlbumPanel album_panel {};
+              };
+            }
           };
         }
 
@@ -114,9 +183,47 @@ template $GatefoldWindow: Adw.ApplicationWindow {
     bottom-bar: $GatefoldMiniPlayer {};
     sheet: $GatefoldPlayerView {};
   };
+  };
+}
+
+menu sort_menu {
+  section {
+    label: _("Sort By");
+
+    item {
+      label: _("_Artist");
+      action: "win.album-sort";
+      target: "artist";
+    }
+
+    item {
+      label: _("_Title");
+      action: "win.album-sort";
+      target: "title";
+    }
+
+    item {
+      label: _("_Year");
+      action: "win.album-sort";
+      target: "year";
+    }
+
+    item {
+      label: _("Date _Added");
+      action: "win.album-sort";
+      target: "added";
+    }
+  }
 }
 
 menu primary_menu {
+  section {
+    item {
+      label: _("_Rescan Library");
+      action: "app.rescan";
+    }
+  }
+
   section {
     item {
       label: _("_Preferences");

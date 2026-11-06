@@ -1,0 +1,179 @@
+using Gtk 4.0;
+using Adw 1;
+
+// The album detail side panel (CONCEPT.md §4.1).
+template $GatefoldAlbumPanel: Adw.Bin {
+  styles [
+    "album-panel",
+  ]
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+      show-start-title-buttons: false;
+      show-end-title-buttons: false;
+
+      [end]
+      Gtk.Button {
+        icon-name: "window-close-symbolic";
+        tooltip-text: _("Close");
+        action-name: "panel.close";
+      }
+
+      styles [
+        "flat",
+      ]
+    }
+
+    content: Gtk.ScrolledWindow {
+      hscrollbar-policy: never;
+
+      child: Adw.Clamp {
+        maximum-size: 560;
+        margin-start: 18;
+        margin-end: 18;
+        margin-bottom: 24;
+
+        child: Gtk.Box {
+          orientation: vertical;
+          spacing: 6;
+
+          Adw.Clamp {
+            maximum-size: 360;
+            margin-bottom: 12;
+
+            child: $GatefoldCoverImage cover {
+              min-size: 160;
+              natural-size: 360;
+              kind: "panel";
+            };
+          }
+
+          Gtk.Label title {
+            wrap: true;
+            xalign: 0;
+            selectable: true;
+
+            styles [
+              "title-2",
+            ]
+          }
+
+          Gtk.Label edition {
+            wrap: true;
+            xalign: 0;
+            visible: false;
+
+            styles [
+              "dim-label",
+            ]
+          }
+
+          Gtk.Label artist {
+            wrap: true;
+            xalign: 0;
+
+            styles [
+              "heading",
+            ]
+          }
+
+          Gtk.Label meta {
+            wrap: true;
+            xalign: 0;
+
+            styles [
+              "dim-label",
+              "caption",
+            ]
+          }
+
+          Gtk.Box {
+            spacing: 6;
+            margin-top: 12;
+            margin-bottom: 12;
+
+            Gtk.Button {
+              action-name: "panel.play";
+
+              child: Adw.ButtonContent {
+                icon-name: "media-playback-start-symbolic";
+                label: _("_Play");
+                use-underline: true;
+              };
+
+              styles [
+                "pill",
+                "suggested-action",
+              ]
+            }
+
+            Gtk.Button {
+              icon-name: "media-playlist-shuffle-symbolic";
+              tooltip-text: _("Shuffle");
+              action-name: "panel.shuffle";
+              valign: center;
+
+              styles [
+                "circular",
+              ]
+            }
+
+            Gtk.MenuButton {
+              icon-name: "view-more-symbolic";
+              tooltip-text: _("More");
+              menu-model: album_menu;
+              valign: center;
+
+              styles [
+                "circular",
+              ]
+            }
+          }
+
+          Gtk.Box tracks {
+            orientation: vertical;
+            spacing: 12;
+          }
+
+          Gtk.Box versions_box {
+            spacing: 12;
+            margin-top: 12;
+            visible: false;
+
+            Gtk.Label versions_label {
+              hexpand: true;
+              wrap: true;
+              xalign: 0;
+
+              styles [
+                "dim-label",
+                "caption",
+              ]
+            }
+
+            Gtk.DropDown versions {
+              valign: center;
+              tooltip-text: _("Version to Play");
+            }
+          }
+        };
+      };
+    };
+  };
+}
+
+menu album_menu {
+  section {
+    item {
+      label: _("Play _Next");
+      action: "panel.play-next";
+    }
+
+    item {
+      label: _("_Add to Queue");
+      action: "panel.add-to-queue";
+    }
+  }
+}

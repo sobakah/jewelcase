@@ -11,11 +11,24 @@ sudo dnf install cargo rust rustfmt clippy cargo-rpm-macros \
     meson blueprint-compiler gettext desktop-file-utils appstream \
     gtk4-devel libadwaita-devel \
     gstreamer1-devel gstreamer1-plugins-base-devel sqlite-devel \
+    fontconfig-devel libseccomp-devel \
+    gstreamer1-plugins-good gstreamer1-plugin-libav glycin-loaders bubblewrap \
     mock rpm-build
 sudo usermod -aG mock "$USER"   # for `make mock`; log in again afterwards
 ```
 
-The GStreamer and SQLite headers aren't needed until Phase 1.
+The library database lives in `~/.local/share/<app id>/library.sqlite`,
+cover thumbnails in `~/.cache/<app id>/covers/` (the development build uses
+the `.Devel` app ID, so it never touches the installed app's data).
+
+Development aids:
+
+- `GATEFOLD_SILENT=1` plays into a fakesink instead of the speakers.
+- `GATEFOLD_SCREENSHOT=out.png` (development profile only) renders the
+  window to a PNG and quits;
+  see `setup_screenshot` in `app/src/window.rs` for the other variables.
+- `cargo run -p gatefold-core --example scan -- DB COVERS FOLDER…` scans
+  into a throwaway database and lists the albums.
 
 ## Build and run
 

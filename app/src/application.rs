@@ -3,15 +3,22 @@ use adw::subclass::prelude::*;
 use gettextrs::gettext;
 use gtk::{gio, glib};
 
+use std::cell::OnceCell;
+
 use crate::config::{APP_ID, RESOURCE_BASE_PATH, VERSION};
+use crate::library::Library;
+use crate::player::Player;
 use crate::preferences_dialog::PreferencesDialog;
 use crate::window::GatefoldWindow;
 
 mod imp {
     use super::*;
 
-    #[derive(Debug, Default)]
-    pub struct GatefoldApplication;
+    #[derive(Default)]
+    pub struct GatefoldApplication {
+        pub library: OnceCell<Library>,
+        pub player: OnceCell<Player>,
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for GatefoldApplication {
@@ -28,6 +35,23 @@ mod imp {
             let app = self.obj();
             app.setup_actions();
             app.setup_accels();
+
+            let library = Library::new();
+            if let Err(err) = library.start() {
+                tracing::error!("Cannot open the library database: {err}");
+            }
+            let player = Player::new(&library);
+            self.library.set(library).expect("set once");
+            self.player.set(player.clone()).expect("set once");
+            player.restore();
+            crate::mpris::start(&app, &player);
+        }
+
+        fn shutdown(&self) {
+            if let Some(player) = self.player.get() {
+                player.save();
+            }
+            self.parent_shutdown();
         }
 
         fn activate(&self) {
@@ -58,6 +82,21 @@ impl GatefoldApplication {
             .build()
     }
 
+    /// The running application.
+    pub fn get() -> Self {
+        gio::Application::default()
+            .and_downcast()
+            .expect("the application is a GatefoldApplication")
+    }
+
+    pub fn library(&self) -> Library {
+        self.imp().library.get().expect("set in startup()").clone()
+    }
+
+    pub fn player(&self) -> Player {
+        self.imp().player.get().expect("set in startup()").clone()
+    }
+
     fn setup_actions(&self) {
         let quit = gio::ActionEntry::builder("quit")
             .activate(|app: &Self, _, _| {
@@ -79,7 +118,10 @@ impl GatefoldApplication {
         let about = gio::ActionEntry::builder("about")
             .activate(|app: &Self, _, _| app.show_about())
             .build();
-        self.add_action_entries([quit, preferences, shortcuts, about]);
+        let rescan = gio::ActionEntry::builder("rescan")
+            .activate(|app: &Self, _, _| app.library().rescan())
+            .build();
+        self.add_action_entries([quit, preferences, shortcuts, about, rescan]);
     }
 
     fn setup_accels(&self) {

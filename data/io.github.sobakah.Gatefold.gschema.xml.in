@@ -27,5 +27,36 @@
       <summary>Music folders</summary>
       <description>Folders the library is read from. While this key is unset, the XDG Music folder is used.</description>
     </key>
+    <key name="album-sort" type="s">
+      <choices>
+        <choice value="artist"/>
+        <choice value="title"/>
+        <choice value="year"/>
+        <choice value="added"/>
+      </choices>
+      <default>"artist"</default>
+      <summary>Album sort order</summary>
+    </key>
+    <key name="replaygain" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="auto"/>
+        <choice value="track"/>
+        <choice value="album"/>
+      </choices>
+      <default>"auto"</default>
+      <summary>ReplayGain mode</summary>
+      <description>“auto” uses album gain when an album plays in order and track gain while shuffling.</description>
+    </key>
+    <key name="restore-queue" type="b">
+      <default>true</default>
+      <summary>Restore the queue on start</summary>
+      <description>Reopen the last queue, paused at the last position.</description>
+    </key>
+    <key name="volume" type="d">
+      <range min="0" max="1"/>
+      <default>1</default>
+      <summary>Playback volume</summary>
+    </key>
   </schema>
 </schemalist>

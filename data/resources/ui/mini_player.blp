@@ -1,94 +1,110 @@
 using Gtk 4.0;
 using Adw 1;
 
-// Bottom bar of the library window (CONCEPT.md §4.1). The player.* actions
-// arrive with playback in Phase 1; until then those buttons are insensitive.
+// Bottom bar of the library window (CONCEPT.md §4.1). Clicking it opens
+// the full player.
 template $GatefoldMiniPlayer: Adw.Bin {
   styles [
     "mini-player",
   ]
 
   child: Gtk.Box {
-    spacing: 12;
-    margin-start: 12;
-    margin-end: 6;
-    margin-top: 6;
-    margin-bottom: 6;
+    orientation: vertical;
 
-    Gtk.Image {
-      icon-name: "folder-music-symbolic";
-      pixel-size: 24;
-      valign: center;
-      accessible-role: presentation;
-
+    Gtk.ProgressBar progress {
       styles [
-        "cover",
-        "cover-placeholder",
+        "osd",
+        "mini-progress",
       ]
     }
 
     Gtk.Box {
-      orientation: vertical;
-      valign: center;
-      hexpand: true;
+      spacing: 12;
+      margin-start: 12;
+      margin-end: 6;
+      margin-top: 6;
+      margin-bottom: 6;
 
-      Gtk.Label {
-        label: _("Not Playing");
-        xalign: 0;
-        ellipsize: end;
-
-        styles [
-          "heading",
-        ]
-      }
-    }
-
-    Gtk.Box {
-      spacing: 6;
-      valign: center;
-
-      Gtk.Button {
-        icon-name: "media-skip-backward-symbolic";
-        tooltip-text: _("Previous");
-        action-name: "player.previous";
-
-        styles [
-          "flat",
-          "circular",
-        ]
+      $GatefoldCoverImage cover {
+        min-size: 48;
+        natural-size: 48;
+        valign: center;
       }
 
-      Gtk.Button {
-        icon-name: "media-playback-start-symbolic";
-        tooltip-text: _("Play");
-        action-name: "player.play-pause";
+      Gtk.Box {
+        orientation: vertical;
+        valign: center;
+        hexpand: true;
 
-        styles [
-          "flat",
-          "circular",
-        ]
+        Gtk.Label title {
+          label: _("Not Playing");
+          xalign: 0;
+          ellipsize: end;
+
+          styles [
+            "heading",
+          ]
+        }
+
+        Gtk.Label artist {
+          xalign: 0;
+          ellipsize: end;
+          visible: false;
+
+          styles [
+            "dim-label",
+            "caption",
+          ]
+        }
       }
 
-      Gtk.Button {
-        icon-name: "media-skip-forward-symbolic";
-        tooltip-text: _("Next");
-        action-name: "player.next";
+      Gtk.Box {
+        spacing: 6;
+        valign: center;
 
-        styles [
-          "flat",
-          "circular",
-        ]
-      }
+        Gtk.Button {
+          icon-name: "media-skip-backward-symbolic";
+          tooltip-text: _("Previous");
+          action-name: "player.previous";
 
-      Gtk.Button {
-        icon-name: "pan-up-symbolic";
-        tooltip-text: _("Show Player");
-        action-name: "win.open-player";
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
 
-        styles [
-          "flat",
-          "circular",
-        ]
+        Gtk.Button play_button {
+          icon-name: "media-playback-start-symbolic";
+          tooltip-text: _("Play");
+          action-name: "player.play-pause";
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "media-skip-forward-symbolic";
+          tooltip-text: _("Next");
+          action-name: "player.next";
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button {
+          icon-name: "pan-up-symbolic";
+          tooltip-text: _("Show Player");
+          action-name: "win.open-player";
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
       }
     }
   };

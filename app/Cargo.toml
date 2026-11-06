@@ -15,6 +15,9 @@ spotify-stream = []
 gatefold-core.workspace = true
 
 adw.workspace = true
+async-channel.workspace = true
+mpris-server.workspace = true
+rand.workspace = true
 gettext-rs.workspace = true
 gtk.workspace = true
 tracing.workspace = true

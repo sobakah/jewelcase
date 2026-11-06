@@ -27,12 +27,26 @@ BuildRequires:  meson >= 1.4
 BuildRequires:  blueprint-compiler
 BuildRequires:  pkgconfig(gtk4) >= 4.24
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.10
+BuildRequires:  pkgconfig(gstreamer-1.0) >= 1.28
+BuildRequires:  pkgconfig(sqlite3)
+# glycin (sandboxed cover decoding) links these.
+BuildRequires:  pkgconfig(fontconfig)
+BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  /usr/bin/glib-compile-resources
 BuildRequires:  /usr/bin/glib-compile-schemas
 BuildRequires:  /usr/bin/xmllint
 BuildRequires:  gettext
 BuildRequires:  desktop-file-utils
 BuildRequires:  /usr/bin/appstreamcli
+
+# Playback (CONCEPT.md §12): playbin3, FLAC and ReplayGain, AAC/ALAC in M4A.
+Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugins-good
+Requires:       gstreamer1-plugin-libav
+# Cover decoding in glycin's sandbox.
+Requires:       glycin-loaders
+Requires:       bubblewrap
+Recommends:     gstreamer1-plugins-ugly-free
 
 %description
 Gatefold is a local-first music player for people who listen to albums,
@@ -71,5 +85,6 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
-* Thu Nov 05 2026 sobakah - 0.1.0-1
+* Fri Nov 06 2026 sobakah - 0.1.0-1
 - Project skeleton (roadmap phase 0)
+- Library scanner, album grid and panel, playback, queue, MPRIS (phase 1)
