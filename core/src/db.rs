@@ -23,6 +23,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/003_artists.sql")),
     M::up(include_str!("db/004_playlists_search.sql")),
     M::up(include_str!("db/005_play_history.sql")),
+    M::up(include_str!("db/006_analysis.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1120,6 +1121,125 @@ impl Database {
             .collect())
     }
 
+    // Analysis (§7) -----------------------------------------------------
+
+    /// Songs still to analyze: no content key yet, or no (current) result
+    /// for it. In library order, `limit` at a time.
+    pub fn tracks_to_analyze(&self, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT t.id, t.path FROM track t
+             LEFT JOIN analysis a ON a.key = t.content_key
+             WHERE t.content_key IS NULL OR a.key IS NULL
+                OR (a.failed = 0 AND a.features_version < ?1)
+             ORDER BY t.id LIMIT ?2",
+        )?;
+        stmt.query_map(
+            params![i64::from(crate::analysis::FEATURES_VERSION), limit as i64],
+            |row| Ok((row.get(0)?, PathBuf::from(row.get::<_, String>(1)?))),
+        )?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(Into::into)
+    }
+
+    pub fn set_content_key(&mut self, track_id: i64, key: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE track SET content_key = ?2 WHERE id = ?1",
+            params![track_id, key],
+        )?;
+        Ok(())
+    }
+
+    /// Whether `key` has a current result (or failed before).
+    pub fn has_analysis(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM analysis WHERE key = ?1 AND (failed = 1 OR features_version >= ?2)",
+                params![key, i64::from(crate::analysis::FEATURES_VERSION)],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Stores a result, or (`None`) that the file couldn't be analyzed.
+    pub fn save_analysis(
+        &mut self,
+        key: &str,
+        result: Option<&crate::analysis::SongAnalysis>,
+        now: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO analysis (key, features, features_version, bpm, failed, analyzed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(key) DO UPDATE SET features = excluded.features,
+               features_version = excluded.features_version, bpm = excluded.bpm,
+               failed = excluded.failed, analyzed = excluded.analyzed",
+            params![
+                key,
+                result.map(|r| crate::analysis::features_to_blob(&r.features)),
+                result.map(|r| i64::from(r.features_version)),
+                result.and_then(|r| r.bpm),
+                result.is_none(),
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// (analyzed, all) songs, for the progress in Preferences.
+    pub fn analysis_progress(&self) -> Result<(u32, u32)> {
+        Ok(self.conn.query_row(
+            "SELECT count(a.key), count(*) FROM track t
+             LEFT JOIN analysis a ON a.key = t.content_key
+               AND (a.failed = 1 OR a.features_version >= ?1)",
+            params![i64::from(crate::analysis::FEATURES_VERSION)],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
+    }
+
+    /// Every song's features for similarity (§7).
+    pub fn similarity_features(&self) -> Result<Vec<crate::similar::SongFeatures>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT t.id, t.album_id, coalesce(nullif(t.album_artist, ''), t.artist),
+                    t.genres, t.bpm, a.bpm, a.features
+             FROM track t
+             LEFT JOIN analysis a ON a.key = t.content_key AND a.failed = 0
+               AND a.features_version >= ?1",
+        )?;
+        stmt.query_map(
+            params![i64::from(crate::analysis::FEATURES_VERSION)],
+            |row| {
+                let tag_bpm: Option<f64> = row.get(4)?;
+                let detected: Option<f64> = row.get(5)?;
+                let sound: Option<Vec<u8>> = row.get(6)?;
+                Ok(crate::similar::SongFeatures {
+                    track_id: row.get(0)?,
+                    album_id: row.get(1)?,
+                    artist: row.get::<_, Option<String>>(2)?.map(|a| a.to_lowercase()),
+                    genres: split_list(row.get::<_, Option<String>>(3)?.unwrap_or_default())
+                        .into_iter()
+                        .map(|g| g.trim().to_lowercase())
+                        .collect(),
+                    bpm: tag_bpm.filter(|b| *b > 0.0).or(detected),
+                    sound: sound.map(|b| crate::analysis::features_from_blob(&b)),
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(Into::into)
+    }
+
+    /// Songs played since `since` (unix seconds), to keep them out of mixes.
+    pub fn played_since(&self, since: i64) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT DISTINCT track_id FROM play_history WHERE played >= ?1")?;
+        stmt.query_map(params![since], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
+    }
+
     /// Records that a song was played; keeps the newest `HISTORY_KEEP`.
     pub fn add_history(&mut self, track_id: i64, now: i64) -> Result<()> {
         let tx = self.conn.transaction()?;
@@ -1218,6 +1338,7 @@ const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, 
   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
     ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)
   ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size,
+    content_key = NULL,
     title = excluded.title, artist = excluded.artist, album = excluded.album,
     album_artist = excluded.album_artist, album_artists = excluded.album_artists,
     album_artist_sort = excluded.album_artist_sort, disc = excluded.disc,
@@ -1718,6 +1839,49 @@ mod tests {
         let genres = db.album_genres().unwrap();
         assert_eq!(genres.len(), 1);
         assert_eq!(genres.values().next().unwrap(), &["K-Pop", "Dance"]);
+    }
+
+    #[test]
+    fn analysis_is_shared_by_content_and_redone_after_changes() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/A/1/01.flac", "1", "One", 1),
+                file("/m/A/2/01.flac", "2", "One again", 1),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let ids = track_ids(&db);
+        assert_eq!(db.tracks_to_analyze(10).unwrap().len(), 2);
+        assert_eq!(db.analysis_progress().unwrap(), (0, 2));
+        let result = crate::analysis::SongAnalysis {
+            features: vec![1.0, 2.0],
+            features_version: crate::analysis::FEATURES_VERSION,
+            bpm: Some(120.0),
+        };
+        // Both files have the same audio: one analysis serves both.
+        db.set_content_key(ids["One"], "k1").unwrap();
+        db.save_analysis("k1", Some(&result), 5).unwrap();
+        assert!(db.has_analysis("k1").unwrap());
+        db.set_content_key(ids["One again"], "k1").unwrap();
+        assert!(db.tracks_to_analyze(10).unwrap().is_empty());
+        assert_eq!(db.analysis_progress().unwrap(), (2, 2));
+        let features = db.similarity_features().unwrap();
+        assert!(
+            features
+                .iter()
+                .all(|f| f.bpm == Some(120.0) && f.sound.is_some())
+        );
+        // A changed file loses its key and is looked at again.
+        let mut changed = file("/m/A/1/01.flac", "1", "One", 1);
+        changed.mtime += 10;
+        db.upsert_tracks(&[changed], 2).unwrap();
+        assert_eq!(db.tracks_to_analyze(10).unwrap().len(), 1);
+        // A file that can't be analyzed isn't tried again.
+        db.save_analysis("bad", None, 6).unwrap();
+        assert!(db.has_analysis("bad").unwrap());
     }
 
     #[test]

@@ -9,9 +9,11 @@ repository.workspace = true
 
 [dependencies]
 async-channel.workspace = true
+bliss-audio.workspace = true
 futures-lite.workspace = true
 glycin.workspace = true
 gst.workspace = true
+gst-app.workspace = true
 image.workspace = true
 lofty.workspace = true
 notify.workspace = true

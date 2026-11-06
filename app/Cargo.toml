@@ -19,6 +19,7 @@ gatefold-tools.workspace = true
 
 adw.workspace = true
 async-channel.workspace = true
+libc.workspace = true
 mpris-server.workspace = true
 rand.workspace = true
 gettext-rs.workspace = true

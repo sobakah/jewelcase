@@ -13,6 +13,9 @@ pub enum Origin {
     Context,
     /// Added with "Play next" or "Add to queue".
     User,
+    /// Mixed in by smart shuffle, or added to keep the music going (§7).
+    /// Moves and plays like the album's songs.
+    Suggested,
 }
 
 impl Origin {
@@ -20,12 +23,14 @@ impl Origin {
         match self {
             Self::Context => "context",
             Self::User => "user",
+            Self::Suggested => "suggested",
         }
     }
 
     pub fn from_str_lossy(value: &str) -> Self {
         match value {
             "user" => Self::User,
+            "suggested" => Self::Suggested,
             _ => Self::Context,
         }
     }
@@ -195,6 +200,28 @@ impl Queue {
         self.insert(tracks, position, unshuffled_position);
     }
 
+    /// Mixes a suggested song in: next after the "Next up" block.
+    pub fn mix_in(&mut self, track_id: i64) {
+        let position = match self.current {
+            Some(current) => user_block_end(&self.items, current + 1),
+            None => self.items.len(),
+        };
+        let unshuffled_position = self.unshuffled_position_after_current(true);
+        self.insert_as(
+            &[track_id],
+            Origin::Suggested,
+            position,
+            unshuffled_position,
+        );
+    }
+
+    /// Adds a suggested song at the end ("keep playing similar music").
+    pub fn append_suggestion(&mut self, track_id: i64) {
+        let unshuffled_position = self.unshuffled.as_ref().map(Vec::len);
+        let end = self.items.len();
+        self.insert_as(&[track_id], Origin::Suggested, end, unshuffled_position);
+    }
+
     fn unshuffled_position_after_current(&self, after_user_block: bool) -> Option<usize> {
         let order = self.unshuffled.as_ref()?;
         let Some(current) = self.current() else {
@@ -215,10 +242,17 @@ impl Queue {
     }
 
     fn insert(&mut self, tracks: &[i64], position: usize, unshuffled_position: Option<usize>) {
-        let new: Vec<QueueItem> = tracks
-            .iter()
-            .map(|&id| self.new_item(id, Origin::User))
-            .collect();
+        self.insert_as(tracks, Origin::User, position, unshuffled_position);
+    }
+
+    fn insert_as(
+        &mut self,
+        tracks: &[i64],
+        origin: Origin,
+        position: usize,
+        unshuffled_position: Option<usize>,
+    ) {
+        let new: Vec<QueueItem> = tracks.iter().map(|&id| self.new_item(id, origin)).collect();
         if let (Some(order), Some(at)) = (self.unshuffled.as_mut(), unshuffled_position) {
             let at = at.min(order.len());
             order.splice(at..at, new.iter().map(|i| i.uid));
@@ -298,6 +332,17 @@ impl Queue {
     /// Shuffles the tracks after the current one (keeping the "Next up"
     /// block in order), or restores the original order.
     pub fn set_shuffle(&mut self, shuffle: bool, rng: &mut impl Rng) {
+        self.set_shuffle_by(shuffle, None::<fn(i64) -> Option<i64>>, rng);
+    }
+
+    /// Like `set_shuffle`; with `album_of`, shuffles whole albums: their
+    /// order is random, each plays in order ("Shuffle albums", §7).
+    pub fn set_shuffle_by(
+        &mut self,
+        shuffle: bool,
+        album_of: Option<impl Fn(i64) -> Option<i64>>,
+        rng: &mut impl Rng,
+    ) {
         if shuffle == self.is_shuffled() {
             return;
         }
@@ -305,7 +350,34 @@ impl Queue {
             self.unshuffled = Some(self.items.iter().map(|i| i.uid).collect());
             let start = self.current.map_or(0, |c| c + 1);
             let start = user_block_end(&self.items, start);
-            self.items[start..].shuffle(rng);
+            match album_of {
+                None => self.items[start..].shuffle(rng),
+                Some(album_of) => {
+                    let playing = self.current().and_then(|i| album_of(i.track_id));
+                    // Runs of the same album, in first-seen order.
+                    let mut groups: Vec<(Option<i64>, Vec<QueueItem>)> = Vec::new();
+                    for item in self.items.drain(start..) {
+                        let album = album_of(item.track_id);
+                        match groups
+                            .iter_mut()
+                            .find(|(a, _)| album.is_some() && *a == album)
+                        {
+                            Some((_, items)) => items.push(item),
+                            None => groups.push((album, vec![item])),
+                        }
+                    }
+                    // The album that's playing finishes first.
+                    let first = match groups.first() {
+                        Some((album, _)) if album.is_some() && *album == playing => {
+                            Some(groups.remove(0))
+                        }
+                        _ => None,
+                    };
+                    groups.shuffle(rng);
+                    self.items
+                        .extend(first.into_iter().chain(groups).flat_map(|(_, items)| items));
+                }
+            }
         } else if let Some(order) = self.unshuffled.take() {
             let current_uid = self.current().map(|i| i.uid);
             let mut items = Vec::with_capacity(self.items.len());
@@ -358,7 +430,7 @@ impl Queue {
         let block_end = user_block_end(&self.items, first_upcoming);
         let to = match item.origin {
             Origin::User => to.clamp(first_upcoming, block_end),
-            Origin::Context => to.max(block_end),
+            Origin::Context | Origin::Suggested => to.max(block_end),
         };
         self.items.insert(to, item);
         if to == from {
@@ -572,6 +644,44 @@ mod tests {
         // The current item can't move, and nothing moves before it.
         assert!(!queue.move_item(0, 2));
         assert!(!queue.move_item(3, 0));
+    }
+
+    #[test]
+    fn shuffling_albums_keeps_each_album_in_order() {
+        let mut queue = Queue::new();
+        // Three albums of three tracks: 1x, 2x, 3x.
+        let tracks = [11, 12, 13, 21, 22, 23, 31, 32, 33];
+        queue.play_context(&tracks, Some(0), None, false, &mut rng());
+        queue.set_shuffle_by(true, Some(|id: i64| Some(id / 10)), &mut rng());
+        let order = ids(&queue);
+        assert_eq!(order[0], 11);
+        // Each album's tracks stay together and in order.
+        for album in [1, 2, 3] {
+            let positions: Vec<usize> = order
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| **id / 10 == album)
+                .map(|(i, _)| i)
+                .collect();
+            assert!(positions.windows(2).all(|w| w[1] == w[0] + 1), "{order:?}");
+        }
+        queue.set_shuffle(false, &mut rng());
+        assert_eq!(ids(&queue), tracks);
+    }
+
+    #[test]
+    fn suggestions_mix_in_after_next_up_and_at_the_end() {
+        let mut queue = album(Some(0));
+        queue.add(&[10]);
+        queue.mix_in(99);
+        // [1*, 10u, 99s, 2, 3, 4, 5]
+        assert_eq!(ids(&queue), [1, 10, 99, 2, 3, 4, 5]);
+        assert_eq!(queue.items()[2].origin, Origin::Suggested);
+        queue.append_suggestion(98);
+        assert_eq!(*ids(&queue).last().unwrap(), 98);
+        // Suggestions move like album songs, never into "Next up".
+        assert!(!queue.move_item(2, 1));
+        assert_eq!(ids(&queue)[1..3], [10, 99]);
     }
 
     #[test]
