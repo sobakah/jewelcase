@@ -285,7 +285,10 @@ impl GatefoldWindow {
         library.connect_scanning_notify(glib::clone!(
             #[weak(rename_to = window)]
             self,
-            move |library| window.update_banner(library)
+            move |library| {
+                window.update_banner(library);
+                window.update_albums_page();
+            }
         ));
         library.connect_scan_status_notify(glib::clone!(
             #[weak(rename_to = window)]
@@ -393,7 +396,9 @@ impl GatefoldWindow {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
         let shown = imp.filtered.get().map_or(0, |f| f.n_items());
-        let page = if library.albums().n_items() == 0 {
+        let page = if library.albums().n_items() == 0 && library.scanning() {
+            "scanning"
+        } else if library.albums().n_items() == 0 {
             "empty"
         } else if shown == 0 {
             "no-results"
@@ -412,7 +417,7 @@ impl GatefoldWindow {
     /// Development aid: `GATEFOLD_SCREENSHOT=out.png` renders the window to
     /// a PNG after `GATEFOLD_SCREENSHOT_DELAY` seconds (default 8) and quits.
     /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, e.g.
-    /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` opens the Nth album
+    /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album
     /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it.
     fn setup_screenshot(&self) {
         let Some(path) = std::env::var_os("GATEFOLD_SCREENSHOT") else {
@@ -428,11 +433,17 @@ impl GatefoldWindow {
             let Some(window) = window.upgrade() else {
                 return;
             };
+            // An index into the grid, or an album title.
             let album = std::env::var("GATEFOLD_SCREENSHOT_ALBUM")
                 .ok()
-                .and_then(|n| n.parse::<u32>().ok())
-                .and_then(|n| window.imp().album_grid.model()?.item(n))
-                .and_downcast::<AlbumObject>();
+                .and_then(|wanted| {
+                    let model = window.imp().album_grid.model()?;
+                    (0..model.n_items())
+                        .filter_map(|i| model.item(i).and_downcast::<AlbumObject>())
+                        .enumerate()
+                        .find(|(i, a)| wanted == i.to_string() || wanted == a.album().title)
+                        .map(|(_, a)| a)
+                });
             if let Some(album) = album {
                 window.show_album(&album);
                 if std::env::var_os("GATEFOLD_SCREENSHOT_PLAY").is_some() {

@@ -195,14 +195,12 @@ impl AlbumPanel {
         while let Some(child) = imp.tracks.first_child() {
             imp.tracks.remove(&child);
         }
-        let multi_disc = tracks
-            .iter()
-            .any(|t| t.track().record.tags.disc.unwrap_or(1) != 1);
+        let multi_disc = tracks.iter().any(|t| t.disc() != 1);
         let mut rows = Vec::with_capacity(tracks.len());
         let mut current_disc = None;
         let mut list: Option<gtk::ListBox> = None;
         for track in tracks {
-            let disc = track.track().record.tags.disc.unwrap_or(1);
+            let disc = track.disc();
             if list.is_none() || current_disc != Some(disc) {
                 current_disc = Some(disc);
                 if multi_disc {

@@ -33,6 +33,8 @@ const BATCH_SIZE: usize = 100;
 pub enum ScanProgress {
     /// Reading tags of new or changed files.
     Reading { done: usize, total: usize },
+    /// The albums are in the database; covers may still be missing.
+    AlbumsReady,
     /// Creating cover thumbnails.
     Covers { done: usize, total: usize },
 }
@@ -90,6 +92,7 @@ pub fn scan(
     let albums = group_albums(&db.all_tracks()?);
     summary.albums = albums.len();
     db.replace_albums(&albums)?;
+    progress(ScanProgress::AlbumsReady);
 
     make_covers(db, covers, progress)?;
     Ok(summary)

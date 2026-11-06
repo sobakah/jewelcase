@@ -111,6 +111,20 @@ template $GatefoldWindow: Adw.ApplicationWindow {
             }
 
             Gtk.StackPage {
+              name: "scanning";
+
+              child: Adw.StatusPage {
+                title: _("Looking for Music…");
+                description: _("Albums show up here as soon as they're found.");
+
+                child: Adw.Spinner {
+                  height-request: 48;
+                  width-request: 48;
+                };
+              };
+            }
+
+            Gtk.StackPage {
               name: "no-results";
 
               child: Adw.StatusPage {

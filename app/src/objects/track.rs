@@ -62,6 +62,12 @@ impl TrackObject {
             .or_else(|| track.album_artist.clone().filter(|a| !a.is_empty()))
     }
 
+    /// The disc as shown in the album panel.
+    pub fn disc(&self) -> u32 {
+        let track = self.track();
+        track.album_disc.or(track.record.tags.disc).unwrap_or(1)
+    }
+
     pub fn duration_ms(&self) -> u64 {
         self.track().record.tags.duration_ms
     }

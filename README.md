@@ -23,6 +23,11 @@ the `.Devel` app ID, so it never touches the installed app's data).
 
 Development aids:
 
+- `build-aux/headless.sh COMMAND…` runs a command in a private, invisible
+  session: headless mutter, its own D-Bus bus, in-memory GSettings, silent
+  audio and separate data folders (`_build/headless/`). Use it for any UI or
+  playback test that shouldn't show up on the desktop, e.g.
+  `GSETTINGS_SCHEMA_DIR=_build/data GATEFOLD_SCREENSHOT=/tmp/shot.png build-aux/headless.sh _build/app/gatefold`.
 - `GATEFOLD_SILENT=1` plays into a fakesink instead of the speakers.
 - `GATEFOLD_SCREENSHOT=out.png` (development profile only) renders the
   window to a PNG and quits;

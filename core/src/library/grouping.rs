@@ -1,7 +1,7 @@
 //! Groups tracks into albums and merges editions (CONCEPT.md §3.3, §3.4).
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::TrackRecord;
@@ -38,6 +38,9 @@ pub struct AlbumInfo {
     pub mb_release_group_id: Option<String>,
     /// In play order: disc, track number, title.
     pub track_ids: Vec<i64>,
+    /// The disc of each track in `track_ids`, as shown in the album panel.
+    /// Usually the tagged disc number; see [`merge_split_releases`].
+    pub track_discs: Vec<u32>,
     pub duration_ms: u64,
     pub cover_key: Option<String>,
     pub added: i64,
@@ -49,11 +52,21 @@ pub fn group_albums(tracks: &[TrackRecord]) -> Vec<AlbumInfo> {
         by_key.entry(identity_key(track)).or_default().push(track);
     }
 
+    let discs = merge_split_releases(&mut by_key);
+    let disc = |track: &TrackRecord| {
+        discs
+            .get(&track.id)
+            .copied()
+            .unwrap_or_else(|| track.tags.disc.unwrap_or(1))
+    };
+
     let mut albums: Vec<(AlbumInfo, Vec<&TrackRecord>)> = by_key
         .into_iter()
         .map(|(key, mut tracks)| {
-            tracks.sort_by(|a, b| play_order(a).cmp(&play_order(b)));
-            (build_album(key, &tracks), tracks)
+            tracks.sort_by(|a, b| play_order(a, disc(a)).cmp(&play_order(b, disc(b))));
+            let mut album = build_album(key, &tracks);
+            album.track_discs = tracks.iter().map(|t| disc(t)).collect();
+            (album, tracks)
         })
         .collect();
     // Preferred version first: no edition, then editions alphabetically.
@@ -108,9 +121,71 @@ fn is_disc_folder(name: &str) -> bool {
         .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()))
 }
 
-fn play_order(track: &TrackRecord) -> (u32, u32, String, &Path) {
+/// Local rule: releases in the same folder with the same album title and
+/// barcode are one album, even when their MusicBrainz release IDs differ.
+/// That happens when the discs of one physical product were entered on
+/// MusicBrainz as separate releases.
+///
+/// Merges the affected entries of `by_key` and returns the disc of each
+/// moved track. When the parts' disc numbers collide (each part says
+/// "disc 1"), the parts become consecutive discs, ordered by release key.
+fn merge_split_releases(
+    by_key: &mut HashMap<String, Vec<&TrackRecord>>,
+) -> HashMap<i64, u32> {
+    let mut parts: HashMap<(PathBuf, String, String), BTreeSet<String>> = HashMap::new();
+    for (key, tracks) in by_key.iter() {
+        for track in tracks {
+            if let (Some(barcode), Some(album)) = (&track.tags.barcode, &track.tags.album) {
+                let folder = album_folder(&track.path).to_path_buf();
+                parts
+                    .entry((folder, album.to_lowercase(), barcode.clone()))
+                    .or_default()
+                    .insert(key.clone());
+            }
+        }
+    }
+
+    let mut discs = HashMap::new();
+    for keys in parts.into_values().filter(|keys| keys.len() > 1) {
+        let keys: Vec<String> = keys.into_iter().collect();
+        if keys.iter().any(|key| !by_key.contains_key(key)) {
+            // Already merged into another album through a different track.
+            continue;
+        }
+        let tracks: Vec<Vec<&TrackRecord>> =
+            keys.iter().filter_map(|key| by_key.remove(key)).collect();
+        let disc_sets: Vec<BTreeSet<u32>> = tracks
+            .iter()
+            .map(|part| part.iter().map(|t| t.tags.disc.unwrap_or(1)).collect())
+            .collect();
+        let collide = disc_sets
+            .iter()
+            .enumerate()
+            .any(|(i, a)| disc_sets[i + 1..].iter().any(|b| !a.is_disjoint(b)));
+        let mut offset = 0;
+        let mut merged = Vec::new();
+        for (part, set) in tracks.into_iter().zip(&disc_sets) {
+            for track in &part {
+                let tagged = track.tags.disc.unwrap_or(1);
+                let first = set.first().copied().unwrap_or(1);
+                let disc = if collide {
+                    offset + tagged - first + 1
+                } else {
+                    tagged
+                };
+                discs.insert(track.id, disc);
+            }
+            offset += set.len() as u32;
+            merged.extend(part);
+        }
+        by_key.insert(keys[0].clone(), merged);
+    }
+    discs
+}
+
+fn play_order(track: &TrackRecord, disc: u32) -> (u32, u32, String, &Path) {
     (
-        track.tags.disc.unwrap_or(1),
+        disc,
         track.tags.number.unwrap_or(u32::MAX),
         track.tags.title.clone().unwrap_or_default().to_lowercase(),
         &track.path,
@@ -180,6 +255,7 @@ fn build_album(key: String, tracks: &[&TrackRecord]) -> AlbumInfo {
         mb_album_id: most_common(&|t| t.tags.mb_album_id.clone()),
         mb_release_group_id: most_common(&|t| t.tags.mb_release_group_id.clone()),
         track_ids: tracks.iter().map(|t| t.id).collect(),
+        track_discs: Vec::new(),
         duration_ms,
         cover_key: tracks.iter().find_map(|t| t.cover_key.clone()),
         added: tracks.iter().map(|t| t.added).min().unwrap_or_default(),
@@ -405,6 +481,44 @@ mod tests {
         let albums = group_albums(&tracks);
         assert_eq!(albums[0].artist_credit, "Alligatoah");
         assert_eq!(albums[0].album_artists, vec!["Alligatoah".to_owned()]);
+    }
+
+    #[test]
+    fn split_release_with_same_barcode_is_one_album() {
+        // NEVER SAY NEVER: two CDs entered as two MusicBrainz releases.
+        let parts = [
+            ("a", 1, "ICONIK"),
+            ("b", 2, "EXTRA"),
+            ("a", 4, "Goosebumps"),
+            ("b", 3, "LONG WAY BACK"),
+        ];
+        let mut tracks: Vec<TrackRecord> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, (release, number, title))| {
+                let mut t = track(
+                    i as i64 + 1,
+                    &format!("/m/ZB1/NSN/{number:02}.flac"),
+                    "NEVER SAY NEVER",
+                    title,
+                    *number,
+                    180,
+                );
+                t.tags.mb_album_id = Some(format!("release-{release}"));
+                t.tags.barcode = Some("8809704433549".into());
+                t.tags.disc = Some(1);
+                t
+            })
+            .collect();
+        let albums = group_albums(&tracks);
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].track_ids, vec![1, 3, 2, 4]);
+        assert_eq!(albums[0].track_discs, vec![1, 1, 2, 2]);
+
+        // A different barcode keeps them apart.
+        tracks[1].tags.barcode = Some("123".into());
+        tracks[3].tags.barcode = Some("123".into());
+        assert_eq!(group_albums(&tracks).len(), 2);
     }
 
     #[test]

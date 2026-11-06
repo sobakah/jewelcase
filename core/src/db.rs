@@ -15,7 +15,10 @@ use crate::library::tags::{Lyrics, TrackTags};
 use crate::library::titles::ReleaseType;
 use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 
-const MIGRATIONS: &[M<'static>] = &[M::up(include_str!("db/001_library.sql"))];
+const MIGRATIONS: &[M<'static>] = &[
+    M::up(include_str!("db/001_library.sql")),
+    M::up(include_str!("db/002_barcode_and_album_order.sql")),
+];
 
 /// Separates the values of multi-value tags in one column.
 const LIST_SEPARATOR: char = '\u{1f}';
@@ -60,6 +63,8 @@ pub struct Track {
     pub album_title: Option<String>,
     pub album_artist: Option<String>,
     pub album_cover_key: Option<String>,
+    /// The disc shown in the album panel (usually the tagged one).
+    pub album_disc: Option<u32>,
 }
 
 /// A file found by the scanner, with its stat data and tags.
@@ -162,6 +167,7 @@ impl Database {
                     t.bit_depth,
                     t.channels,
                     file.cover_key,
+                    t.barcode,
                 ])?;
             }
         }
@@ -196,7 +202,9 @@ impl Database {
         let mut kept = HashSet::new();
         {
             let mut upsert = tx.prepare_cached(UPSERT_ALBUM)?;
-            let mut link = tx.prepare_cached("UPDATE track SET album_id = ?1 WHERE id = ?2")?;
+            let mut link = tx.prepare_cached(
+                "UPDATE track SET album_id = ?1, album_position = ?3, album_disc = ?4 WHERE id = ?2",
+            )?;
             let mut upsert_artist = tx.prepare_cached(UPSERT_ARTIST)?;
             let mut album_artist = tx.prepare_cached(
                 "INSERT INTO album_artist (album_id, artist_id, position) VALUES (?1, ?2, ?3)",
@@ -226,8 +234,9 @@ impl Database {
                     |row| row.get(0),
                 )?;
                 kept.insert(id);
-                for track_id in &album.track_ids {
-                    link.execute(params![id, track_id])?;
+                for (position, track_id) in album.track_ids.iter().enumerate() {
+                    let disc = album.track_discs.get(position).copied();
+                    link.execute(params![id, track_id, position as i64, disc])?;
                 }
                 for (position, name) in album.album_artists.iter().enumerate() {
                     let artist_id: i64 = upsert_artist.query_row(
@@ -300,7 +309,8 @@ impl Database {
             "SELECT {TRACK_COLUMNS}, {TRACK_ALBUM_COLUMNS} FROM track t
                LEFT JOIN album a ON a.id = t.album_id
              WHERE t.album_id = ?1
-             ORDER BY COALESCE(t.disc, 1), COALESCE(t.number, 1000000), lower(t.title), t.path"
+             ORDER BY t.album_position, COALESCE(t.disc, 1), COALESCE(t.number, 1000000),
+               lower(t.title), t.path"
         ))?;
         let rows = stmt.query_map([album_id], track)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -404,9 +414,9 @@ const TRACK_COLUMNS: &str = "t.id, t.path, t.added, t.title, t.artist, t.album, 
     t.mb_album_id, t.mb_release_group_id, t.mb_track_id, t.mb_album_artist_ids,
     t.release_comment, t.release_type, t.compilation, t.isrc, t.bpm, t.lyrics_synced,
     t.lyrics_excerpt, t.replaygain_track, t.replaygain_album, t.duration_ms, t.format,
-    t.bitrate, t.sample_rate, t.bit_depth, t.channels, t.cover_key";
-const TRACK_COLUMN_COUNT: usize = 34;
-const TRACK_ALBUM_COLUMNS: &str = "t.album_id, a.title, a.artist_credit, a.cover_key";
+    t.bitrate, t.sample_rate, t.bit_depth, t.channels, t.cover_key, t.barcode";
+const TRACK_COLUMN_COUNT: usize = 35;
+const TRACK_ALBUM_COLUMNS: &str = "t.album_id, a.title, a.artist_credit, a.cover_key, t.album_disc";
 
 const ALBUM_COLUMNS: &str = "id, group_key, title, sort_title, edition, artist_credit,
     artist_sort, year, release_type, soundtrack, compilation, track_count, duration_ms,
@@ -416,9 +426,10 @@ const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, 
     album_artist, album_artists, album_artist_sort, disc, number, year, genres, composer,
     mb_album_id, mb_release_group_id, mb_track_id, mb_album_artist_ids, release_comment,
     release_type, compilation, isrc, bpm, lyrics_synced, lyrics_excerpt, replaygain_track,
-    replaygain_album, duration_ms, format, bitrate, sample_rate, bit_depth, channels, cover_key)
+    replaygain_album, duration_ms, format, bitrate, sample_rate, bit_depth, channels, cover_key,
+    barcode)
   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)
+    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)
   ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size,
     title = excluded.title, artist = excluded.artist, album = excluded.album,
     album_artist = excluded.album_artist, album_artists = excluded.album_artists,
@@ -433,7 +444,7 @@ const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, 
     replaygain_track = excluded.replaygain_track, replaygain_album = excluded.replaygain_album,
     duration_ms = excluded.duration_ms, format = excluded.format, bitrate = excluded.bitrate,
     sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth,
-    channels = excluded.channels, cover_key = excluded.cover_key";
+    channels = excluded.channels, cover_key = excluded.cover_key, barcode = excluded.barcode";
 
 const UPSERT_ALBUM: &str = "INSERT INTO album (key, group_key, title, sort_title, edition,
     artist_credit, artist_sort, year, release_type, soundtrack, compilation, mb_album_id,
@@ -480,6 +491,7 @@ fn track_record(row: &Row) -> rusqlite::Result<TrackRecord> {
             release_type: row.get(19)?,
             compilation: row.get(20)?,
             isrc: row.get(21)?,
+            barcode: row.get(34)?,
             bpm: row.get(22)?,
             lyrics: lyrics_synced
                 .zip(lyrics_excerpt)
@@ -505,6 +517,7 @@ fn track(row: &Row) -> rusqlite::Result<Track> {
         album_title: row.get(n + 1)?,
         album_artist: row.get(n + 2)?,
         album_cover_key: row.get(n + 3)?,
+        album_disc: row.get(n + 4)?,
     })
 }
 

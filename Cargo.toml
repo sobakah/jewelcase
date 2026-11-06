@@ -37,3 +37,10 @@ tempfile = "3"
 
 [profile.release]
 lto = "thin"
+
+# Cover resizing is painfully slow unoptimized; keep debug builds usable.
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3

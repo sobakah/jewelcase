@@ -242,6 +242,7 @@ impl Library {
             async move {
                 while let Ok(message) = rx.recv().await {
                     match message {
+                        ScanMessage::Progress(ScanProgress::AlbumsReady) => library.reload(),
                         ScanMessage::Progress(progress) => library.show_progress(progress),
                         ScanMessage::Done(result) => {
                             library.scan_done(result);
@@ -263,6 +264,7 @@ impl Library {
             ScanProgress::Covers { done, total } => gettext("Preparing covers… {done} of {total}")
                 .replace("{done}", &done.to_string())
                 .replace("{total}", &total.to_string()),
+            ScanProgress::AlbumsReady => return,
         };
         self.set_scan_status(&status);
     }

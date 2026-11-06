@@ -31,6 +31,7 @@ pub struct TrackTags {
     pub release_type: Option<String>,
     pub compilation: bool,
     pub isrc: Option<String>,
+    pub barcode: Option<String>,
     pub bpm: Option<f64>,
     pub lyrics: Option<Lyrics>,
     pub replaygain_track: Option<f64>,
@@ -134,13 +135,17 @@ fn fill_from_tag(tags: &mut TrackTags, tag: &Tag) {
     .find_map(|key| text(key).as_deref().and_then(parse_year));
     tags.genres = texts(ItemKey::Genre);
     tags.composer = text(ItemKey::Composer);
-    tags.mb_album_id = text(ItemKey::MusicBrainzReleaseId);
-    tags.mb_release_group_id = text(ItemKey::MusicBrainzReleaseGroupId);
-    tags.mb_track_id = text(ItemKey::MusicBrainzTrackId);
-    tags.mb_album_artist_ids = texts(ItemKey::MusicBrainzReleaseArtistId);
+    tags.mb_album_id = text(ItemKey::MusicBrainzReleaseId).and_then(|v| mbid(&v));
+    tags.mb_release_group_id = text(ItemKey::MusicBrainzReleaseGroupId).and_then(|v| mbid(&v));
+    tags.mb_track_id = text(ItemKey::MusicBrainzTrackId).and_then(|v| mbid(&v));
+    tags.mb_album_artist_ids = texts(ItemKey::MusicBrainzReleaseArtistId)
+        .iter()
+        .filter_map(|v| mbid(v))
+        .collect();
     tags.release_type = text(ItemKey::MusicBrainzReleaseType);
     tags.compilation = text(ItemKey::FlagCompilation).is_some_and(|v| v == "1" || v == "true");
     tags.isrc = text(ItemKey::Isrc).or_else(|| text(ItemKey::AppleXid).and_then(isrc_from_xid));
+    tags.barcode = text(ItemKey::Barcode);
     tags.bpm = text(ItemKey::Bpm)
         .or_else(|| text(ItemKey::IntegerBpm))
         .and_then(|v| v.parse::<f64>().ok())
@@ -210,6 +215,25 @@ fn format_name(file_type: FileType) -> &'static str {
     }
 }
 
+/// The MusicBrainz ID (a UUID) in a tag value, lowercased. Tolerates
+/// slips like `MUSICBRAINZ_ALBUMID=<uuid>` or surrounding text; anything
+/// without a UUID is ignored.
+fn mbid(value: &str) -> Option<String> {
+    let is_uuid = |s: &str| {
+        s.len() == 36
+            && s.char_indices().all(|(i, c)| match i {
+                8 | 13 | 18 | 23 => c == '-',
+                _ => c.is_ascii_hexdigit(),
+            })
+    };
+    let value = value.trim();
+    (0..value.len().saturating_sub(35))
+        .rev()
+        .filter_map(|start| value.get(start..start + 36))
+        .find(|candidate| is_uuid(candidate))
+        .map(str::to_lowercase)
+}
+
 fn parse_year(date: &str) -> Option<i32> {
     let digits: String = date.chars().take_while(char::is_ascii_digit).collect();
     (digits.len() == 4).then(|| digits.parse().ok()).flatten()
@@ -269,6 +293,19 @@ mod tests {
         assert_eq!(parse_year("2021-05-03"), Some(2021));
         assert_eq!(parse_year("1999"), Some(1999));
         assert_eq!(parse_year("99"), None);
+    }
+
+    #[test]
+    fn mbids() {
+        let id = "4cca6504-4aa2-4b6a-98e3-2f112210d5be";
+        assert_eq!(mbid(id).as_deref(), Some(id));
+        assert_eq!(
+            mbid(&format!("MUSICBRAINZ_ALBUMID={id}")).as_deref(),
+            Some(id)
+        );
+        assert_eq!(mbid(&id.to_uppercase()).as_deref(), Some(id));
+        assert_eq!(mbid("not an id"), None);
+        assert_eq!(mbid(""), None);
     }
 
     #[test]
