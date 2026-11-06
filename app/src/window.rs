@@ -53,7 +53,9 @@ mod imp {
         #[template_child]
         pub album_panel: TemplateChild<AlbumPanel>,
         #[template_child]
-        pub artists_nav: TemplateChild<adw::NavigationView>,
+        pub artist_split: TemplateChild<adw::OverlaySplitView>,
+        #[template_child]
+        pub artist_holder: TemplateChild<adw::Bin>,
         #[template_child]
         pub artists_stack: TemplateChild<gtk::Stack>,
         #[template_child]
@@ -219,6 +221,7 @@ mod imp {
             obj.setup_albums();
             obj.setup_artists();
             obj.setup_playlists();
+            obj.setup_artist_overlay();
             obj.setup_messages();
             obj.setup_tools();
 
@@ -540,26 +543,9 @@ impl GatefoldWindow {
         let imp = self.imp();
         imp.bottom_sheet.set_open(false);
         imp.search_bar.set_search_mode(false);
-        let split = imp.playlist_split.get();
-        let laid_out = split.is_mapped();
         imp.stack.set_visible_child_name("playlists");
         imp.playlist_panel.set_playlist(playlist);
-        if laid_out {
-            split.set_show_sidebar(true);
-            return;
-        }
-        // Revealing the sidebar before the split view has had its first
-        // allocation makes it hand the panel a bogus negative width, so
-        // wait for one frame to be laid out.
-        let ticks = std::cell::Cell::new(0);
-        split.add_tick_callback(move |split, _| {
-            ticks.set(ticks.get() + 1);
-            if ticks.get() < 2 {
-                return glib::ControlFlow::Continue;
-            }
-            split.set_show_sidebar(true);
-            glib::ControlFlow::Break
-        });
+        reveal_sidebar(&imp.playlist_split);
     }
 
     async fn import_playlist(&self) {
@@ -629,21 +615,66 @@ impl GatefoldWindow {
         imp.bottom_sheet.set_open(false);
         imp.search_bar.set_search_mode(false);
         imp.stack.set_visible_child_name("artists");
-        if imp
-            .artists_nav
-            .visible_page()
-            .and_downcast::<ArtistPage>()
+        if self
+            .artist_page()
             .is_some_and(|page| page.artist_id() == artist_id)
         {
+            reveal_sidebar(&imp.artist_split);
             return;
         }
-        imp.artists_nav.pop_to_tag("artists");
         let page = ArtistPage::new(artist_id);
         imp.split_view
             .bind_property("collapsed", &page.split_view(), "collapsed")
             .sync_create()
             .build();
-        imp.artists_nav.push(&page);
+        page.connect_local(
+            "close",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |_| {
+                    window.imp().artist_split.set_show_sidebar(false);
+                    None
+                }
+            ),
+        );
+        imp.artist_holder.set_child(Some(&page));
+        reveal_sidebar(&imp.artist_split);
+    }
+
+    /// A collapsed split view ignores the width fraction, so keep the
+    /// artist panel at most of the window, with some grid showing beside it
+    /// (or all of it on narrow windows).
+    fn setup_artist_overlay(&self) {
+        self.connect_realize(|window| {
+            let Some(surface) = window.surface() else {
+                return;
+            };
+            let update = glib::clone!(
+                #[weak]
+                window,
+                move |surface: &gtk::gdk::Surface| {
+                    let width = surface.width();
+                    let panel = if width < 600 { width } else { width * 88 / 100 };
+                    window
+                        .imp()
+                        .artist_split
+                        .set_max_sidebar_width(f64::from(panel));
+                }
+            );
+            update(&surface);
+            surface.connect_width_notify(update);
+        });
+    }
+
+    fn artist_page(&self) -> Option<ArtistPage> {
+        self.imp()
+            .artist_holder
+            .child()
+            .and_downcast::<ArtistPage>()
     }
 
     fn setup_tools(&self) {
@@ -814,10 +845,11 @@ impl GatefoldWindow {
         self.announce_imported_albums();
         // Leave the page of an artist that's no longer in the library.
         let library = GatefoldApplication::get().library();
-        if let Some(page) = imp.artists_nav.visible_page().and_downcast::<ArtistPage>()
+        if let Some(page) = self.artist_page()
             && library.artist(page.artist_id()).is_none()
         {
-            imp.artists_nav.pop_to_tag("artists");
+            imp.artist_split.set_show_sidebar(false);
+            imp.artist_holder.set_child(None::<&gtk::Widget>);
         }
         self.update_artists_page();
         // Show the reloaded version of the open album, or close the panel.
@@ -1032,4 +1064,23 @@ fn imp_toast(window: &GatefoldWindow, message: &str) {
         .imp()
         .toast_overlay
         .add_toast(adw::Toast::new(message));
+}
+
+/// Shows a split view's sidebar. Revealing it before the split view has had
+/// its first allocation (its page was just made visible) makes it hand the
+/// sidebar a bogus negative width, so then wait for one frame.
+fn reveal_sidebar(split: &adw::OverlaySplitView) {
+    if split.is_mapped() && split.width() > 0 {
+        split.set_show_sidebar(true);
+        return;
+    }
+    let ticks = std::cell::Cell::new(0);
+    split.add_tick_callback(move |split, _| {
+        ticks.set(ticks.get() + 1);
+        if ticks.get() < 2 {
+            return glib::ControlFlow::Continue;
+        }
+        split.set_show_sidebar(true);
+        glib::ControlFlow::Break
+    });
 }

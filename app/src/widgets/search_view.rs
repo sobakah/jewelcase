@@ -142,17 +142,14 @@ impl SearchView {
                 continue;
             };
             let info = artist.artist();
-            let avatar = adw::Avatar::builder()
-                .size(40)
-                .text(&info.name)
-                .show_initials(true)
-                .build();
+            let picture = Self::small_cover(None);
+            picture.set_placeholder_icon("avatar-default-symbolic");
             let portrait = info
                 .portrait_key
                 .as_deref()
                 .and_then(|k| covers::portrait(k, CoverSize::Grid));
-            avatar.set_custom_image(portrait.as_ref());
-            let row = Self::row(&info.name, &format::song_count(info.track_count), &avatar);
+            picture.set_texture(portrait.as_ref());
+            let row = Self::row(&info.name, &format::song_count(info.track_count), &picture);
             row.set_action_name(Some("win.show-artist"));
             row.set_action_target_value(Some(&id.to_variant()));
             list.append(&row);

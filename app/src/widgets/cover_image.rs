@@ -160,9 +160,20 @@ impl CoverImage {
             _ => CoverSize::Grid,
         };
         let texture = key.and_then(|key| covers::texture(key, size));
-        imp.picture.set_paintable(texture.as_ref());
+        self.set_texture(texture.as_ref());
+    }
+
+    /// Shows an image (e.g. an artist portrait), or the placeholder.
+    pub fn set_texture(&self, texture: Option<&gtk::gdk::Texture>) {
+        let imp = self.imp();
+        imp.picture.set_paintable(texture);
         imp.picture.set_visible(texture.is_some());
         imp.placeholder.set_visible(texture.is_none());
+    }
+
+    /// The icon shown without an image (default: a music folder).
+    pub fn set_placeholder_icon(&self, icon_name: &str) {
+        self.imp().placeholder.set_icon_name(Some(icon_name));
     }
 
     /// The accessible label, e.g. "Cover of 25".

@@ -1,6 +1,6 @@
 //! An artist's page (CONCEPT.md §4.2): portrait, counts, Play all, links,
 //! a short bio, and the albums grouped by release type, plus
-//! Collaborations and a collapsed "Appears on".
+//! Collaborations and "Appears on".
 
 use std::cell::{Cell, RefCell};
 
@@ -13,10 +13,13 @@ use gatefold_core::library::titles::ReleaseType;
 use gettextrs::{gettext, ngettext};
 use gtk::{gio, glib};
 
-use super::{AlbumPanel, AlbumTile};
+use super::{AlbumPanel, AlbumTile, CoverImage};
 use crate::application::GatefoldApplication;
 use crate::objects::{AlbumObject, ArtistObject, TrackObject};
 use crate::{covers, format};
+
+/// The width of an album tile on artist pages, with its spacing.
+const TILE_WIDTH: u32 = 198;
 
 mod imp {
     use super::*;
@@ -29,7 +32,9 @@ mod imp {
         #[template_child]
         pub split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
-        pub avatar: TemplateChild<adw::Avatar>,
+        pub portrait_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub portrait: TemplateChild<CoverImage>,
         #[template_child]
         pub name: TemplateChild<gtk::Label>,
         #[template_child]
@@ -37,7 +42,7 @@ mod imp {
         #[template_child]
         pub counts: TemplateChild<gtk::Label>,
         #[template_child]
-        pub links: TemplateChild<gtk::Box>,
+        pub links: TemplateChild<adw::WrapBox>,
         #[template_child]
         pub bio_box: TemplateChild<gtk::Box>,
         #[template_child]
@@ -53,17 +58,24 @@ mod imp {
         pub artist: RefCell<Option<ArtistObject>>,
         /// The artist's own albums in page order, for Play All.
         pub own_albums: RefCell<Vec<AlbumObject>>,
+        /// The album grids, which share one column count.
+        pub flows: RefCell<Vec<gtk::FlowBox>>,
+        pub columns: Cell<u32>,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for ArtistPage {
         const NAME: &'static str = "GatefoldArtistPage";
         type Type = super::ArtistPage;
-        type ParentType = adw::NavigationPage;
+        type ParentType = adw::Bin;
 
         fn class_init(klass: &mut Self::Class) {
             AlbumPanel::ensure_type();
+            CoverImage::ensure_type();
             klass.bind_template();
+            klass.install_action("artist.close", None, |page, _, _| {
+                page.emit_by_name::<()>("close", &[]);
+            });
             klass.install_action("artist.play", None, |page, _, _| page.play_all(false));
             klass.install_action("artist.shuffle", None, |page, _, _| page.play_all(true));
             klass.install_action_async("artist.choose-image", None, |page, _, _| async move {
@@ -108,9 +120,18 @@ mod imp {
     }
 
     impl ObjectImpl for ArtistPage {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: std::sync::OnceLock<Vec<glib::subclass::Signal>> =
+                std::sync::OnceLock::new();
+            SIGNALS.get_or_init(|| vec![glib::subclass::Signal::builder("close").build()])
+        }
+
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            self.portrait
+                .set_placeholder_icon("avatar-default-symbolic");
+            obj.set_layout_manager(None::<gtk::LayoutManager>);
             let library = GatefoldApplication::get().library();
             library.connect_local(
                 "artist-changed",
@@ -179,13 +200,48 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for ArtistPage {}
-    impl NavigationPageImpl for ArtistPage {}
+    // The page lays out its child itself (no layout manager, see
+    // constructed()) to learn its width.
+    impl WidgetImpl for ArtistPage {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            self.obj()
+                .child()
+                .map_or(gtk::SizeRequestMode::ConstantSize, |c| c.request_mode())
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            self.obj()
+                .child()
+                .map_or((0, 0, -1, -1), |c| c.measure(orientation, for_size))
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.obj().child() {
+                child.allocate(width, height, baseline, None);
+            }
+            // Same tile size in every section: as many columns as fit
+            // tiles of about TILE_WIDTH, also for sections with few releases.
+            let available = self.sections.width();
+            if available <= 0 {
+                return;
+            }
+            let columns = (available as u32 / TILE_WIDTH).clamp(2, 8);
+            if self.columns.replace(columns) != columns {
+                let obj = self.obj().downgrade();
+                glib::idle_add_local_once(move || {
+                    if let Some(obj) = obj.upgrade() {
+                        obj.apply_columns();
+                    }
+                });
+            }
+        }
+    }
+    impl BinImpl for ArtistPage {}
 }
 
 glib::wrapper! {
     pub struct ArtistPage(ObjectSubclass<imp::ArtistPage>)
-        @extends gtk::Widget, adw::NavigationPage,
+        @extends gtk::Widget, adw::Bin,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
@@ -225,18 +281,17 @@ impl ArtistPage {
             return;
         };
         let info = artist.artist();
-        self.set_title(&info.name);
         imp.name.set_label(&info.name);
         let latin = library.aliases().latin_name(&info.name);
         imp.latin_name.set_visible(latin.is_some());
         imp.latin_name
             .set_label(latin.as_deref().unwrap_or_default());
-        imp.avatar.set_text(Some(&info.name));
         let portrait = info
             .portrait_key
             .as_deref()
             .and_then(|key| covers::portrait(key, CoverSize::Panel));
-        imp.avatar.set_custom_image(portrait.as_ref());
+        imp.portrait.set_texture(portrait.as_ref());
+        imp.portrait.set_label(&info.name);
         // Commons images need their attribution (CONCEPT.md §8).
         let attribution = info
             .meta
@@ -244,7 +299,11 @@ impl ArtistPage {
             .is_none()
             .then(|| info.meta.portrait_attribution.clone())
             .flatten();
-        imp.avatar.set_tooltip_text(attribution.as_deref());
+        let tooltip = match attribution {
+            Some(attribution) => format!("{}\n{attribution}", gettext("Change Image")),
+            None => gettext("Change Image"),
+        };
+        imp.portrait_button.set_tooltip_text(Some(&tooltip));
 
         imp.counts.set_label(&format!(
             "{} · {}",
@@ -324,6 +383,7 @@ impl ArtistPage {
         while let Some(child) = imp.sections.first_child() {
             imp.sections.remove(&child);
         }
+        imp.flows.borrow_mut().clear();
         let library = GatefoldApplication::get().library();
         let albums = library.artist_albums(self.artist_id());
 
@@ -374,11 +434,15 @@ impl ArtistPage {
                 .css_classes(["title-4"])
                 .build(),
         );
+        // A fixed column count (see size_allocate), so a section with few
+        // releases doesn't stretch its tiles: albums, EPs and singles all
+        // look the same size.
+        let columns = self.imp().columns.get().max(2);
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            .min_children_per_line(2)
-            .max_children_per_line(8)
+            .min_children_per_line(columns)
+            .max_children_per_line(columns)
             .column_spacing(18)
             .row_spacing(18)
             .activate_on_single_click(true)
@@ -401,6 +465,15 @@ impl ArtistPage {
         ));
         section.append(&flow);
         self.imp().sections.append(&section);
+        self.imp().flows.borrow_mut().push(flow);
+    }
+
+    fn apply_columns(&self) {
+        let columns = self.imp().columns.get().max(2);
+        for flow in self.imp().flows.borrow().iter() {
+            flow.set_min_children_per_line(columns);
+            flow.set_max_children_per_line(columns);
+        }
     }
 
     fn add_appears_on(&self, tracks: &[TrackObject]) {
@@ -410,15 +483,30 @@ impl ArtistPage {
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
-            .margin_top(12)
             .build();
         for track in tracks {
             let row = adw::ActionRow::builder()
                 .title(track.title())
-                .subtitle(track.track().album_title.clone().unwrap_or_default())
+                .subtitle(
+                    [
+                        track.track().album_title.clone(),
+                        track.track().album_artist.clone(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" — "),
+                )
                 .use_markup(false)
                 .activatable(true)
                 .build();
+            let cover: CoverImage = glib::Object::builder()
+                .property("min-size", 40)
+                .property("natural-size", 40)
+                .build();
+            cover.set_cover(track.cover_key());
+            cover.set_valign(gtk::Align::Center);
+            row.add_prefix(&cover);
             row.add_suffix(
                 &gtk::Label::builder()
                     .label(format::duration(track.duration_ms()))
@@ -446,16 +534,23 @@ impl ArtistPage {
                 }
             }
         ));
-        // Collapsed by default (§4.2).
-        let expander = gtk::Expander::builder()
-            .label(
-                ngettext("Appears On ({})", "Appears On ({})", count as u32)
-                    .replace("{}", &count.to_string()),
-            )
-            .child(&list)
+        // Always shown, after the artist's own releases (§4.2).
+        let section = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
             .build();
-        expander.add_css_class("appears-on");
-        self.imp().sections.append(&expander);
+        section.append(
+            &gtk::Label::builder()
+                .label(
+                    ngettext("Appears On ({})", "Appears On ({})", count as u32)
+                        .replace("{}", &count.to_string()),
+                )
+                .xalign(0.0)
+                .css_classes(["title-4"])
+                .build(),
+        );
+        section.append(&list);
+        self.imp().sections.append(&section);
     }
 
     fn show_album(&self, album: &AlbumObject) {

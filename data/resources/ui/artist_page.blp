@@ -1,19 +1,25 @@
 using Gtk 4.0;
 using Adw 1;
+// An artist's page (CONCEPT.md §4.2): a panel like the album panel, over
+// most of the artist grid, which stays visible (dimmed) behind it.
+template $GatefoldArtistPage: Adw.Bin {
+  styles [
+    "album-panel",
+    "artist-panel",
+  ]
 
-// An artist's page, pushed onto the Artists navigation view (CONCEPT.md §4.2).
-template $GatefoldArtistPage: Adw.NavigationPage {
   child: Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
+      show-title: false;
       show-start-title-buttons: false;
       show-end-title-buttons: false;
 
       [end]
-      Gtk.MenuButton {
-        icon-name: "view-more-symbolic";
-        tooltip-text: _("Artist Menu");
-        menu-model: artist_menu;
+      Gtk.Button {
+        icon-name: "window-close-symbolic";
+        tooltip-text: _("Close");
+        action-name: "artist.close";
       }
 
       styles [
@@ -41,7 +47,6 @@ template $GatefoldArtistPage: Adw.NavigationPage {
           maximum-size: 1100;
           margin-start: 24;
           margin-end: 24;
-          margin-top: 12;
           margin-bottom: 24;
 
           child: Gtk.Box {
@@ -50,11 +55,22 @@ template $GatefoldArtistPage: Adw.NavigationPage {
 
             Gtk.Box {
               spacing: 24;
-
-              Adw.Avatar avatar {
-                size: 160;
-                show-initials: true;
+              // Clicking the portrait offers the image choices.
+              Gtk.MenuButton portrait_button {
+                menu-model: image_menu;
+                halign: start;
                 valign: start;
+
+                child: $GatefoldCoverImage portrait {
+                  min-size: 160;
+                  natural-size: 180;
+                  kind: "panel";
+                };
+
+                styles [
+                  "flat",
+                  "portrait-button",
+                ]
               }
 
               Gtk.Box {
@@ -65,6 +81,7 @@ template $GatefoldArtistPage: Adw.NavigationPage {
 
                 Gtk.Label name {
                   wrap: true;
+                  wrap-mode: word_char;
                   xalign: 0;
 
                   styles [
@@ -92,8 +109,9 @@ template $GatefoldArtistPage: Adw.NavigationPage {
                   ]
                 }
 
-                Gtk.Box {
-                  spacing: 6;
+                Adw.WrapBox {
+                  child-spacing: 6;
+                  line-spacing: 6;
                   margin-top: 6;
 
                   Gtk.Button {
@@ -121,10 +139,47 @@ template $GatefoldArtistPage: Adw.NavigationPage {
                       "circular",
                     ]
                   }
+
+                  Gtk.Button {
+                    icon-name: "edit-find-symbolic";
+                    tooltip-text: _("Identify Artist…");
+                    action-name: "artist.identify";
+                    valign: center;
+
+                    styles [
+                      "circular",
+                      "flat",
+                    ]
+                  }
+
+                  Gtk.Button {
+                    icon-name: "view-refresh-symbolic";
+                    tooltip-text: _("Look Up Again");
+                    action-name: "artist.lookup";
+                    valign: center;
+
+                    styles [
+                      "circular",
+                      "flat",
+                    ]
+                  }
+
+                  Gtk.Button {
+                    icon-name: "document-edit-symbolic";
+                    tooltip-text: _("Edit Album Artist Tags…");
+                    action-name: "artist.edit-tags";
+                    valign: center;
+
+                    styles [
+                      "circular",
+                      "flat",
+                    ]
+                  }
                 }
 
-                Gtk.Box links {
-                  spacing: 6;
+                Adw.WrapBox links {
+                  child-spacing: 6;
+                  line-spacing: 6;
                   margin-top: 6;
                   visible: false;
                 }
@@ -168,7 +223,7 @@ template $GatefoldArtistPage: Adw.NavigationPage {
   };
 }
 
-menu artist_menu {
+menu image_menu {
   section {
     item {
       label: _("_Choose Image…");
@@ -183,25 +238,6 @@ menu artist_menu {
     item {
       label: _("_Reset to Automatic");
       action: "artist.reset-portrait";
-    }
-  }
-
-  section {
-    item {
-      label: _("_Identify Artist…");
-      action: "artist.identify";
-    }
-
-    item {
-      label: _("_Look Up Again");
-      action: "artist.lookup";
-    }
-  }
-
-  section {
-    item {
-      label: _("_Edit Album Artist Tags…");
-      action: "artist.edit-tags";
     }
   }
 }

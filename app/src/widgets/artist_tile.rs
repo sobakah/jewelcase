@@ -1,10 +1,12 @@
-//! A tile in the artist grid: circular portrait and name (CONCEPT.md §4.1).
+//! A tile in the artist grid: portrait (a rounded square, like album
+//! covers) and name (CONCEPT.md §4.1).
 
 use adw::prelude::*;
 use gatefold_core::library::covers::CoverSize;
 use gtk::glib;
 use gtk::subclass::prelude::*;
 
+use super::CoverImage;
 use crate::covers;
 use crate::objects::ArtistObject;
 
@@ -13,22 +15,21 @@ mod imp {
 
     #[derive(Debug)]
     pub struct ArtistTile {
-        pub avatar: adw::Avatar,
+        pub portrait: CoverImage,
         pub name: gtk::Label,
     }
 
     impl Default for ArtistTile {
         fn default() -> Self {
             Self {
-                avatar: adw::Avatar::builder()
-                    .size(140)
-                    .show_initials(true)
-                    .halign(gtk::Align::Center)
+                portrait: glib::Object::builder()
+                    .property("min-size", 120)
+                    .property("natural-size", 180)
                     .build(),
                 name: gtk::Label::builder()
+                    .xalign(0.0)
                     .ellipsize(gtk::pango::EllipsizeMode::End)
-                    .justify(gtk::Justification::Center)
-                    .css_classes(["artist-name"])
+                    .css_classes(["album-title", "artist-name"])
                     .build(),
             }
         }
@@ -46,9 +47,12 @@ mod imp {
             self.parent_constructed();
             let obj = self.obj();
             obj.set_orientation(gtk::Orientation::Vertical);
-            obj.set_spacing(9);
+            obj.set_spacing(3);
             obj.add_css_class("artist-tile");
-            obj.append(&self.avatar);
+            self.portrait
+                .set_placeholder_icon("avatar-default-symbolic");
+            self.portrait.set_margin_bottom(6);
+            obj.append(&self.portrait);
             obj.append(&self.name);
         }
     }
@@ -72,12 +76,12 @@ impl ArtistTile {
         let imp = self.imp();
         let info = artist.artist();
         imp.name.set_label(&info.name);
-        imp.avatar.set_text(Some(&info.name));
         let portrait = info
             .portrait_key
             .as_deref()
             .and_then(|key| covers::portrait(key, CoverSize::Grid));
-        imp.avatar.set_custom_image(portrait.as_ref());
+        imp.portrait.set_texture(portrait.as_ref());
+        imp.portrait.set_label(&info.name);
         self.set_tooltip_text(Some(&info.name));
     }
 }
