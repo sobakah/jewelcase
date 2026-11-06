@@ -134,6 +134,14 @@ impl Client {
             return Ok(info);
         };
         info.links = self.musicbrainz_links(mbid)?;
+        // MusicBrainz often lacks the Wikidata link that Wikidata itself
+        // has (its "MusicBrainz artist ID", P434): look it up that way.
+        if providers.wikidata && info.links.wikidata_id.is_none() {
+            match self.wikidata_by_mbid(mbid) {
+                Ok(qid) => info.links.wikidata_id = qid,
+                Err(err) => tracing::info!("Wikidata search for {mbid} failed: {err}"),
+            }
+        }
         info.portraits = self.portrait_candidates(mbid, &info.links, providers);
 
         if providers.wikidata
@@ -210,6 +218,22 @@ impl Client {
             }
         }
         candidates
+    }
+
+    /// The Wikidata item that names this MusicBrainz artist (P434), if
+    /// exactly one does.
+    fn wikidata_by_mbid(&self, mbid: &str) -> Result<Option<String>> {
+        let json = self.json(
+            "https://www.wikidata.org/w/api.php",
+            &[
+                ("action", "query"),
+                ("list", "search"),
+                ("srsearch", &format!("haswbstatement:P434={mbid}")),
+                ("srlimit", "2"),
+                ("format", "json"),
+            ],
+        )?;
+        Ok(parse_wikidata_search(&json))
     }
 
     fn wikidata(&self, qid: &str, language: &str) -> Result<WikidataInfo> {
@@ -351,6 +375,19 @@ pub fn artist_from_release(release: &Value, name: &str) -> Option<String> {
     // A single credited artist whose release is tagged with our name.
     match artists.as_slice() {
         [(id, _, _)] => Some(id.clone()),
+        _ => None,
+    }
+}
+
+/// The single item of a Wikidata search, or None (none, or ambiguous).
+pub fn parse_wikidata_search(json: &Value) -> Option<String> {
+    let hits = json.pointer("/query/search")?.as_array()?;
+    match hits.as_slice() {
+        [only] => only
+            .get("title")
+            .and_then(Value::as_str)
+            .filter(|t| t.starts_with('Q'))
+            .map(str::to_owned),
         _ => None,
     }
 }
@@ -589,6 +626,16 @@ mod tests {
             artist_from_release(&single, "방탄소년단").as_deref(),
             Some("bts")
         );
+    }
+
+    #[test]
+    fn wikidata_search_takes_only_a_single_hit() {
+        let one = serde_json::json!({"query": {"search": [{"title": "Q62396954"}]}});
+        assert_eq!(parse_wikidata_search(&one).as_deref(), Some("Q62396954"));
+        let two = serde_json::json!({"query": {"search": [{"title": "Q1"}, {"title": "Q2"}]}});
+        assert_eq!(parse_wikidata_search(&two), None);
+        let none = serde_json::json!({"query": {"search": []}});
+        assert_eq!(parse_wikidata_search(&none), None);
     }
 
     #[test]
