@@ -129,9 +129,7 @@ fn is_disc_folder(name: &str) -> bool {
 /// Merges the affected entries of `by_key` and returns the disc of each
 /// moved track. When the parts' disc numbers collide (each part says
 /// "disc 1"), the parts become consecutive discs, ordered by release key.
-fn merge_split_releases(
-    by_key: &mut HashMap<String, Vec<&TrackRecord>>,
-) -> HashMap<i64, u32> {
+fn merge_split_releases(by_key: &mut HashMap<String, Vec<&TrackRecord>>) -> HashMap<i64, u32> {
     let mut parts: HashMap<(PathBuf, String, String), BTreeSet<String>> = HashMap::new();
     for (key, tracks) in by_key.iter() {
         for track in tracks {

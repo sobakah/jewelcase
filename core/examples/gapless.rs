@@ -27,7 +27,11 @@ fn main() {
         player.seek(duration.saturating_sub(2000));
     }
     player.set_next(Some((b, 1)));
-    for _ in 0..12 {
+    let steps: usize = std::env::var("STEPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(12);
+    for _ in 0..steps {
         std::thread::sleep(Duration::from_millis(500));
         while let Ok(event) = events.try_recv() {
             player.handle_event(&event);

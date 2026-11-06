@@ -510,6 +510,14 @@ impl Player {
                 }
             }
             PlayerEvent::EndOfStream => {
+                // No gapless hand-over happened (see playback.rs): play the
+                // next track now, if there is one.
+                let next = imp.queue.borrow_mut().advance(true).is_some();
+                if next {
+                    self.load_current(true, 0);
+                    self.queue_changed();
+                    return;
+                }
                 // The queue ran out: rewind to its start, ready to play again.
                 if let Some(engine) = self.engine() {
                     engine.stop();

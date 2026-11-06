@@ -8,6 +8,12 @@
 //!   Album or track gain can switch at any time; turning ReplayGain on or
 //!   off applies from the next [`Player::load`].
 //!
+//! - **M4A workaround:** after a seek inside an MP4 file, GStreamer's next
+//!   gapless track starts only after a delay as long as the seek jump (seen
+//!   with GStreamer 1.28, playbin and playbin3, any next format). So after
+//!   such a seek the hand-over is skipped: the track ends with
+//!   [`PlayerEvent::EndOfStream`] and the caller loads the next one.
+//!
 //! Bus messages are forwarded from GStreamer's threads through a channel,
 //! so this module doesn't need a GLib main loop.
 
@@ -38,11 +44,27 @@ pub enum PlaybackError {
 /// The URI and queue item uid of the track to play next.
 type NextTrack = Option<(String, u64)>;
 
+/// What decides whether the next track may start gaplessly.
+#[derive(Debug, Default)]
+struct GaplessState {
+    current_is_mp4: bool,
+    /// The current MP4 stream was seeked (see the module docs).
+    seeked_mp4: bool,
+}
+
+fn is_mp4(uri: &str) -> bool {
+    let lower = uri.to_lowercase();
+    [".m4a", ".mp4", ".m4b", ".m4p"]
+        .iter()
+        .any(|ext| lower.ends_with(ext))
+}
+
 pub struct Player {
     playbin: gst::Element,
     filter: gst::Element,
     rgvolume: gst::Element,
     next: Arc<Mutex<NextTrack>>,
+    gapless: Arc<Mutex<GaplessState>>,
     pending_seek_ms: Mutex<Option<u64>>,
     replaygain: Mutex<bool>,
 }
@@ -88,11 +110,19 @@ impl Player {
         });
 
         let next: Arc<Mutex<NextTrack>> = Arc::default();
+        let gapless: Arc<Mutex<GaplessState>> = Arc::default();
         let next_slot = next.clone();
+        let gapless_state = gapless.clone();
         playbin.connect("about-to-finish", false, move |values| {
             let playbin = values[0].get::<gst::Element>().ok()?;
+            let mut state = gapless_state.lock().ok()?;
+            if state.seeked_mp4 {
+                // Ends with EOS instead; the caller loads the next track.
+                return None;
+            }
             let next = next_slot.lock().ok()?.take();
             if let Some((uri, uid)) = next {
+                state.current_is_mp4 = is_mp4(&uri);
                 playbin.set_property("uri", &uri);
                 let _ = tx.send_blocking(PlayerEvent::NextQueued(uid));
             }
@@ -104,6 +134,7 @@ impl Player {
             filter,
             rgvolume,
             next,
+            gapless,
             pending_seek_ms: Mutex::new(None),
             replaygain: Mutex::new(true),
         };
@@ -128,6 +159,12 @@ impl Player {
         let filter = replaygain.then_some(&self.filter);
         self.playbin.set_property("audio-filter", filter);
         self.playbin.set_property("uri", uri);
+        if let Ok(mut gapless) = self.gapless.lock() {
+            *gapless = GaplessState {
+                current_is_mp4: is_mp4(uri),
+                seeked_mp4: false,
+            };
+        }
         if let Ok(mut pending) = self.pending_seek_ms.lock() {
             *pending = (start_ms > 0).then_some(start_ms);
         }
@@ -158,6 +195,11 @@ impl Player {
     }
 
     pub fn seek(&self, ms: u64) {
+        if let Ok(mut gapless) = self.gapless.lock()
+            && gapless.current_is_mp4
+        {
+            gapless.seeked_mp4 = true;
+        }
         let flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         if let Err(err) = self
             .playbin

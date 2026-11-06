@@ -418,11 +418,15 @@ impl GatefoldWindow {
     /// a PNG after `GATEFOLD_SCREENSHOT_DELAY` seconds (default 8) and quits.
     /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, e.g.
     /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album
-    /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it.
+    /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it. Without `GATEFOLD_SCREENSHOT`,
+    /// only that album step runs.
     fn setup_screenshot(&self) {
-        let Some(path) = std::env::var_os("GATEFOLD_SCREENSHOT") else {
+        // Without GATEFOLD_SCREENSHOT, only the album and actions steps run
+        // (for playback tests); the app keeps running.
+        let path = std::env::var_os("GATEFOLD_SCREENSHOT");
+        if path.is_none() && std::env::var_os("GATEFOLD_SCREENSHOT_ALBUM").is_none() {
             return;
-        };
+        }
         let delay = std::env::var("GATEFOLD_SCREENSHOT_DELAY")
             .ok()
             .and_then(|d| d.parse().ok())
@@ -461,6 +465,7 @@ impl GatefoldWindow {
                     tracing::warn!("Screenshot action {name}: {err}");
                 }
             }
+            let Some(path) = path else { return };
             let window = window.downgrade();
             glib::timeout_add_seconds_local_once(1, move || {
                 let Some(window) = window.upgrade() else {
