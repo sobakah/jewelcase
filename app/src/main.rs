@@ -4,6 +4,7 @@ mod covers;
 mod format;
 mod library;
 mod library_folders;
+mod metadata;
 mod mpris;
 mod objects;
 mod player;

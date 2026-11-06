@@ -13,6 +13,7 @@ spotify-stream = []
 
 [dependencies]
 gatefold-core.workspace = true
+gatefold-metadata.workspace = true
 
 adw.workspace = true
 async-channel.workspace = true

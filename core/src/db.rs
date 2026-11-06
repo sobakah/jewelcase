@@ -10,6 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use rusqlite_migration::{M, Migrations};
 
 use crate::library::TrackRecord;
+use crate::library::artists::{AlbumRole, ArtistInfo};
 use crate::library::grouping::AlbumInfo;
 use crate::library::tags::{Lyrics, TrackTags};
 use crate::library::titles::ReleaseType;
@@ -18,6 +19,7 @@ use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/001_library.sql")),
     M::up(include_str!("db/002_barcode_and_album_order.sql")),
+    M::up(include_str!("db/003_artists.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -65,6 +67,45 @@ pub struct Track {
     pub album_cover_key: Option<String>,
     /// The disc shown in the album panel (usually the tagged one).
     pub album_disc: Option<u32>,
+}
+
+/// An album artist as shown in the library (CONCEPT.md §3.3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Artist {
+    pub id: i64,
+    pub key: String,
+    pub name: String,
+    pub sort_name: String,
+    /// From the tags, else from the online lookup.
+    pub mbid: Option<String>,
+    /// Albums credited to the artist (not collaborations).
+    pub album_count: u32,
+    pub track_count: u32,
+    /// The portrait to show: the custom one, else the automatic one.
+    pub portrait_key: Option<String>,
+    /// The cover of the artist's newest album, for the fallback avatar.
+    pub cover_key: Option<String>,
+    pub meta: ArtistMeta,
+}
+
+/// What the online lookup found (CONCEPT.md §8).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ArtistMeta {
+    /// "done", "not-found" or "ambiguous"; `None` until looked up.
+    pub lookup_state: Option<String>,
+    /// Unix seconds of the last lookup.
+    pub looked_up: Option<i64>,
+    pub lookup_mbid: Option<String>,
+    pub wikidata_id: Option<String>,
+    pub spotify_id: Option<String>,
+    pub wikipedia_url: Option<String>,
+    pub website: Option<String>,
+    pub bio: Option<String>,
+    pub portrait_key: Option<String>,
+    /// "local", "fanart.tv" or "wikimedia".
+    pub portrait_source: Option<String>,
+    pub portrait_attribution: Option<String>,
+    pub custom_portrait_key: Option<String>,
 }
 
 /// A file found by the scanner, with its stat data and tags.
@@ -195,21 +236,18 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Replaces the album tables with freshly grouped albums. Albums keep
-    /// their ID as long as their identity key stays the same.
-    pub fn replace_albums(&mut self, albums: &[AlbumInfo]) -> Result<()> {
+    /// Replaces the album and artist tables with freshly grouped data.
+    /// Albums and artists keep their ID while their identity key stays the
+    /// same; artists keep their online metadata.
+    pub fn replace_library(&mut self, albums: &[AlbumInfo], artists: &[ArtistInfo]) -> Result<()> {
         let tx = self.conn.transaction()?;
-        let mut kept = HashSet::new();
+        let mut album_ids: HashMap<&str, i64> = HashMap::new();
+        let mut artist_ids = HashSet::new();
         {
             let mut upsert = tx.prepare_cached(UPSERT_ALBUM)?;
             let mut link = tx.prepare_cached(
                 "UPDATE track SET album_id = ?1, album_position = ?3, album_disc = ?4 WHERE id = ?2",
             )?;
-            let mut upsert_artist = tx.prepare_cached(UPSERT_ARTIST)?;
-            let mut album_artist = tx.prepare_cached(
-                "INSERT INTO album_artist (album_id, artist_id, position) VALUES (?1, ?2, ?3)",
-            )?;
-            tx.execute("DELETE FROM album_artist", [])?;
             for album in albums {
                 let id: i64 = upsert.query_row(
                     params![
@@ -233,38 +271,47 @@ impl Database {
                     ],
                     |row| row.get(0),
                 )?;
-                kept.insert(id);
+                album_ids.insert(&album.key, id);
                 for (position, track_id) in album.track_ids.iter().enumerate() {
                     let disc = album.track_discs.get(position).copied();
                     link.execute(params![id, track_id, position as i64, disc])?;
                 }
-                for (position, name) in album.album_artists.iter().enumerate() {
-                    let artist_id: i64 = upsert_artist.query_row(
-                        params![
-                            name,
-                            name.to_lowercase(),
-                            crate::library::titles::sort_key(name)
-                        ],
-                        |row| row.get(0),
-                    )?;
-                    album_artist.execute(params![id, artist_id, position as i64])?;
+            }
+
+            tx.execute("DELETE FROM album_artist", [])?;
+            tx.execute("DELETE FROM track_artist", [])?;
+            let mut upsert_artist = tx.prepare_cached(UPSERT_ARTIST)?;
+            let mut album_artist = tx.prepare_cached(
+                "INSERT OR IGNORE INTO album_artist (album_id, artist_id, role, position)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut track_artist = tx.prepare_cached(
+                "INSERT OR IGNORE INTO track_artist (track_id, artist_id) VALUES (?1, ?2)",
+            )?;
+            for artist in artists {
+                let id: i64 = upsert_artist.query_row(
+                    params![artist.key, artist.name, artist.sort_name, artist.mbid],
+                    |row| row.get(0),
+                )?;
+                artist_ids.insert(id);
+                for (album_key, role, position) in &artist.albums {
+                    if let Some(album_id) = album_ids.get(album_key.as_str()) {
+                        album_artist.execute(params![
+                            album_id,
+                            id,
+                            role.as_str(),
+                            *position as i64
+                        ])?;
+                    }
+                }
+                for track_id in &artist.appears_on {
+                    track_artist.execute(params![track_id, id])?;
                 }
             }
         }
-        let stale: Vec<i64> = {
-            let mut stmt = tx.prepare("SELECT id FROM album")?;
-            stmt.query_map([], |row| row.get(0))?
-                .filter_map(std::result::Result::ok)
-                .filter(|id| !kept.contains(id))
-                .collect()
-        };
-        for id in stale {
-            tx.execute("DELETE FROM album WHERE id = ?1", [id])?;
-        }
-        tx.execute(
-            "DELETE FROM artist WHERE id NOT IN (SELECT artist_id FROM album_artist)",
-            [],
-        )?;
+        let kept: HashSet<i64> = album_ids.into_values().collect();
+        delete_except(&tx, "album", &kept)?;
+        delete_except(&tx, "artist", &artist_ids)?;
         tx.commit()?;
         Ok(())
     }
@@ -329,6 +376,135 @@ impl Database {
             }
         }
         Ok(tracks)
+    }
+
+    // Artists ---------------------------------------------------------------
+
+    pub fn artists(&self) -> Result<Vec<Artist>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {ARTIST_COLUMNS} FROM artist ar ORDER BY ar.sort_name, ar.id"
+        ))?;
+        let rows = stmt.query_map([], artist)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn artist(&self, id: i64) -> Result<Option<Artist>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {ARTIST_COLUMNS} FROM artist ar WHERE ar.id = ?1"),
+                [id],
+                artist,
+            )
+            .optional()?)
+    }
+
+    /// The artist's albums and collaborations, oldest first.
+    pub fn artist_albums(&self, artist_id: i64) -> Result<Vec<(Album, AlbumRole)>> {
+        let columns = ALBUM_COLUMNS
+            .split(',')
+            .map(|c| format!("a.{}", c.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {columns}, aa.role FROM album_artist aa JOIN album a ON a.id = aa.album_id
+             WHERE aa.artist_id = ?1 ORDER BY a.year, a.sort_title, a.id"
+        ))?;
+        let rows = stmt.query_map([artist_id], |row| {
+            Ok((
+                album(row)?,
+                AlbumRole::from_str_lossy(&row.get::<_, String>(15)?),
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Tracks on other artists' albums ("Appears on"), by album.
+    pub fn artist_appears_on(&self, artist_id: i64) -> Result<Vec<Track>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLUMNS}, {TRACK_ALBUM_COLUMNS} FROM track_artist ta
+               JOIN track t ON t.id = ta.track_id
+               LEFT JOIN album a ON a.id = t.album_id
+             WHERE ta.artist_id = ?1
+             ORDER BY a.year, a.sort_title, t.album_position"
+        ))?;
+        let rows = stmt.query_map([artist_id], track)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The album artists of an album, in credit order: (id, name).
+    pub fn album_artists(&self, album_id: i64) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT ar.id, ar.name FROM album_artist aa JOIN artist ar ON ar.id = aa.artist_id
+             WHERE aa.album_id = ?1 AND aa.role = 'credit' ORDER BY aa.position",
+        )?;
+        let rows = stmt.query_map([album_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Release MBIDs of the artist's albums, for the MusicBrainz lookup.
+    pub fn artist_release_mbids(&self, artist_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT a.mb_album_id FROM album_artist aa JOIN album a ON a.id = aa.album_id
+             WHERE aa.artist_id = ?1 AND aa.role = 'credit' AND a.mb_album_id IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([artist_id], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Folders of the artist's albums' tracks, for local portraits.
+    pub fn artist_track_paths(&self, artist_id: i64) -> Result<Vec<PathBuf>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.path FROM album_artist aa JOIN track t ON t.album_id = aa.album_id
+             WHERE aa.artist_id = ?1 AND aa.role = 'credit'",
+        )?;
+        let rows = stmt.query_map([artist_id], |row| {
+            Ok(PathBuf::from(row.get::<_, String>(0)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Stores what the online lookup found. The custom portrait is kept.
+    pub fn set_artist_meta(&mut self, artist_id: i64, meta: &ArtistMeta) -> Result<()> {
+        self.conn.execute(
+            "UPDATE artist SET lookup_state = ?2, looked_up = ?3, lookup_mbid = ?4,
+               wikidata_id = ?5, spotify_id = ?6, wikipedia_url = ?7, website = ?8, bio = ?9,
+               portrait_key = ?10, portrait_source = ?11, portrait_attribution = ?12
+             WHERE id = ?1",
+            params![
+                artist_id,
+                meta.lookup_state,
+                meta.looked_up,
+                meta.lookup_mbid,
+                meta.wikidata_id,
+                meta.spotify_id,
+                meta.wikipedia_url,
+                meta.website,
+                meta.bio,
+                meta.portrait_key,
+                meta.portrait_source,
+                meta.portrait_attribution,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Sets or clears (`None`: back to automatic) the user's portrait.
+    pub fn set_custom_portrait(&mut self, artist_id: i64, key: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE artist SET custom_portrait_key = ?2 WHERE id = ?1",
+            params![artist_id, key],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets the lookup result, so the next lookup starts over.
+    pub fn reset_artist_lookup(&mut self, artist_id: i64, mbid: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE artist SET lookup_state = NULL, looked_up = NULL, lookup_mbid = ?2 WHERE id = ?1",
+            params![artist_id, mbid],
+        )?;
+        Ok(())
     }
 
     // Queue -----------------------------------------------------------------
@@ -460,9 +636,68 @@ const UPSERT_ALBUM: &str = "INSERT INTO album (key, group_key, title, sort_title
     cover_key = excluded.cover_key, added = excluded.added
   RETURNING id";
 
-const UPSERT_ARTIST: &str = "INSERT INTO artist (name, name_key, sort_name) VALUES (?1, ?2, ?3)
-  ON CONFLICT(name_key) DO UPDATE SET name = excluded.name
+const UPSERT_ARTIST: &str =
+    "INSERT INTO artist (key, name, sort_name, mbid) VALUES (?1, ?2, ?3, ?4)
+  ON CONFLICT(key) DO UPDATE SET name = excluded.name, sort_name = excluded.sort_name,
+    mbid = excluded.mbid
   RETURNING id";
+
+const ARTIST_COLUMNS: &str =
+    "ar.id, ar.key, ar.name, ar.sort_name, COALESCE(ar.mbid, ar.lookup_mbid),
+    (SELECT COUNT(*) FROM album_artist aa WHERE aa.artist_id = ar.id AND aa.role = 'credit'),
+    (SELECT COALESCE(SUM(a.track_count), 0) FROM album_artist aa JOIN album a ON a.id = aa.album_id
+       WHERE aa.artist_id = ar.id AND aa.role = 'credit'),
+    COALESCE(ar.custom_portrait_key, ar.portrait_key),
+    (SELECT a.cover_key FROM album_artist aa JOIN album a ON a.id = aa.album_id
+       WHERE aa.artist_id = ar.id AND a.cover_key IS NOT NULL
+       ORDER BY aa.role = 'credit' DESC, a.year DESC LIMIT 1),
+    ar.lookup_state, ar.looked_up, ar.lookup_mbid, ar.wikidata_id, ar.spotify_id,
+    ar.wikipedia_url, ar.website, ar.bio, ar.portrait_key, ar.portrait_source,
+    ar.portrait_attribution, ar.custom_portrait_key";
+
+fn artist(row: &Row) -> rusqlite::Result<Artist> {
+    Ok(Artist {
+        id: row.get(0)?,
+        key: row.get(1)?,
+        name: row.get(2)?,
+        sort_name: row.get(3)?,
+        mbid: row.get(4)?,
+        album_count: row.get(5)?,
+        track_count: row.get(6)?,
+        portrait_key: row.get(7)?,
+        cover_key: row.get(8)?,
+        meta: ArtistMeta {
+            lookup_state: row.get(9)?,
+            looked_up: row.get(10)?,
+            lookup_mbid: row.get(11)?,
+            wikidata_id: row.get(12)?,
+            spotify_id: row.get(13)?,
+            wikipedia_url: row.get(14)?,
+            website: row.get(15)?,
+            bio: row.get(16)?,
+            portrait_key: row.get(17)?,
+            portrait_source: row.get(18)?,
+            portrait_attribution: row.get(19)?,
+            custom_portrait_key: row.get(20)?,
+        },
+    })
+}
+
+/// Deletes rows of `table` whose ID isn't in `keep`.
+fn delete_except(tx: &rusqlite::Transaction, table: &str, keep: &HashSet<i64>) -> Result<()> {
+    let stale: Vec<i64> = {
+        let mut stmt = tx.prepare(&format!("SELECT id FROM {table}"))?;
+        stmt.query_map([], |row| row.get(0))?
+            .filter_map(std::result::Result::ok)
+            .filter(|id| !keep.contains(id))
+            .collect()
+    };
+    let mut delete = tx.prepare(&format!("DELETE FROM {table} WHERE id = ?1"))?;
+    for id in stale {
+        delete.execute([id])?;
+    }
+    Ok(())
+}
 
 fn track_record(row: &Row) -> rusqlite::Result<TrackRecord> {
     let lyrics_synced: Option<bool> = row.get(23)?;
@@ -595,8 +830,10 @@ mod tests {
     }
 
     fn rebuild(db: &mut Database) {
-        let albums = group_albums(&db.all_tracks().unwrap());
-        db.replace_albums(&albums).unwrap();
+        let tracks = db.all_tracks().unwrap();
+        let albums = group_albums(&tracks);
+        let artists = crate::library::artists::build_artists(&albums, &tracks, &Default::default());
+        db.replace_library(&albums, &artists).unwrap();
     }
 
     #[test]

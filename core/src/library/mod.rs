@@ -1,5 +1,6 @@
 //! The music library: folders, tags, albums and the scanner (CONCEPT.md §3).
 
+pub mod artists;
 pub mod covers;
 pub mod folders;
 pub mod grouping;

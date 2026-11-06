@@ -53,6 +53,27 @@
       <summary>Restore the queue on start</summary>
       <description>Reopen the last queue, paused at the last position.</description>
     </key>
+    <key name="online-metadata" type="b">
+      <default>false</default>
+      <summary>Look up artists online</summary>
+      <description>Artist photos, links and short biographies from MusicBrainz, Wikidata, Wikipedia and fanart.tv. Asked on first use of the Artists view.</description>
+    </key>
+    <key name="online-metadata-asked" type="b">
+      <default>false</default>
+      <summary>Whether the user was asked about online lookups</summary>
+    </key>
+    <key name="metadata-wikidata" type="b">
+      <default>true</default>
+      <summary>Use Wikidata, Wikimedia Commons and Wikipedia</summary>
+    </key>
+    <key name="metadata-fanart" type="b">
+      <default>true</default>
+      <summary>Use fanart.tv (needs an API key)</summary>
+    </key>
+    <key name="fanart-api-key" type="s">
+      <default>""</default>
+      <summary>fanart.tv project API key</summary>
+    </key>
     <key name="volume" type="d">
       <range min="0" max="1"/>
       <default>1</default>

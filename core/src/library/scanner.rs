@@ -15,6 +15,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::artists::{Aliases, build_artists};
 use super::covers::{self, CoverCache};
 use super::grouping::{album_folder, group_albums};
 use super::tags;
@@ -50,6 +51,7 @@ pub struct ScanSummary {
     pub failed: usize,
     pub symlinks_skipped: usize,
     pub albums: usize,
+    pub artists: usize,
 }
 
 struct FoundFile {
@@ -62,6 +64,7 @@ struct FoundFile {
 pub fn scan(
     db: &mut Database,
     folders: &[PathBuf],
+    aliases: &Aliases,
     covers: &CoverCache,
     progress: &(dyn Fn(ScanProgress) + Sync),
 ) -> Result<ScanSummary, DbError> {
@@ -89,9 +92,12 @@ pub fn scan(
     summary.removed = removed.len();
     db.delete_tracks(&removed)?;
 
-    let albums = group_albums(&db.all_tracks()?);
+    let tracks = db.all_tracks()?;
+    let albums = group_albums(&tracks);
+    let artists = build_artists(&albums, &tracks, aliases);
     summary.albums = albums.len();
-    db.replace_albums(&albums)?;
+    summary.artists = artists.len();
+    db.replace_library(&albums, &artists)?;
     progress(ScanProgress::AlbumsReady);
 
     make_covers(db, covers, progress)?;
@@ -348,7 +354,14 @@ mod tests {
         // Not decodable: the file fails to read and isn't stored.
         fs::write(music.join("broken.flac"), b"nope").unwrap();
 
-        let summary = scan(&mut db, std::slice::from_ref(&music), &covers, &|_| {}).unwrap();
+        let summary = scan(
+            &mut db,
+            std::slice::from_ref(&music),
+            &Aliases::default(),
+            &covers,
+            &|_| {},
+        )
+        .unwrap();
         assert_eq!((summary.files, summary.read, summary.failed), (1, 0, 1));
 
         let unmounted = dir.path().join("Drive");
@@ -364,7 +377,14 @@ mod tests {
             ..stored.clone()
         };
         db.upsert_tracks(&[stored, gone], 0).unwrap();
-        let summary = scan(&mut db, &[music, unmounted.clone()], &covers, &|_| {}).unwrap();
+        let summary = scan(
+            &mut db,
+            &[music, unmounted.clone()],
+            &Aliases::default(),
+            &covers,
+            &|_| {},
+        )
+        .unwrap();
         assert_eq!(summary.removed, 1);
         let left: Vec<_> = db
             .all_tracks()

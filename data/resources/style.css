@@ -50,3 +50,24 @@
 .expand-button:checked {
   transform: rotate(180deg);
 }
+
+/* Artist grid and pages (CONCEPT.md §4.1, §4.2). */
+.artist-grid {
+  padding: 12px;
+}
+
+.artist-grid > child {
+  padding: 12px;
+  border-radius: 15px;
+}
+
+.artist-tile .artist-name {
+  font-weight: bold;
+}
+
+.album-panel .artist-link {
+  padding: 0;
+  min-height: 0;
+  font-weight: bold;
+  color: var(--accent-color);
+}

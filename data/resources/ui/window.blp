@@ -70,7 +70,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
 
           child: Gtk.SearchEntry search_entry {
             hexpand: true;
-            placeholder-text: _("Filter albums by title or artist");
+            placeholder-text: _("Filter albums and artists");
           };
         };
       }
@@ -168,10 +168,90 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           title: _("Artists");
           icon-name: "avatar-default-symbolic";
 
-          child: Adw.StatusPage {
-            icon-name: "avatar-default-symbolic";
-            title: _("No Artists Yet");
-            description: _("Album artists from your library will show up here.");
+          child: Adw.NavigationView artists_nav {
+            Adw.NavigationPage {
+              title: _("Artists");
+              tag: "artists";
+
+              child: Gtk.Stack artists_stack {
+                transition-type: crossfade;
+
+                Gtk.StackPage {
+                  name: "ask";
+
+                  child: Adw.StatusPage {
+                    icon-name: "avatar-default-symbolic";
+                    title: _("Show Artist Photos and Links?");
+                    description: _("Gatefold can look up artists online: MusicBrainz identifies them, Wikidata, Wikipedia and Wikimedia Commons add links, a short biography and a photo, and fanart.tv adds photos if you enter an API key in Preferences. Only artist names and MusicBrainz IDs are sent. You can change this any time in Preferences.");
+
+                    child: Gtk.Box {
+                      halign: center;
+                      spacing: 12;
+
+                      Gtk.Button {
+                        label: _("_Not Now");
+                        use-underline: true;
+                        action-name: "win.online-metadata";
+                        action-target: "false";
+
+                        styles [
+                          "pill",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        label: _("_Look Up Artists");
+                        use-underline: true;
+                        action-name: "win.online-metadata";
+                        action-target: "true";
+
+                        styles [
+                          "pill",
+                          "suggested-action",
+                        ]
+                      }
+                    };
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "empty";
+
+                  child: Adw.StatusPage {
+                    icon-name: "avatar-default-symbolic";
+                    title: _("No Artists Yet");
+                    description: _("Album artists from your library will show up here.");
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "no-results";
+
+                  child: Adw.StatusPage {
+                    icon-name: "edit-find-symbolic";
+                    title: _("No Matching Artists");
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "artists";
+
+                  child: Gtk.ScrolledWindow {
+                    hscrollbar-policy: never;
+
+                    child: Gtk.GridView artist_grid {
+                      max-columns: 12;
+                      min-columns: 2;
+                      single-click-activate: true;
+
+                      styles [
+                        "artist-grid",
+                      ]
+                    };
+                  };
+                }
+              };
+            }
           };
         }
 

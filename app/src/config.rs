@@ -31,6 +31,12 @@ pub fn database_path() -> std::path::PathBuf {
         .join("library.sqlite")
 }
 
+/// `~/.local/share/<app id>/artists/`: artist portraits (CONCEPT.md §8).
+/// Custom ones must survive cache cleanups, so they live with the data.
+pub fn portrait_dir() -> std::path::PathBuf {
+    gtk::glib::user_data_dir().join(APP_ID).join("artists")
+}
+
 /// `~/.cache/<app id>/covers/` (CONCEPT.md §4.3).
 pub fn cover_dir() -> std::path::PathBuf {
     gtk::glib::user_cache_dir().join(APP_ID).join("covers")

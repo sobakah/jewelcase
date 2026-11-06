@@ -54,12 +54,13 @@ Meson runs Cargo and passes it the compiled GResource bundle (Blueprint UI, CSS,
 ```
 app/        GTK UI (crate `gatefold`)
 core/       library model, scanner, queue, playback; no GTK (crate `gatefold-core`)
+metadata/   MusicBrainz, Wikidata, Commons, fanart.tv lookups (crate `gatefold-metadata`)
 data/       desktop file, metainfo, GSettings schema, icons, Blueprint UI + CSS (data/resources)
 po/         translations
 build-aux/  build helper scripts
 ```
 
-The `metadata`, `lyrics`, `tools`, `similarity` and `spotify` crates from CONCEPT.md §2 are added in the phases that need them.
+The `lyrics`, `tools`, `similarity` and `spotify` crates from CONCEPT.md §2 are added in the phases that need them.
 
 ## License
 

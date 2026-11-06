@@ -7,8 +7,8 @@ use gtk::{gio, glib};
 
 use crate::application::GatefoldApplication;
 use crate::config::{self, APP_ID};
-use crate::objects::AlbumObject;
-use crate::widgets::{AlbumPanel, AlbumTile, MiniPlayer, PlayerView};
+use crate::objects::{AlbumObject, ArtistObject};
+use crate::widgets::{AlbumPanel, AlbumTile, ArtistPage, ArtistTile, MiniPlayer, PlayerView};
 
 mod imp {
     use super::*;
@@ -38,6 +38,14 @@ mod imp {
         pub album_grid: TemplateChild<gtk::GridView>,
         #[template_child]
         pub album_panel: TemplateChild<AlbumPanel>,
+        #[template_child]
+        pub artists_nav: TemplateChild<adw::NavigationView>,
+        #[template_child]
+        pub artists_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub artist_grid: TemplateChild<gtk::GridView>,
+        pub artist_filter: OnceCell<gtk::CustomFilter>,
+        pub artists_filtered: OnceCell<gtk::FilterListModel>,
         pub settings: OnceCell<gio::Settings>,
         pub filter: OnceCell<gtk::CustomFilter>,
         pub sorter: OnceCell<gtk::CustomSorter>,
@@ -67,6 +75,25 @@ mod imp {
                 let bar = &win.imp().search_bar;
                 bar.set_search_mode(!bar.is_search_mode());
             });
+            klass.install_action(
+                "win.show-artist",
+                Some(glib::VariantTy::INT64),
+                |win, _, param| {
+                    if let Some(id) = param.and_then(|p| p.get::<i64>()) {
+                        win.show_artist(id);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.online-metadata",
+                Some(glib::VariantTy::BOOLEAN),
+                |win, _, param| {
+                    let allow = param.and_then(|p| p.get::<bool>()).unwrap_or(false);
+                    let settings = win.settings();
+                    let _ = settings.set_boolean("online-metadata", allow);
+                    let _ = settings.set_boolean("online-metadata-asked", true);
+                },
+            );
             klass.install_action(
                 "win.view",
                 Some(glib::VariantTy::STRING),
@@ -106,6 +133,7 @@ mod imp {
             obj.insert_action_group("player", Some(player.actions()));
             obj.setup_shortcuts();
             obj.setup_albums();
+            obj.setup_artists();
             obj.setup_messages();
 
             self.search_bar.set_key_capture_widget(Some(&*obj));
@@ -253,6 +281,9 @@ impl GatefoldWindow {
             move |entry| {
                 window.imp().search.replace(entry.text().to_lowercase());
                 window.filter_changed();
+                if let Some(filter) = window.imp().artist_filter.get() {
+                    filter.changed(gtk::FilterChange::Different);
+                }
             }
         ));
         self.settings().connect_changed(
@@ -306,6 +337,118 @@ impl GatefoldWindow {
         imp.filtered.set(filtered).expect("set once");
         self.update_albums_page();
         self.update_banner(&library);
+    }
+
+    fn setup_artists(&self) {
+        let imp = self.imp();
+        let library = GatefoldApplication::get().library();
+
+        let filter = gtk::CustomFilter::new(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            true,
+            move |item| {
+                let artist = item.downcast_ref::<ArtistObject>().expect("artists");
+                let search = window.imp().search.borrow();
+                search.is_empty()
+                    || artist
+                        .artist()
+                        .name
+                        .to_lowercase()
+                        .contains(search.as_str())
+            }
+        ));
+        let filtered =
+            gtk::FilterListModel::new(Some(library.artists().clone()), Some(filter.clone()));
+        imp.artist_grid
+            .set_model(Some(&gtk::NoSelection::new(Some(filtered.clone()))));
+
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(|_, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+            item.set_child(Some(&ArtistTile::new()));
+        });
+        factory.connect_bind(|_, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+            if let (Some(tile), Some(artist)) = (
+                item.child().and_downcast::<ArtistTile>(),
+                item.item().and_downcast::<ArtistObject>(),
+            ) {
+                tile.bind(&artist);
+                item.set_accessible_label(&artist.artist().name);
+                // Lookups run lazily, for artists that are shown (§8).
+                GatefoldApplication::get().library().request_lookup(&artist);
+            }
+        });
+        imp.artist_grid.set_factory(Some(&factory));
+        imp.artist_grid.connect_activate(|grid, position| {
+            let Some(artist) = grid
+                .model()
+                .and_then(|m| m.item(position))
+                .and_downcast::<ArtistObject>()
+            else {
+                return;
+            };
+            if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
+                window.show_artist(artist.id());
+            }
+        });
+
+        filtered.connect_items_changed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |_, _, _, _| window.update_artists_page()
+        ));
+        self.settings().connect_changed(
+            Some("online-metadata-asked"),
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |_, _| window.update_artists_page()
+            ),
+        );
+        imp.artist_filter.set(filter).expect("set once");
+        imp.artists_filtered.set(filtered).expect("set once");
+        self.update_artists_page();
+    }
+
+    fn update_artists_page(&self) {
+        let imp = self.imp();
+        let library = GatefoldApplication::get().library();
+        let shown = imp.artists_filtered.get().map_or(0, |f| f.n_items());
+        let page = if !self.settings().boolean("online-metadata-asked") {
+            "ask"
+        } else if library.artists().n_items() == 0 {
+            "empty"
+        } else if shown == 0 {
+            "no-results"
+        } else {
+            "artists"
+        };
+        imp.artists_stack.set_visible_child_name(page);
+    }
+
+    /// Opens an artist's page in the Artists view.
+    pub fn show_artist(&self, artist_id: i64) {
+        let imp = self.imp();
+        imp.bottom_sheet.set_open(false);
+        imp.stack.set_visible_child_name("artists");
+        if imp
+            .artists_nav
+            .visible_page()
+            .and_downcast::<ArtistPage>()
+            .is_some_and(|page| page.artist_id() == artist_id)
+        {
+            return;
+        }
+        imp.artists_nav.pop_to_tag("artists");
+        let page = ArtistPage::new(artist_id);
+        imp.split_view
+            .bind_property("collapsed", &page.split_view(), "collapsed")
+            .sync_create()
+            .build();
+        imp.artists_nav.push(&page);
     }
 
     fn setup_messages(&self) {
@@ -377,6 +520,14 @@ impl GatefoldWindow {
 
     fn library_reloaded(&self) {
         let imp = self.imp();
+        // Leave the page of an artist that's no longer in the library.
+        let library = GatefoldApplication::get().library();
+        if let Some(page) = imp.artists_nav.visible_page().and_downcast::<ArtistPage>()
+            && library.artist(page.artist_id()).is_none()
+        {
+            imp.artists_nav.pop_to_tag("artists");
+        }
+        self.update_artists_page();
         // Show the reloaded version of the open album, or close the panel.
         if let Some(open) = imp.album_panel.album() {
             let library = GatefoldApplication::get().library();
@@ -416,9 +567,11 @@ impl GatefoldWindow {
 
     /// Development aid: `GATEFOLD_SCREENSHOT=out.png` renders the window to
     /// a PNG after `GATEFOLD_SCREENSHOT_DELAY` seconds (default 8) and quits.
+    /// The steps below run after 2 seconds.
     /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, e.g.
     /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album
-    /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it. Without `GATEFOLD_SCREENSHOT`,
+    /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
+    /// opens an artist page. Without `GATEFOLD_SCREENSHOT`,
     /// only that album step runs.
     fn setup_screenshot(&self) {
         // Without GATEFOLD_SCREENSHOT, only the album and actions steps run
@@ -433,10 +586,27 @@ impl GatefoldWindow {
             .unwrap_or(8);
         let actions = std::env::var("GATEFOLD_SCREENSHOT_ACTIONS").unwrap_or_default();
         let window = self.downgrade();
-        glib::timeout_add_seconds_local_once(delay.max(2) - 1, move || {
+        let first_step = delay.clamp(1, 2);
+        glib::timeout_add_seconds_local_once(first_step, move || {
             let Some(window) = window.upgrade() else {
                 return;
             };
+            for action in actions.split_whitespace() {
+                let (name, target) = match action.split_once("::") {
+                    // GVariant text ("true", "42"), else a plain string.
+                    Some((name, target)) => (
+                        name,
+                        Some(
+                            glib::Variant::parse(None, target)
+                                .unwrap_or_else(|_| target.to_variant()),
+                        ),
+                    ),
+                    None => (action, None),
+                };
+                if let Err(err) = WidgetExt::activate_action(&window, name, target.as_ref()) {
+                    tracing::warn!("Screenshot action {name}: {err}");
+                }
+            }
             // An index into the grid, or an album title.
             let album = std::env::var("GATEFOLD_SCREENSHOT_ALBUM")
                 .ok()
@@ -448,6 +618,18 @@ impl GatefoldWindow {
                         .find(|(i, a)| wanted == i.to_string() || wanted == a.album().title)
                         .map(|(_, a)| a)
                 });
+            let artist = std::env::var("GATEFOLD_SCREENSHOT_ARTIST")
+                .ok()
+                .and_then(|name| {
+                    let library = GatefoldApplication::get().library();
+                    let artists = library.artists();
+                    (0..artists.n_items())
+                        .filter_map(|i| artists.item(i).and_downcast::<ArtistObject>())
+                        .find(|a| a.artist().name == name)
+                });
+            if let Some(artist) = artist {
+                window.show_artist(artist.id());
+            }
             if let Some(album) = album {
                 window.show_album(&album);
                 if std::env::var_os("GATEFOLD_SCREENSHOT_PLAY").is_some() {
@@ -456,38 +638,32 @@ impl GatefoldWindow {
                         .play_album(album.album().id, None, false);
                 }
             }
-            for action in actions.split_whitespace() {
-                let (name, target) = match action.split_once("::") {
-                    Some((name, target)) => (name, Some(target.to_variant())),
-                    None => (action, None),
-                };
-                if let Err(err) = WidgetExt::activate_action(&window, name, target.as_ref()) {
-                    tracing::warn!("Screenshot action {name}: {err}");
-                }
-            }
             let Some(path) = path else { return };
             let window = window.downgrade();
-            glib::timeout_add_seconds_local_once(1, move || {
-                let Some(window) = window.upgrade() else {
-                    return;
-                };
-                let paintable = gtk::WidgetPaintable::new(Some(&window));
-                let (w, h) = (window.width(), window.height());
-                let snapshot = gtk::Snapshot::new();
-                paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
-                let node = snapshot.to_node();
-                let renderer = window.native().and_then(|n| n.renderer());
-                if let (Some(node), Some(renderer)) = (node, renderer) {
-                    let texture = renderer.render_texture(&node, None);
-                    match texture.save_to_png(&path) {
-                        Ok(()) => tracing::info!("Screenshot saved to {}", path.display()),
-                        Err(err) => tracing::warn!("Screenshot failed: {err}"),
+            glib::timeout_add_seconds_local_once(
+                delay.saturating_sub(first_step).max(1),
+                move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let paintable = gtk::WidgetPaintable::new(Some(&window));
+                    let (w, h) = (window.width(), window.height());
+                    let snapshot = gtk::Snapshot::new();
+                    paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+                    let node = snapshot.to_node();
+                    let renderer = window.native().and_then(|n| n.renderer());
+                    if let (Some(node), Some(renderer)) = (node, renderer) {
+                        let texture = renderer.render_texture(&node, None);
+                        match texture.save_to_png(&path) {
+                            Ok(()) => tracing::info!("Screenshot saved to {}", path.display()),
+                            Err(err) => tracing::warn!("Screenshot failed: {err}"),
+                        }
                     }
-                }
-                if let Some(app) = window.application() {
-                    app.activate_action("quit", None);
-                }
-            });
+                    if let Some(app) = window.application() {
+                        app.activate_action("quit", None);
+                    }
+                },
+            );
         });
     }
 

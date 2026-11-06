@@ -25,6 +25,14 @@ mod imp {
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub online_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub wikidata_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub fanart_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub fanart_key_row: TemplateChild<adw::PasswordEntryRow>,
         pub folder_rows: RefCell<Vec<adw::ActionRow>>,
         pub settings: OnceCell<gio::Settings>,
     }
@@ -64,6 +72,26 @@ mod imp {
             settings
                 .bind("restore-queue", &*self.restore_queue_row, "active")
                 .build();
+            settings
+                .bind("online-metadata", &*self.online_row, "active")
+                .build();
+            settings
+                .bind("metadata-wikidata", &*self.wikidata_row, "active")
+                .build();
+            settings
+                .bind("metadata-fanart", &*self.fanart_row, "active")
+                .build();
+            settings
+                .bind("fanart-api-key", &*self.fanart_key_row, "text")
+                .build();
+            // Answering here counts as answering the Artists view's question.
+            self.online_row.connect_active_notify(glib::clone!(
+                #[weak]
+                settings,
+                move |_| {
+                    let _ = settings.set_boolean("online-metadata-asked", true);
+                }
+            ));
             settings
                 .bind("replaygain", &*self.replaygain_row, "selected")
                 .mapping(|value, _| {

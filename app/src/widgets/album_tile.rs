@@ -95,6 +95,15 @@ impl Default for AlbumTile {
     }
 }
 
+impl AlbumTile {
+    /// Cover and title only, for the artist page (CONCEPT.md §4.2).
+    pub fn bind_title_only(&self, album: &AlbumObject) {
+        self.bind(album);
+        self.imp().artist.set_visible(false);
+        self.set_tooltip_text(Some(&album.album().title));
+    }
+}
+
 pub fn artist_or_unknown(credit: &str) -> String {
     if credit.is_empty() {
         gettext("Unknown Artist")

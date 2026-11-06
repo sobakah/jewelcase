@@ -1,0 +1,14 @@
+[package]
+name = "gatefold-metadata"
+description = "Gatefold's online artist metadata: MusicBrainz, Wikidata, Wikimedia Commons, fanart.tv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true

@@ -279,6 +279,22 @@ impl Player {
         self.queue_changed();
     }
 
+    /// Plays a list of tracks (an artist's albums), in order or shuffled.
+    pub fn play_tracks(&self, tracks: Vec<TrackObject>, shuffle: bool) {
+        if tracks.is_empty() {
+            return;
+        }
+        let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();
+        self.cache_tracks(tracks);
+        let start = (!shuffle).then_some(0);
+        self.imp()
+            .queue
+            .borrow_mut()
+            .play_context(&ids, start, None, shuffle, &mut rand::rng());
+        self.load_current(true, 0);
+        self.queue_changed();
+    }
+
     /// Inserts tracks after the current one.
     pub fn play_next(&self, tracks: Vec<TrackObject>) {
         let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();

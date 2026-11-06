@@ -1,4 +1,4 @@
-//! Loads cover thumbnails made by the scanner (gatefold_core::library::covers).
+//! Loads cover and portrait thumbnails made by gatefold_core's CoverCache.
 //!
 //! The thumbnails are our own JPEGs, so GDK's built-in loader reads them.
 //! Recently used textures are cached; covers repeat a lot in the grid.
@@ -11,24 +11,38 @@ use gtk::gdk;
 
 use crate::config;
 
-/// Textures kept in memory, per size.
+/// Textures kept in memory.
 const CACHE_LIMIT: usize = 400;
 
-thread_local! {
-    static CACHE: RefCell<HashMap<(String, CoverSize), gdk::Texture>> = RefCell::default();
-    static COVERS: CoverCache = CoverCache::new(config::cover_dir());
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Kind {
+    Cover,
+    Portrait,
 }
 
-pub fn texture(key: &str, size: CoverSize) -> Option<gdk::Texture> {
-    let cache_key = (key.to_owned(), size);
+thread_local! {
+    static CACHE: RefCell<HashMap<(Kind, String, CoverSize), gdk::Texture>> = RefCell::default();
+    static COVERS: CoverCache = CoverCache::new(config::cover_dir());
+    static PORTRAITS: CoverCache = CoverCache::new(config::portrait_dir());
+}
+
+fn path(kind: Kind, key: &str, size: CoverSize) -> std::path::PathBuf {
+    match kind {
+        Kind::Cover => COVERS.with(|c| c.path(key, size)),
+        Kind::Portrait => PORTRAITS.with(|c| c.path(key, size)),
+    }
+}
+
+fn load(kind: Kind, key: &str, size: CoverSize) -> Option<gdk::Texture> {
+    let cache_key = (kind, key.to_owned(), size);
     if let Some(texture) = CACHE.with_borrow(|cache| cache.get(&cache_key).cloned()) {
         return Some(texture);
     }
-    let path = COVERS.with(|covers| covers.path(key, size));
+    let path = path(kind, key, size);
     let texture = match gdk::Texture::from_filename(&path) {
         Ok(texture) => texture,
         Err(err) => {
-            tracing::debug!("No cover thumbnail {}: {err}", path.display());
+            tracing::debug!("No thumbnail {}: {err}", path.display());
             return None;
         }
     };
@@ -41,9 +55,17 @@ pub fn texture(key: &str, size: CoverSize) -> Option<gdk::Texture> {
     Some(texture)
 }
 
-/// A `file://` URI of a thumbnail, for MPRIS.
+pub fn texture(key: &str, size: CoverSize) -> Option<gdk::Texture> {
+    load(Kind::Cover, key, size)
+}
+
+pub fn portrait(key: &str, size: CoverSize) -> Option<gdk::Texture> {
+    load(Kind::Portrait, key, size)
+}
+
+/// A `file://` URI of a cover thumbnail, for MPRIS.
 pub fn uri(key: &str, size: CoverSize) -> Option<String> {
-    let path = COVERS.with(|covers| covers.path(key, size));
+    let path = path(Kind::Cover, key, size);
     path.is_file()
         .then(|| gtk::glib::filename_to_uri(&path, None).ok())
         .flatten()

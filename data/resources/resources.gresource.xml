@@ -4,6 +4,7 @@
     <!-- Compiled from .blp by blueprint-compiler into the build directory. -->
     <file compressed="true" preprocess="xml-stripblanks">ui/window.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/album_panel.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/artist_page.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/mini_player.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/player_view.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/preferences_dialog.ui</file>

@@ -70,13 +70,9 @@ template $GatefoldAlbumPanel: Adw.Bin {
             ]
           }
 
-          Gtk.Label artist {
-            wrap: true;
-            xalign: 0;
-
-            styles [
-              "heading",
-            ]
+          // Album artists as links to their pages, or the plain credit.
+          Adw.WrapBox artists {
+            child-spacing: 12;
           }
 
           Gtk.Label meta {

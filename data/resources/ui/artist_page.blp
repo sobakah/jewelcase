@@ -1,0 +1,188 @@
+using Gtk 4.0;
+using Adw 1;
+
+// An artist's page, pushed onto the Artists navigation view (CONCEPT.md §4.2).
+template $GatefoldArtistPage: Adw.NavigationPage {
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-start-title-buttons: false;
+      show-end-title-buttons: false;
+
+      [end]
+      Gtk.MenuButton {
+        icon-name: "view-more-symbolic";
+        tooltip-text: _("Artist Menu");
+        menu-model: artist_menu;
+      }
+
+      styles [
+        "flat",
+      ]
+    }
+
+    [top]
+    Adw.Banner identify_banner {
+      button-label: _("_Identify…");
+      action-name: "artist.identify";
+    }
+
+    content: Adw.OverlaySplitView split_view {
+      sidebar-position: end;
+      show-sidebar: false;
+      min-sidebar-width: 320;
+      max-sidebar-width: 440;
+      sidebar-width-fraction: 0.38;
+
+      content: Gtk.ScrolledWindow {
+        hscrollbar-policy: never;
+
+        child: Adw.Clamp {
+          maximum-size: 1100;
+          margin-start: 24;
+          margin-end: 24;
+          margin-top: 12;
+          margin-bottom: 24;
+
+          child: Gtk.Box {
+            orientation: vertical;
+            spacing: 24;
+
+            Gtk.Box {
+              spacing: 24;
+
+              Adw.Avatar avatar {
+                size: 160;
+                show-initials: true;
+                valign: start;
+              }
+
+              Gtk.Box {
+                orientation: vertical;
+                valign: center;
+                spacing: 6;
+                hexpand: true;
+
+                Gtk.Label name {
+                  wrap: true;
+                  xalign: 0;
+
+                  styles [
+                    "title-1",
+                  ]
+                }
+
+                Gtk.Label counts {
+                  xalign: 0;
+
+                  styles [
+                    "dim-label",
+                  ]
+                }
+
+                Gtk.Box {
+                  spacing: 6;
+                  margin-top: 6;
+
+                  Gtk.Button {
+                    action-name: "artist.play";
+
+                    child: Adw.ButtonContent {
+                      icon-name: "media-playback-start-symbolic";
+                      label: _("_Play All");
+                      use-underline: true;
+                    };
+
+                    styles [
+                      "pill",
+                      "suggested-action",
+                    ]
+                  }
+
+                  Gtk.Button {
+                    icon-name: "media-playlist-shuffle-symbolic";
+                    tooltip-text: _("Shuffle");
+                    action-name: "artist.shuffle";
+                    valign: center;
+
+                    styles [
+                      "circular",
+                    ]
+                  }
+                }
+
+                Gtk.Box links {
+                  spacing: 6;
+                  margin-top: 6;
+                  visible: false;
+                }
+              }
+            }
+
+            Gtk.Box bio_box {
+              orientation: vertical;
+              spacing: 3;
+              visible: false;
+
+              Gtk.Label bio {
+                wrap: true;
+                xalign: 0;
+                lines: 2;
+                ellipsize: end;
+                selectable: true;
+              }
+
+              Gtk.Button bio_toggle {
+                label: _("More");
+                halign: start;
+
+                styles [
+                  "flat",
+                  "small",
+                ]
+              }
+            }
+
+            Gtk.Box sections {
+              orientation: vertical;
+              spacing: 24;
+            }
+          };
+        };
+      };
+
+      sidebar: $GatefoldAlbumPanel album_panel {};
+    };
+  };
+}
+
+menu artist_menu {
+  section {
+    item {
+      label: _("_Choose Image…");
+      action: "artist.choose-image";
+    }
+
+    item {
+      label: _("Choose From _Online Sources…");
+      action: "artist.choose-online";
+    }
+
+    item {
+      label: _("_Reset to Automatic");
+      action: "artist.reset-portrait";
+    }
+  }
+
+  section {
+    item {
+      label: _("_Identify Artist…");
+      action: "artist.identify";
+    }
+
+    item {
+      label: _("_Look Up Again");
+      action: "artist.lookup";
+    }
+  }
+}

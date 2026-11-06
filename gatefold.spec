@@ -88,3 +88,4 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 * Fri Nov 06 2026 sobakah - 0.1.0-1
 - Project skeleton (roadmap phase 0)
 - Library scanner, album grid and panel, playback, queue, MPRIS (phase 1)
+- Artists: grid, pages, online lookups, portraits (phase 2)

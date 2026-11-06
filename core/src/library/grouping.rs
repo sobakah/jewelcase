@@ -30,6 +30,9 @@ pub struct AlbumInfo {
     pub artist_sort: String,
     /// One entry per album artist (§3.3): `ALBUMARTISTS` values, else the credit.
     pub album_artists: Vec<String>,
+    /// `MUSICBRAINZ_ALBUMARTISTID` values, parallel to `album_artists` when
+    /// the counts match.
+    pub album_artist_mbids: Vec<String>,
     pub year: Option<i32>,
     pub release_type: ReleaseType,
     pub soundtrack: bool,
@@ -213,6 +216,8 @@ fn build_album(key: String, tracks: &[&TrackRecord]) -> AlbumInfo {
                 vec![artist_credit.clone()]
             }
         });
+    let album_artist_mbids =
+        most_common_list(tracks.iter().map(|t| &t.tags.mb_album_artist_ids)).unwrap_or_default();
     let artist_sort = most_common(&|t| t.tags.album_artist_sort.clone())
         .map(|s| s.to_lowercase())
         .unwrap_or_else(|| titles::sort_key(&artist_credit));
@@ -244,6 +249,7 @@ fn build_album(key: String, tracks: &[&TrackRecord]) -> AlbumInfo {
         title,
         edition,
         album_artists,
+        album_artist_mbids,
         artist_sort,
         artist_credit,
         year: most_common(&|t| t.tags.year.map(|y| y.to_string())).and_then(|y| y.parse().ok()),

@@ -29,7 +29,7 @@ mod imp {
         #[template_child]
         pub edition: TemplateChild<gtk::Label>,
         #[template_child]
-        pub artist: TemplateChild<gtk::Label>,
+        pub artists: TemplateChild<adw::WrapBox>,
         #[template_child]
         pub meta: TemplateChild<gtk::Label>,
         #[template_child]
@@ -172,8 +172,7 @@ impl AlbumPanel {
         imp.edition
             .set_label(info.edition.as_deref().unwrap_or_default());
         imp.edition.set_visible(info.edition.is_some());
-        let artist = artist_or_unknown(&info.artist_credit);
-        imp.artist.set_label(&artist);
+        self.fill_artists(info);
 
         let mut meta = Vec::new();
         if let Some(year) = info.year {
@@ -188,6 +187,35 @@ impl AlbumPanel {
         self.fill_tracks(&tracks, &info.artist_credit);
         imp.track_objects.replace(tracks);
         self.update_playing();
+    }
+
+    fn fill_artists(&self, album: &gatefold_core::db::Album) {
+        let imp = self.imp();
+        imp.artists.remove_all();
+        let linked = GatefoldApplication::get().library().album_artists(album.id);
+        if linked.is_empty() {
+            // Compilations and unknown artists have no page.
+            imp.artists.append(
+                &gtk::Label::builder()
+                    .label(artist_or_unknown(&album.artist_credit))
+                    .wrap(true)
+                    .xalign(0.0)
+                    .css_classes(["heading"])
+                    .build(),
+            );
+            return;
+        }
+        for (id, name) in linked {
+            let button = gtk::Button::builder()
+                .label(&name)
+                .action_name("win.show-artist")
+                .action_target(&id.to_variant())
+                // Translators: tooltip of an artist link; {} is the name.
+                .tooltip_text(gettext("Go to {}").replace("{}", &name))
+                .css_classes(["flat", "artist-link", "heading"])
+                .build();
+            imp.artists.append(&button);
+        }
     }
 
     fn fill_tracks(&self, tracks: &[TrackObject], album_artist: &str) {
