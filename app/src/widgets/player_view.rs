@@ -360,19 +360,6 @@ impl PlayerView {
     }
 
     fn update_repeat(&self, player: &Player) {
-        let (icon, tooltip) = match player.repeat().as_str() {
-            "all" => ("media-playlist-repeat-symbolic", gettext("Repeat: All")),
-            "one" => (
-                "media-playlist-repeat-song-symbolic",
-                gettext("Repeat: One Song"),
-            ),
-            _ => (
-                "media-playlist-consecutive-symbolic",
-                gettext("Repeat: Off"),
-            ),
-        };
-        let button = &self.imp().repeat_button;
-        button.set_icon_name(icon);
-        button.set_tooltip_text(Some(&tooltip));
+        super::mini_player::update_repeat_button(&self.imp().repeat_button, player);
     }
 }

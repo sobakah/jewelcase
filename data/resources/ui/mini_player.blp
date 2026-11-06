@@ -1,8 +1,8 @@
 using Gtk 4.0;
 using Adw 1;
-
-// Bottom bar of the library window (CONCEPT.md §4.1). Clicking it opens
-// the full player.
+// Bottom bar of the library window (CONCEPT.md §4.1): a compact, centered
+// player. Clicking the arrow (or swiping up) opens the full player; the
+// queue button opens the queue as a card.
 template $GatefoldMiniPlayer: Adw.Bin {
   styles [
     "mini-player",
@@ -10,24 +10,18 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
   child: Gtk.Box {
     orientation: vertical;
-
-    Gtk.ProgressBar progress {
-      styles [
-        "osd",
-        "mini-progress",
-      ]
-    }
+    margin-start: 12;
+    margin-end: 12;
+    margin-top: 9;
+    margin-bottom: 6;
+    spacing: 3;
 
     Gtk.Box {
       spacing: 12;
-      margin-start: 12;
-      margin-end: 6;
-      margin-top: 6;
-      margin-bottom: 6;
 
       $GatefoldCoverImage cover {
-        min-size: 48;
-        natural-size: 48;
+        min-size: 56;
+        natural-size: 56;
         valign: center;
       }
 
@@ -35,11 +29,13 @@ template $GatefoldMiniPlayer: Adw.Bin {
         orientation: vertical;
         valign: center;
         hexpand: true;
+        width-request: 140;
 
         Gtk.Label title {
           label: _("Not Playing");
           xalign: 0;
           ellipsize: end;
+          max-width-chars: 28;
 
           styles [
             "heading",
@@ -49,6 +45,7 @@ template $GatefoldMiniPlayer: Adw.Bin {
         Gtk.Label artist {
           xalign: 0;
           ellipsize: end;
+          max-width-chars: 28;
           visible: false;
 
           styles [
@@ -59,13 +56,27 @@ template $GatefoldMiniPlayer: Adw.Bin {
       }
 
       Gtk.Box {
-        spacing: 6;
+        spacing: 3;
         valign: center;
+
+        Gtk.ToggleButton shuffle_button {
+          visible: bind template.compact inverted;
+          icon-name: "media-playlist-shuffle-symbolic";
+          tooltip-text: _("Shuffle");
+          action-name: "player.shuffle";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
 
         Gtk.Button {
           icon-name: "media-skip-backward-symbolic";
           tooltip-text: _("Previous");
           action-name: "player.previous";
+          valign: center;
 
           styles [
             "flat",
@@ -77,10 +88,12 @@ template $GatefoldMiniPlayer: Adw.Bin {
           icon-name: "media-playback-start-symbolic";
           tooltip-text: _("Play");
           action-name: "player.play-pause";
+          valign: center;
 
           styles [
-            "flat",
             "circular",
+            "suggested-action",
+            "mini-play-button",
           ]
         }
 
@@ -88,6 +101,44 @@ template $GatefoldMiniPlayer: Adw.Bin {
           icon-name: "media-skip-forward-symbolic";
           tooltip-text: _("Next");
           action-name: "player.next";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+
+        Gtk.Button repeat_button {
+          visible: bind template.compact inverted;
+          icon-name: "media-playlist-consecutive-symbolic";
+          tooltip-text: _("Repeat: Off");
+          action-name: "player.repeat";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+      }
+
+      Gtk.Box {
+        spacing: 3;
+        valign: center;
+        margin-start: 6;
+        // The queue as a card above the bar, to view and change it.
+        Gtk.MenuButton queue_button {
+          visible: bind template.compact inverted;
+          icon-name: "view-list-ordered-symbolic";
+          tooltip-text: _("Queue");
+          direction: up;
+
+          popover: Gtk.Popover queue_popover {
+            styles [
+              "queue-card",
+            ]
+          };
 
           styles [
             "flat",
@@ -105,6 +156,47 @@ template $GatefoldMiniPlayer: Adw.Bin {
             "circular",
           ]
         }
+      }
+    }
+
+    Gtk.Box {
+      spacing: 6;
+
+      Gtk.Label position_label {
+        label: "0:00";
+        width-chars: 5;
+        xalign: 1;
+
+        styles [
+          "dim-label",
+          "caption",
+          "numeric",
+        ]
+      }
+
+      Gtk.Scale seek {
+        hexpand: true;
+
+        adjustment: Gtk.Adjustment seek_adjustment {
+          lower: 0;
+          upper: 1;
+        };
+
+        styles [
+          "mini-seek",
+        ]
+      }
+
+      Gtk.Label duration_label {
+        label: "0:00";
+        width-chars: 5;
+        xalign: 0;
+
+        styles [
+          "dim-label",
+          "caption",
+          "numeric",
+        ]
       }
     }
   };

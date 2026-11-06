@@ -327,3 +327,9 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     row.add_controller(drop);
     row.upcast()
 }
+
+impl Default for QueueView {
+    fn default() -> Self {
+        glib::Object::new()
+    }
+}

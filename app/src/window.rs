@@ -53,6 +53,8 @@ mod imp {
         #[template_child]
         pub album_panel: TemplateChild<AlbumPanel>,
         #[template_child]
+        pub mini_player: TemplateChild<MiniPlayer>,
+        #[template_child]
         pub artist_split: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub artist_holder: TemplateChild<adw::Bin>,
@@ -94,6 +96,9 @@ mod imp {
 
             klass.install_action("win.open-player", None, |win, _, _| {
                 win.imp().bottom_sheet.set_open(true);
+            });
+            klass.install_action("win.queue-card", None, |win, _, _| {
+                win.imp().mini_player.show_queue();
             });
             klass.install_action("win.close-player", None, |win, _, _| {
                 win.imp().bottom_sheet.set_open(false);

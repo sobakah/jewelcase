@@ -24,13 +24,18 @@ template $GatefoldWindow: Adw.ApplicationWindow {
     setters {
       header_bar.show-title: false;
       switcher_bar.reveal: true;
+      bottom_sheet.full-width: true;
+      mini_player.compact: true;
       split_view.collapsed: true;
       playlist_split.collapsed: true;
     }
   }
 
   content: Adw.ToastOverlay toast_overlay {
+    // Not full width: the mini player is a compact bar in the middle, and
+    // the player sheet only as wide as it needs (CONCEPT.md §4.3).
     child: Adw.BottomSheet bottom_sheet {
+      full-width: false;
       // The sheet doesn't pad its content, so keep the switcher bar and the
       // ends of the lists clear of the mini player.
       content: Adw.ToolbarView {
@@ -403,7 +408,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
         }
       };
 
-      bottom-bar: $GatefoldMiniPlayer {};
+      bottom-bar: $GatefoldMiniPlayer mini_player {};
 
       sheet: $GatefoldPlayerView player_view {};
     };
