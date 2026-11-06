@@ -385,8 +385,10 @@ pub fn parse_search(json: &Value) -> Vec<Candidate> {
         .collect()
 }
 
-/// Accepts only a high-confidence match: a perfect score, the same name,
-/// and no other artist of that name close behind (§8).
+/// Accepts the best-ranked artist with exactly that name (or alias), if
+/// MusicBrainz is confident about it. With several artists of the same
+/// name, its ranking (which favours the better-known one) has proven
+/// right; "Identify Artist…" picks another (§8).
 pub fn pick_candidate(name: &str, candidates: Vec<Candidate>) -> Identity {
     let wanted = name.to_lowercase();
     let same_name: Vec<&Candidate> = candidates
@@ -396,11 +398,8 @@ pub fn pick_candidate(name: &str, candidates: Vec<Candidate>) -> Identity {
                 || c.other_names.iter().any(|n| n.to_lowercase() == wanted)
         })
         .collect();
-    match same_name.as_slice() {
-        [only] if only.score >= 95 => Identity::Found(only.mbid.clone()),
-        [first, second, ..] if first.score == 100 && second.score < 80 => {
-            Identity::Found(first.mbid.clone())
-        }
+    match same_name.first() {
+        Some(first) if first.score >= 95 => Identity::Found(first.mbid.clone()),
         _ if candidates.is_empty() => Identity::NotFound,
         _ => Identity::Ambiguous(candidates.into_iter().take(5).collect()),
     }
@@ -607,8 +606,9 @@ mod tests {
             candidate("n1", "Nirvana", 100),
             candidate("n2", "Nirvana", 100),
         ];
-        assert!(
-            matches!(pick_candidate("Nirvana", homonyms), Identity::Ambiguous(c) if c.len() == 2)
+        assert_eq!(
+            pick_candidate("Nirvana", homonyms),
+            Identity::Found("n1".into())
         );
 
         let mut native = candidate("ku", "牛尾憲輔", 100);
