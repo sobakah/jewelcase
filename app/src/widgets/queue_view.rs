@@ -61,6 +61,35 @@ impl QueueView {
                 .css_classes(["heading"])
                 .build(),
         );
+        let save = gtk::Button::builder()
+            .label(gettext("_Save"))
+            .use_underline(true)
+            .tooltip_text(gettext("Save as Playlist"))
+            .css_classes(["flat"])
+            .build();
+        save.connect_clicked(glib::clone!(
+            #[weak]
+            player,
+            move |button| {
+                let button = button.clone();
+                glib::spawn_future_local(async move {
+                    let name = super::playlist_picker::ask_name(
+                        &button,
+                        &gettext("Save Queue as Playlist"),
+                        "",
+                        &gettext("_Save"),
+                    )
+                    .await;
+                    if let Some(name) = name {
+                        let ids = player.queued_track_ids();
+                        GatefoldApplication::get()
+                            .library()
+                            .create_playlist(&name, &ids);
+                    }
+                });
+            }
+        ));
+        header.append(&save);
         header.append(
             &gtk::Button::builder()
                 .label(gettext("_Clear"))

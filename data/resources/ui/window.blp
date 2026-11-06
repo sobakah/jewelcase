@@ -16,6 +16,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
 
     setters {
       split_view.collapsed: true;
+      playlist_split.collapsed: true;
     }
   }
 
@@ -26,18 +27,31 @@ template $GatefoldWindow: Adw.ApplicationWindow {
       header_bar.show-title: false;
       switcher_bar.reveal: true;
       split_view.collapsed: true;
+      playlist_split.collapsed: true;
     }
   }
 
   content: Adw.ToastOverlay toast_overlay {
   child: Adw.BottomSheet bottom_sheet {
+    // The sheet doesn't pad its content, so keep the switcher bar and the
+    // ends of the lists clear of the mini player.
     content: Adw.ToolbarView {
+      margin-bottom: bind bottom_sheet.bottom-bar-height;
+
       [top]
       Adw.HeaderBar header_bar {
         title-widget: Adw.ViewSwitcher {
           stack: stack;
           policy: wide;
         };
+
+        [start]
+        Gtk.MenuButton playlist_button {
+          icon-name: "list-add-symbolic";
+          tooltip-text: _("New Playlist");
+          menu-model: playlist_menu;
+          visible: false;
+        }
 
         [start]
         Gtk.MenuButton sort_button {
@@ -70,7 +84,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
 
           child: Gtk.SearchEntry search_entry {
             hexpand: true;
-            placeholder-text: _("Filter albums and artists");
+            placeholder-text: _("Search artists, albums, songs and playlists");
           };
         };
       }
@@ -128,7 +142,14 @@ template $GatefoldWindow: Adw.ApplicationWindow {
         revealed: false;
       }
 
-      content: Adw.ViewStack stack {
+      // The library views, or search results while searching.
+      content: Gtk.Stack main_stack {
+        transition-type: crossfade;
+
+        Gtk.StackPage {
+          name: "library";
+
+          child: Adw.ViewStack stack {
         Adw.ViewStackPage {
           name: "albums";
           title: _("Albums");
@@ -172,14 +193,6 @@ template $GatefoldWindow: Adw.ApplicationWindow {
               };
             }
 
-            Gtk.StackPage {
-              name: "no-results";
-
-              child: Adw.StatusPage {
-                icon-name: "edit-find-symbolic";
-                title: _("No Matching Albums");
-              };
-            }
 
             Gtk.StackPage {
               name: "albums";
@@ -272,14 +285,6 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                   };
                 }
 
-                Gtk.StackPage {
-                  name: "no-results";
-
-                  child: Adw.StatusPage {
-                    icon-name: "edit-find-symbolic";
-                    title: _("No Matching Artists");
-                  };
-                }
 
                 Gtk.StackPage {
                   name: "artists";
@@ -308,11 +313,81 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           title: _("Playlists");
           icon-name: "view-list-bullet-symbolic";
 
-          child: Adw.StatusPage {
-            icon-name: "view-list-bullet-symbolic";
-            title: _("No Playlists Yet");
-            description: _("Playlists you create will show up here.");
+          child: Gtk.Stack playlists_stack {
+            transition-type: crossfade;
+
+            Gtk.StackPage {
+              name: "empty";
+
+              child: Adw.StatusPage {
+                icon-name: "view-list-bullet-symbolic";
+                title: _("No Playlists Yet");
+                description: _("Create a playlist, or import an M3U or XSPF file.");
+
+                child: Gtk.Box {
+                  halign: center;
+                  spacing: 12;
+
+                  Gtk.Button {
+                    label: _("_Import…");
+                    use-underline: true;
+                    action-name: "win.import-playlist";
+
+                    styles [
+                      "pill",
+                    ]
+                  }
+
+                  Gtk.Button {
+                    label: _("_New Playlist");
+                    use-underline: true;
+                    action-name: "win.new-playlist";
+
+                    styles [
+                      "pill",
+                      "suggested-action",
+                    ]
+                  }
+                };
+              };
+            }
+
+            Gtk.StackPage {
+              name: "playlists";
+
+              child: Adw.OverlaySplitView playlist_split {
+                sidebar-position: end;
+                show-sidebar: false;
+                min-sidebar-width: 320;
+                max-sidebar-width: 440;
+                sidebar-width-fraction: 0.38;
+
+                content: Gtk.ScrolledWindow {
+                  hscrollbar-policy: never;
+
+                  child: Gtk.GridView playlist_grid {
+                    max-columns: 12;
+                    min-columns: 2;
+                    single-click-activate: true;
+
+                    styles [
+                      "album-grid",
+                    ]
+                  };
+                };
+
+                sidebar: $GatefoldPlaylistPanel playlist_panel {};
+              };
+            }
           };
+        }
+      };
+        }
+
+        Gtk.StackPage {
+          name: "search";
+
+          child: $GatefoldSearchView search_view {};
         }
       };
 
@@ -326,6 +401,20 @@ template $GatefoldWindow: Adw.ApplicationWindow {
     sheet: $GatefoldPlayerView player_view {};
   };
   };
+}
+
+menu playlist_menu {
+  section {
+    item {
+      label: _("_New Playlist…");
+      action: "win.new-playlist";
+    }
+
+    item {
+      label: _("_Import Playlist…");
+      action: "win.import-playlist";
+    }
+  }
 }
 
 menu sort_menu {

@@ -66,6 +66,9 @@ mod imp {
         pub state: Cell<State>,
         /// Queue item handed to GStreamer for gapless playback.
         pub pending_next: Cell<Option<u64>>,
+        /// "Next From: …" for queues not started from an album (an artist,
+        /// a playlist). Not saved with the queue.
+        pub context_name: RefCell<Option<String>>,
         pub tick: RefCell<Option<glib::SourceId>>,
         pub save: RefCell<Option<glib::SourceId>>,
     }
@@ -268,6 +271,7 @@ impl Player {
         }
         let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();
         self.cache_tracks(tracks);
+        self.imp().context_name.replace(None);
         self.imp().queue.borrow_mut().play_context(
             &ids,
             start,
@@ -280,13 +284,22 @@ impl Player {
     }
 
     /// Plays a list of tracks (an artist's albums), in order or shuffled.
-    pub fn play_tracks(&self, tracks: Vec<TrackObject>, shuffle: bool) {
+    /// `name` is the context for "Next From: …" (an artist or playlist);
+    /// `start` the track to begin with.
+    pub fn play_tracks(
+        &self,
+        tracks: Vec<TrackObject>,
+        start: Option<usize>,
+        shuffle: bool,
+        name: Option<String>,
+    ) {
         if tracks.is_empty() {
             return;
         }
         let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();
         self.cache_tracks(tracks);
-        let start = (!shuffle).then_some(0);
+        self.imp().context_name.replace(name);
+        let start = start.or((!shuffle).then_some(0));
         self.imp()
             .queue
             .borrow_mut()
@@ -346,6 +359,9 @@ impl Player {
 
     /// The album the queue was started from, for "Next From: …".
     pub fn context_title(&self) -> Option<String> {
+        if let Some(name) = self.imp().context_name.borrow().clone() {
+            return Some(name);
+        }
         let album = self.imp().queue.borrow().context_album()?;
         self.library()
             .db()?
@@ -353,6 +369,17 @@ impl Player {
             .ok()
             .flatten()
             .map(|a| a.title)
+    }
+
+    /// All queued tracks, for "Save as Playlist".
+    pub fn queued_track_ids(&self) -> Vec<i64> {
+        self.imp()
+            .queue
+            .borrow()
+            .items()
+            .iter()
+            .map(|i| i.track_id)
+            .collect()
     }
 
     /// Removes the queue entry at `offset` in the queue model (> 0).

@@ -99,6 +99,58 @@ impl CoverCache {
     /// Decodes `data` in glycin's sandbox and writes all thumbnail sizes.
     pub fn generate(&self, key: &str, data: Vec<u8>) -> Result<(), CoverError> {
         let image = decode(data)?;
+        self.write_thumbnails(key, &image)
+    }
+
+    /// A 2×2 mosaic of up to four covers (playlists, §4.1), made from their
+    /// panel thumbnails. Fewer covers repeat. Returns the mosaic's key.
+    pub fn mosaic(&self, keys: &[String]) -> Result<String, CoverError> {
+        let key = self.mosaic_key(keys);
+        let keys: Vec<&String> = keys.iter().take(4).collect();
+        if self.has(&key) {
+            return Ok(key);
+        }
+        let tiles: Vec<DynamicImage> = keys
+            .iter()
+            .filter_map(|k| image::open(self.path(k, CoverSize::Panel)).ok())
+            .collect();
+        if tiles.is_empty() {
+            return Err(CoverError::Decode(
+                "no cover thumbnails for the mosaic".into(),
+            ));
+        }
+        let half = CoverSize::Panel.pixels() / 2;
+        let mut canvas = image::RgbImage::new(half * 2, half * 2);
+        for (i, (x, y)) in [(0, 0), (half, 0), (0, half), (half, half)]
+            .into_iter()
+            .enumerate()
+        {
+            // 1 cover: all four; 2: diagonal; 3: the first repeats.
+            let tile = &tiles[match tiles.len() {
+                2 => [0, 1, 1, 0][i],
+                n => i % n,
+            }];
+            let tile = tile
+                .resize_to_fill(half, half, FilterType::CatmullRom)
+                .to_rgb8();
+            image::imageops::overlay(&mut canvas, &tile, i64::from(x), i64::from(y));
+        }
+        self.write_thumbnails(&key, &DynamicImage::ImageRgb8(canvas))?;
+        Ok(key)
+    }
+
+    /// The key `mosaic` stores the mosaic of these covers under.
+    pub fn mosaic_key(&self, keys: &[String]) -> String {
+        let joined = keys
+            .iter()
+            .take(4)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("+");
+        cover_key('m', joined.as_bytes())
+    }
+
+    fn write_thumbnails(&self, key: &str, image: &DynamicImage) -> Result<(), CoverError> {
         fs::create_dir_all(&self.dir)?;
         for size in CoverSize::ALL {
             let pixels = size.pixels();
@@ -116,7 +168,7 @@ impl CoverCache {
             }
             fs::rename(&partial, &path)?;
         }
-        self.write_color(key, &image)?;
+        self.write_color(key, image)?;
         Ok(())
     }
 }
@@ -263,6 +315,35 @@ mod tests {
         let gray = image::RgbImage::from_pixel(10, 10, image::Rgb([90, 90, 90]));
         assert_eq!(dominant_color(&DynamicImage::ImageRgb8(gray)), [90, 90, 90]);
         assert_eq!(parse_hex("#0a0b0c"), Some([10, 11, 12]));
+    }
+
+    #[test]
+    fn mosaics() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = CoverCache::new(dir.path());
+        let colors = [[255, 0, 0], [0, 255, 0]];
+        let keys: Vec<String> = colors
+            .iter()
+            .enumerate()
+            .map(|(i, rgb)| {
+                let key = format!("t{i}");
+                let tile =
+                    DynamicImage::ImageRgb8(image::RgbImage::from_pixel(64, 64, image::Rgb(*rgb)));
+                cache.write_thumbnails(&key, &tile).unwrap();
+                key
+            })
+            .collect();
+        let mosaic = cache.mosaic(&keys).unwrap();
+        assert!(cache.has(&mosaic));
+        let image = image::open(cache.path(&mosaic, CoverSize::Panel))
+            .unwrap()
+            .to_rgb8();
+        let [r, g, _] = image.get_pixel(10, 10).0;
+        assert!(r > 200 && g < 60, "top left is the first cover");
+        let [r, g, _] = image.get_pixel(image.width() - 10, 10).0;
+        assert!(g > 200 && r < 60, "top right is the second cover");
+        assert_eq!(cache.mosaic(&keys).unwrap(), mosaic, "cached");
+        assert!(cache.mosaic(&["missing".into()]).is_err());
     }
 
     #[test]

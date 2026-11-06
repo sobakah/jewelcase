@@ -7,6 +7,7 @@
     <file compressed="true" preprocess="xml-stripblanks">ui/artist_page.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/mini_player.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/player_view.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/playlist_panel.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/preferences_dialog.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/shortcuts_dialog.ui</file>
     <!-- Loaded automatically by AdwApplication. -->

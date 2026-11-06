@@ -4,4 +4,5 @@
 pub mod db;
 pub mod library;
 pub mod playback;
+pub mod playlist_files;
 pub mod queue;

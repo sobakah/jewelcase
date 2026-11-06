@@ -1,0 +1,179 @@
+using Gtk 4.0;
+using Adw 1;
+
+// A playlist in the side panel (CONCEPT.md §4.1): editable order (drag
+// and drop), remove, rename, cover, export.
+template $GatefoldPlaylistPanel: Adw.Bin {
+  styles [
+    "album-panel",
+  ]
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+      show-start-title-buttons: false;
+      show-end-title-buttons: false;
+
+      [end]
+      Gtk.Button {
+        icon-name: "window-close-symbolic";
+        tooltip-text: _("Close");
+        action-name: "playlist.close";
+      }
+
+      styles [
+        "flat",
+      ]
+    }
+
+    content: Gtk.ScrolledWindow {
+      hscrollbar-policy: never;
+
+      child: Adw.Clamp {
+        maximum-size: 560;
+        margin-start: 18;
+        margin-end: 18;
+        margin-bottom: 24;
+
+        child: Gtk.Box {
+          orientation: vertical;
+          spacing: 6;
+
+          Adw.Clamp {
+            maximum-size: 360;
+            margin-bottom: 12;
+
+            child: $GatefoldCoverImage cover {
+              min-size: 160;
+              natural-size: 360;
+              kind: "panel";
+            };
+          }
+
+          Gtk.Label name {
+            wrap: true;
+            xalign: 0;
+
+            styles [
+              "title-2",
+            ]
+          }
+
+          Gtk.Label meta {
+            wrap: true;
+            xalign: 0;
+
+            styles [
+              "dim-label",
+              "caption",
+            ]
+          }
+
+          Gtk.Label availability {
+            wrap: true;
+            xalign: 0;
+            visible: false;
+
+            styles [
+              "caption",
+            ]
+          }
+
+          Gtk.Box {
+            spacing: 6;
+            margin-top: 12;
+            margin-bottom: 12;
+
+            Gtk.Button {
+              action-name: "playlist.play";
+
+              child: Adw.ButtonContent {
+                icon-name: "media-playback-start-symbolic";
+                label: _("_Play");
+                use-underline: true;
+              };
+
+              styles [
+                "pill",
+                "suggested-action",
+              ]
+            }
+
+            Gtk.Button {
+              icon-name: "media-playlist-shuffle-symbolic";
+              tooltip-text: _("Shuffle");
+              action-name: "playlist.shuffle";
+              valign: center;
+
+              styles [
+                "circular",
+              ]
+            }
+
+            Gtk.MenuButton {
+              icon-name: "view-more-symbolic";
+              tooltip-text: _("More");
+              menu-model: playlist_menu;
+              valign: center;
+
+              styles [
+                "circular",
+              ]
+            }
+          }
+
+          Adw.StatusPage empty {
+            icon-name: "view-list-bullet-symbolic";
+            title: _("Empty Playlist");
+            description: _("Add songs with “Add to Playlist…” in an album or the queue.");
+            visible: false;
+
+            styles [
+              "compact",
+            ]
+          }
+
+          Gtk.ListBox items {
+            selection-mode: none;
+
+            styles [
+              "boxed-list",
+            ]
+          }
+        };
+      };
+    };
+  };
+}
+
+menu playlist_menu {
+  section {
+    item {
+      label: _("_Rename…");
+      action: "playlist.rename";
+    }
+
+    item {
+      label: _("Change _Cover…");
+      action: "playlist.change-cover";
+    }
+
+    item {
+      label: _("Use _Automatic Cover");
+      action: "playlist.reset-cover";
+    }
+  }
+
+  section {
+    item {
+      label: _("_Export…");
+      action: "playlist.export";
+    }
+
+    item {
+      label: _("_Delete Playlist…");
+      action: "playlist.delete";
+    }
+  }
+}

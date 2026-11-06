@@ -8,12 +8,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_core::db::{Album, Database, Track};
+use gatefold_core::db::{Album, Database, PlaylistItem, SearchResults, Track};
 use gatefold_core::library::artists::AlbumRole;
 use gatefold_core::library::artists::Aliases;
 use gatefold_core::library::covers::CoverCache;
 use gatefold_core::library::scanner::{self, ScanProgress, ScanSummary};
 use gatefold_core::library::watch::LibraryWatcher;
+use gatefold_core::playlist_files::{self, Entry as PlaylistFileEntry, Format};
 use gatefold_metadata::{Candidate, PortraitCandidate, Providers};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
@@ -23,7 +24,7 @@ use gtk::{gio, glib};
 use crate::config::{self, APP_ID};
 use crate::library_folders;
 use crate::metadata::{self, ArtistChanged, Job, MetadataService};
-use crate::objects::{AlbumObject, ArtistObject, TrackObject};
+use crate::objects::{AlbumObject, ArtistObject, PlaylistObject, TrackObject};
 
 /// Changes are collected this long before an incremental scan starts.
 const WATCH_DEBOUNCE: Duration = Duration::from_secs(3);
@@ -51,6 +52,7 @@ mod imp {
 
         pub albums: OnceCell<gio::ListStore>,
         pub artists: OnceCell<gio::ListStore>,
+        pub playlists: OnceCell<gio::ListStore>,
         pub metadata: OnceCell<Metadata>,
         pub lookups: RefCell<HashSet<i64>>,
         /// lyrembed's alias groups, from the last scan (search, artist pages).
@@ -92,6 +94,8 @@ mod imp {
                 vec![
                     // Albums were reloaded from the database.
                     Signal::builder("reloaded").build(),
+                    // A playlist was created, renamed, changed or deleted.
+                    Signal::builder("playlists-changed").build(),
                     // An artist's portrait, links or bio changed.
                     Signal::builder("artist-changed")
                         .param_types([i64::static_type()])
@@ -112,6 +116,9 @@ mod imp {
                 .expect("set once");
             self.artists
                 .set(gio::ListStore::new::<ArtistObject>())
+                .expect("set once");
+            self.playlists
+                .set(gio::ListStore::new::<PlaylistObject>())
                 .expect("set once");
         }
     }
@@ -246,6 +253,7 @@ impl Library {
 
         crate::covers::clear();
         self.reload_artists();
+        self.reload_playlists();
         let store = self.albums();
         store.splice(0, store.n_items(), &objects);
         let empty = objects.is_empty();
@@ -436,6 +444,211 @@ impl Library {
             }
         }
         self.emit_by_name::<()>("artist-changed", &[&id]);
+    }
+
+    // Playlists (CONCEPT.md §4.1, §9.5) -------------------------------------
+
+    pub fn playlists(&self) -> &gio::ListStore {
+        self.imp().playlists.get().expect("set in constructed()")
+    }
+
+    pub fn reload_playlists(&self) {
+        let playlists = match self.db().map(|db| db.playlists()) {
+            Some(Ok(playlists)) => playlists,
+            Some(Err(err)) => {
+                tracing::warn!("Cannot load playlists: {err}");
+                return;
+            }
+            None => return,
+        };
+        let covers = CoverCache::new(config::cover_dir());
+        let mut missing_mosaics = Vec::new();
+        let objects: Vec<PlaylistObject> =
+            playlists
+                .into_iter()
+                .map(|playlist| {
+                    let cover = playlist.custom_cover_key.clone().or_else(|| {
+                        match playlist.cover_keys.len() {
+                            0 => None,
+                            1 => playlist.cover_keys.first().cloned(),
+                            _ => {
+                                let mosaic = covers.mosaic_key(&playlist.cover_keys);
+                                if covers.has(&mosaic) {
+                                    Some(mosaic)
+                                } else {
+                                    missing_mosaics.push(playlist.cover_keys.clone());
+                                    playlist.cover_keys.first().cloned()
+                                }
+                            }
+                        }
+                    });
+                    PlaylistObject::new(playlist, cover)
+                })
+                .collect();
+        let store = self.playlists();
+        store.splice(0, store.n_items(), &objects);
+        self.emit_by_name::<()>("playlists-changed", &[]);
+
+        if !missing_mosaics.is_empty() {
+            glib::spawn_future_local(glib::clone!(
+                #[weak(rename_to = library)]
+                self,
+                async move {
+                    let made = gio::spawn_blocking(move || {
+                        missing_mosaics
+                            .iter()
+                            .filter(|keys| covers.mosaic(keys).is_ok())
+                            .count()
+                    })
+                    .await
+                    .unwrap_or(0);
+                    if made > 0 {
+                        library.reload_playlists();
+                    }
+                }
+            ));
+        }
+    }
+
+    pub fn playlist(&self, id: i64) -> Option<PlaylistObject> {
+        let store = self.playlists();
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
+            .find(|p| p.id() == id)
+    }
+
+    pub fn playlist_items(&self, id: i64) -> Vec<PlaylistItem> {
+        self.db()
+            .and_then(|db| db.playlist_items(id).ok())
+            .unwrap_or_default()
+    }
+
+    fn playlist_op(&self, op: impl FnOnce(&mut Database, i64) -> gatefold_core::db::Result<()>) {
+        let result = match self.db() {
+            Some(mut db) => op(&mut db, metadata::now()),
+            None => return,
+        };
+        if let Err(err) = result {
+            tracing::warn!("Playlist change failed: {err}");
+            self.emit_by_name::<()>("message", &[&gettext("The playlist couldn't be changed")]);
+        }
+        self.reload_playlists();
+    }
+
+    /// Creates a playlist, optionally with tracks; returns its ID.
+    pub fn create_playlist(&self, name: &str, tracks: &[i64]) -> Option<i64> {
+        let mut created = None;
+        self.playlist_op(|db, now| {
+            let id = db.create_playlist(name, now)?;
+            created = Some(id);
+            if !tracks.is_empty() {
+                db.add_to_playlist(id, tracks, None, now)?;
+            }
+            Ok(())
+        });
+        created
+    }
+
+    pub fn add_to_playlist(&self, id: i64, tracks: &[i64]) {
+        self.playlist_op(|db, now| db.add_to_playlist(id, tracks, None, now));
+        let name = self
+            .playlist(id)
+            .map(|p| p.playlist().name.clone())
+            .unwrap_or_default();
+        // Translators: {} is a playlist name.
+        self.emit_by_name::<()>("message", &[&gettext("Added to “{}”").replace("{}", &name)]);
+    }
+
+    pub fn rename_playlist(&self, id: i64, name: &str) {
+        self.playlist_op(|db, now| db.rename_playlist(id, name, now));
+    }
+
+    pub fn delete_playlist(&self, id: i64) {
+        self.playlist_op(|db, _| db.delete_playlist(id));
+    }
+
+    pub fn remove_playlist_item(&self, id: i64, item: i64) {
+        self.playlist_op(|db, now| db.remove_playlist_item(id, item, now));
+    }
+
+    pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
+        self.playlist_op(|db, now| db.move_playlist_item(id, from, to, now));
+    }
+
+    pub fn reset_playlist_cover(&self, id: i64) {
+        self.playlist_op(|db, now| db.set_playlist_cover(id, None, now));
+    }
+
+    /// Uses an image file as the playlist's cover (decoded by glycin).
+    pub async fn set_playlist_cover(&self, id: i64, data: Vec<u8>) -> Result<(), String> {
+        let key = gatefold_core::library::covers::cover_key('c', &data);
+        let job_key = key.clone();
+        gio::spawn_blocking(move || {
+            let covers = CoverCache::new(config::cover_dir());
+            if covers.has(&job_key) {
+                Ok(())
+            } else {
+                covers.generate(&job_key, data).map_err(|e| e.to_string())
+            }
+        })
+        .await
+        .map_err(|_| "the cover job failed".to_owned())??;
+        self.playlist_op(|db, now| db.set_playlist_cover(id, Some(&key), now));
+        Ok(())
+    }
+
+    /// Imports an M3U/M3U8/XSPF file as a new playlist. Returns its ID and
+    /// how many entries matched library tracks, of how many.
+    pub async fn import_playlist(&self, path: PathBuf) -> Result<(i64, usize, usize), String> {
+        let (name, entries) = gio::spawn_blocking(move || playlist_files::read(&path))
+            .await
+            .map_err(|_| "the import failed".to_owned())?
+            .map_err(|e| e.to_string())?;
+        let total = entries.len();
+        let mut db = self.db().ok_or("no database")?;
+        let now = metadata::now();
+        let id = db.create_playlist(&name, now).map_err(|e| e.to_string())?;
+        let matched = db
+            .import_entries(id, &entries, now)
+            .map_err(|e| e.to_string())?;
+        drop(db);
+        self.reload_playlists();
+        Ok((id, matched, total))
+    }
+
+    /// Writes a playlist as M3U8 or XSPF (by the file's extension).
+    pub async fn export_playlist(&self, id: i64, path: PathBuf) -> Result<(), String> {
+        let name = self
+            .playlist(id)
+            .map(|p| p.playlist().name.clone())
+            .unwrap_or_default();
+        let entries: Vec<PlaylistFileEntry> = self
+            .playlist_items(id)
+            .into_iter()
+            .map(|item| PlaylistFileEntry {
+                location: item.track.as_ref().map(|t| t.record.path.clone()),
+                title: item.title,
+                artist: item.artist,
+                album: item.album,
+                duration_ms: item.duration_ms,
+            })
+            .collect();
+        gio::spawn_blocking(move || {
+            let text = match Format::from_path(&path) {
+                Format::Xspf => playlist_files::write_xspf(&name, &entries),
+                Format::M3u8 => playlist_files::write_m3u8(&entries),
+            };
+            std::fs::write(&path, text).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "the export failed".to_owned())?
+    }
+
+    /// Full-text search (FTS5, §4.1).
+    pub fn search(&self, query: &str, limit: usize) -> SearchResults {
+        self.db()
+            .and_then(|db| db.search(query, limit).ok())
+            .unwrap_or_default()
     }
 
     fn folders(&self) -> Vec<PathBuf> {

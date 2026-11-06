@@ -15,6 +15,7 @@ gst.workspace = true
 image.workspace = true
 lofty.workspace = true
 notify.workspace = true
+quick-xml.workspace = true
 rand.workspace = true
 rusqlite.workspace = true
 rusqlite_migration.workspace = true

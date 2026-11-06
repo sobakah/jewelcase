@@ -98,6 +98,8 @@ pub fn scan(
     summary.albums = albums.len();
     summary.artists = artists.len();
     db.replace_library(&albums, &artists)?;
+    db.relink_playlists()?;
+    db.rebuild_search(aliases)?;
     progress(ScanProgress::AlbumsReady);
 
     make_covers(db, covers, progress)?;

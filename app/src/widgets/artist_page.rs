@@ -473,9 +473,15 @@ impl ArtistPage {
             .iter()
             .flat_map(|album| library.album_tracks(album.album().id))
             .collect();
+        let name = self
+            .imp()
+            .artist
+            .borrow()
+            .as_ref()
+            .map(|a| a.artist().name.clone());
         GatefoldApplication::get()
             .player()
-            .play_tracks(tracks, shuffle);
+            .play_tracks(tracks, None, shuffle, name);
     }
 
     async fn choose_image(&self) {

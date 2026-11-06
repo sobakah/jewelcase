@@ -93,3 +93,4 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Artists: grid, pages, online lookups, portraits (phase 2)
 - Player: cover colors, adaptive layouts, lyrics, queue sections (phase 3)
 - Companion tools: lyrembed, cdimport, tag editor (phase 4)
+- Playlists, M3U8/XSPF import and export, search (phase 5)

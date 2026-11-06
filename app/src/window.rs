@@ -1,4 +1,4 @@
-use std::cell::{OnceCell, RefCell};
+use std::cell::OnceCell;
 use std::cmp::Ordering;
 
 use adw::prelude::*;
@@ -7,8 +7,12 @@ use gtk::{gio, glib};
 
 use crate::application::GatefoldApplication;
 use crate::config::{self, APP_ID};
+use crate::objects::PlaylistObject;
 use crate::objects::{AlbumObject, ArtistObject};
-use crate::widgets::{AlbumPanel, AlbumTile, ArtistPage, ArtistTile, MiniPlayer, PlayerView};
+use crate::widgets::{
+    AlbumPanel, AlbumTile, ArtistPage, ArtistTile, MiniPlayer, PlayerView, PlaylistPanel,
+    PlaylistTile, SearchView, playlist_picker,
+};
 
 mod imp {
     use super::*;
@@ -54,13 +58,22 @@ mod imp {
         pub artists_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub artist_grid: TemplateChild<gtk::GridView>,
-        pub artist_filter: OnceCell<gtk::CustomFilter>,
-        pub artists_filtered: OnceCell<gtk::FilterListModel>,
+        #[template_child]
+        pub main_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub search_view: TemplateChild<SearchView>,
+        #[template_child]
+        pub playlist_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub playlists_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub playlist_split: TemplateChild<adw::OverlaySplitView>,
+        #[template_child]
+        pub playlist_grid: TemplateChild<gtk::GridView>,
+        #[template_child]
+        pub playlist_panel: TemplateChild<PlaylistPanel>,
         pub settings: OnceCell<gio::Settings>,
-        pub filter: OnceCell<gtk::CustomFilter>,
         pub sorter: OnceCell<gtk::CustomSorter>,
-        pub filtered: OnceCell<gtk::FilterListModel>,
-        pub search: RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -73,6 +86,8 @@ mod imp {
             MiniPlayer::ensure_type();
             PlayerView::ensure_type();
             AlbumPanel::ensure_type();
+            PlaylistPanel::ensure_type();
+            SearchView::ensure_type();
             klass.bind_template();
 
             klass.install_action("win.open-player", None, |win, _, _| {
@@ -108,6 +123,40 @@ mod imp {
                     }
                 },
             );
+            klass.install_action(
+                "win.show-playlist",
+                Some(glib::VariantTy::INT64),
+                |win, _, param| {
+                    let library = GatefoldApplication::get().library();
+                    if let Some(playlist) = param
+                        .and_then(|p| p.get::<i64>())
+                        .and_then(|id| library.playlist(id))
+                    {
+                        win.show_playlist(&playlist);
+                    }
+                },
+            );
+            klass.install_action_async("win.new-playlist", None, |win, _, _| async move {
+                let name = playlist_picker::ask_name(
+                    &win,
+                    &gettextrs::gettext("New Playlist"),
+                    "",
+                    &gettextrs::gettext("_Create"),
+                )
+                .await;
+                if let Some(name) = name {
+                    let library = GatefoldApplication::get().library();
+                    if let Some(playlist) = library
+                        .create_playlist(&name, &[])
+                        .and_then(|id| library.playlist(id))
+                    {
+                        win.show_playlist(&playlist);
+                    }
+                }
+            });
+            klass.install_action_async("win.import-playlist", None, |win, _, _| async move {
+                win.import_playlist().await;
+            });
             klass.install_action(
                 "win.show-artist",
                 Some(glib::VariantTy::INT64),
@@ -169,6 +218,7 @@ mod imp {
             obj.setup_shortcuts();
             obj.setup_albums();
             obj.setup_artists();
+            obj.setup_playlists();
             obj.setup_messages();
             obj.setup_tools();
 
@@ -240,16 +290,6 @@ impl GatefoldWindow {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
 
-        let filter = gtk::CustomFilter::new(glib::clone!(
-            #[weak(rename_to = window)]
-            self,
-            #[upgrade_or]
-            true,
-            move |item| {
-                let album = item.downcast_ref::<AlbumObject>().expect("albums");
-                window.matches_search(album)
-            }
-        ));
         let sorter = gtk::CustomSorter::new(glib::clone!(
             #[weak(rename_to = window)]
             self,
@@ -261,9 +301,7 @@ impl GatefoldWindow {
                 window.compare_albums(a, b).into()
             }
         ));
-        let filtered =
-            gtk::FilterListModel::new(Some(library.albums().clone()), Some(filter.clone()));
-        let sorted = gtk::SortListModel::new(Some(filtered.clone()), Some(sorter.clone()));
+        let sorted = gtk::SortListModel::new(Some(library.albums().clone()), Some(sorter.clone()));
         imp.album_grid
             .set_model(Some(&gtk::NoSelection::new(Some(sorted))));
 
@@ -314,13 +352,7 @@ impl GatefoldWindow {
         imp.search_entry.connect_search_changed(glib::clone!(
             #[weak(rename_to = window)]
             self,
-            move |entry| {
-                window.imp().search.replace(entry.text().to_lowercase());
-                window.filter_changed();
-                if let Some(filter) = window.imp().artist_filter.get() {
-                    filter.changed(gtk::FilterChange::Different);
-                }
-            }
+            move |entry| window.search_changed(&entry.text())
         ));
         self.settings().connect_changed(
             Some("album-sort"),
@@ -362,15 +394,13 @@ impl GatefoldWindow {
             self,
             move |library| window.update_banner(library)
         ));
-        filtered.connect_items_changed(glib::clone!(
+        library.albums().connect_items_changed(glib::clone!(
             #[weak(rename_to = window)]
             self,
             move |_, _, _, _| window.update_albums_page()
         ));
 
-        imp.filter.set(filter).expect("set once");
         imp.sorter.set(sorter).expect("set once");
-        imp.filtered.set(filtered).expect("set once");
         self.update_albums_page();
         self.update_banner(&library);
     }
@@ -379,28 +409,9 @@ impl GatefoldWindow {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
 
-        let filter = gtk::CustomFilter::new(glib::clone!(
-            #[weak(rename_to = window)]
-            self,
-            #[upgrade_or]
-            true,
-            move |item| {
-                let artist = item.downcast_ref::<ArtistObject>().expect("artists");
-                let search = window.imp().search.borrow();
-                // Any alias spelling matches: "Hoshino Gen" finds 星野源 (§10.1).
-                search.is_empty()
-                    || GatefoldApplication::get()
-                        .library()
-                        .aliases()
-                        .spellings(&artist.artist().name)
-                        .iter()
-                        .any(|name| name.to_lowercase().contains(search.as_str()))
-            }
-        ));
-        let filtered =
-            gtk::FilterListModel::new(Some(library.artists().clone()), Some(filter.clone()));
-        imp.artist_grid
-            .set_model(Some(&gtk::NoSelection::new(Some(filtered.clone()))));
+        imp.artist_grid.set_model(Some(&gtk::NoSelection::new(Some(
+            library.artists().clone(),
+        ))));
 
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
@@ -433,7 +444,7 @@ impl GatefoldWindow {
             }
         });
 
-        filtered.connect_items_changed(glib::clone!(
+        library.artists().connect_items_changed(glib::clone!(
             #[weak(rename_to = window)]
             self,
             move |_, _, _, _| window.update_artists_page()
@@ -446,21 +457,166 @@ impl GatefoldWindow {
                 move |_, _| window.update_artists_page()
             ),
         );
-        imp.artist_filter.set(filter).expect("set once");
-        imp.artists_filtered.set(filtered).expect("set once");
         self.update_artists_page();
+    }
+
+    fn setup_playlists(&self) {
+        let imp = self.imp();
+        let library = GatefoldApplication::get().library();
+        imp.playlist_grid
+            .set_model(Some(&gtk::NoSelection::new(Some(
+                library.playlists().clone(),
+            ))));
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(|_, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+            item.set_child(Some(&PlaylistTile::new()));
+        });
+        factory.connect_bind(|_, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+            if let (Some(tile), Some(playlist)) = (
+                item.child().and_downcast::<PlaylistTile>(),
+                item.item().and_downcast::<PlaylistObject>(),
+            ) {
+                tile.bind(&playlist);
+                item.set_accessible_label(&playlist.playlist().name);
+            }
+        });
+        imp.playlist_grid.set_factory(Some(&factory));
+        imp.playlist_grid.connect_activate(|grid, position| {
+            let Some(playlist) = grid
+                .model()
+                .and_then(|m| m.item(position))
+                .and_downcast::<PlaylistObject>()
+            else {
+                return;
+            };
+            if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
+                window.show_playlist(&playlist);
+            }
+        });
+        imp.playlist_panel.connect_local(
+            "close",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |_| {
+                    window.imp().playlist_split.set_show_sidebar(false);
+                    None
+                }
+            ),
+        );
+        library.playlists().connect_items_changed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |store, _, _, _| {
+                let page = if store.n_items() == 0 {
+                    "empty"
+                } else {
+                    "playlists"
+                };
+                window.imp().playlists_stack.set_visible_child_name(page);
+            }
+        ));
+        let page = if library.playlists().n_items() == 0 {
+            "empty"
+        } else {
+            "playlists"
+        };
+        imp.playlists_stack.set_visible_child_name(page);
+        // The "+" menu belongs to the Playlists view.
+        let button = imp.playlist_button.get();
+        imp.stack
+            .bind_property("visible-child-name", &button, "visible")
+            .transform_to(|_, name: Option<String>| Some(name.as_deref() == Some("playlists")))
+            .sync_create()
+            .build();
+    }
+
+    pub fn show_playlist(&self, playlist: &PlaylistObject) {
+        let imp = self.imp();
+        imp.bottom_sheet.set_open(false);
+        imp.search_bar.set_search_mode(false);
+        let split = imp.playlist_split.get();
+        let laid_out = split.is_mapped();
+        imp.stack.set_visible_child_name("playlists");
+        imp.playlist_panel.set_playlist(playlist);
+        if laid_out {
+            split.set_show_sidebar(true);
+            return;
+        }
+        // Revealing the sidebar before the split view has had its first
+        // allocation makes it hand the panel a bogus negative width, so
+        // wait for one frame to be laid out.
+        let ticks = std::cell::Cell::new(0);
+        split.add_tick_callback(move |split, _| {
+            ticks.set(ticks.get() + 1);
+            if ticks.get() < 2 {
+                return glib::ControlFlow::Continue;
+            }
+            split.set_show_sidebar(true);
+            glib::ControlFlow::Break
+        });
+    }
+
+    async fn import_playlist(&self) {
+        let filter = gtk::FileFilter::new();
+        filter.set_name(Some(&gettextrs::gettext("Playlists (M3U, XSPF)")));
+        for pattern in ["*.m3u", "*.m3u8", "*.xspf", "*.M3U", "*.M3U8", "*.XSPF"] {
+            filter.add_pattern(pattern);
+        }
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&filter);
+        let dialog = gtk::FileDialog::builder()
+            .title(gettextrs::gettext("Import Playlist"))
+            .modal(true)
+            .filters(&filters)
+            .build();
+        let Ok(file) = dialog.open_future(Some(self)).await else {
+            return;
+        };
+        let Some(path) = file.path() else { return };
+        let library = GatefoldApplication::get().library();
+        let message = match library.import_playlist(path).await {
+            Ok((id, matched, total)) => {
+                if let Some(playlist) = library.playlist(id) {
+                    self.show_playlist(&playlist);
+                }
+                // Translators: {matched} of {total} playlist entries.
+                gettextrs::gettext("Imported: {matched} of {total} songs are in your library")
+                    .replace("{matched}", &matched.to_string())
+                    .replace("{total}", &total.to_string())
+            }
+            Err(err) => {
+                tracing::warn!("Playlist import failed: {err}");
+                gettextrs::gettext("The playlist couldn't be imported")
+            }
+        };
+        imp_toast(self, &message);
+    }
+
+    /// Search results replace the library views while searching (§4.1).
+    fn search_changed(&self, text: &str) {
+        let imp = self.imp();
+        let query = text.trim();
+        if query.is_empty() {
+            imp.main_stack.set_visible_child_name("library");
+        } else {
+            imp.search_view.search(query);
+            imp.main_stack.set_visible_child_name("search");
+        }
     }
 
     fn update_artists_page(&self) {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
-        let shown = imp.artists_filtered.get().map_or(0, |f| f.n_items());
         let page = if !self.settings().boolean("online-metadata-asked") {
             "ask"
         } else if library.artists().n_items() == 0 {
             "empty"
-        } else if shown == 0 {
-            "no-results"
         } else {
             "artists"
         };
@@ -471,6 +627,7 @@ impl GatefoldWindow {
     pub fn show_artist(&self, artist_id: i64) {
         let imp = self.imp();
         imp.bottom_sheet.set_open(false);
+        imp.search_bar.set_search_mode(false);
         imp.stack.set_visible_child_name("artists");
         if imp
             .artists_nav
@@ -629,24 +786,10 @@ impl GatefoldWindow {
 
     fn show_album(&self, album: &AlbumObject) {
         let imp = self.imp();
+        imp.search_bar.set_search_mode(false);
+        imp.stack.set_visible_child_name("albums");
         imp.album_panel.set_album(album);
         imp.split_view.set_show_sidebar(true);
-    }
-
-    fn matches_search(&self, album: &AlbumObject) -> bool {
-        let search = self.imp().search.borrow();
-        if search.is_empty() {
-            return true;
-        }
-        let library = GatefoldApplication::get().library();
-        let aliases = library.aliases();
-        album.versions().iter().any(|v| {
-            v.title.to_lowercase().contains(search.as_str())
-                || aliases
-                    .spellings(&v.artist_credit)
-                    .iter()
-                    .any(|name| name.to_lowercase().contains(search.as_str()))
-        })
     }
 
     fn compare_albums(&self, a: &AlbumObject, b: &AlbumObject) -> Ordering {
@@ -663,12 +806,6 @@ impl GatefoldWindow {
             "year" => b.year.cmp(&a.year).then_with(by_artist),
             "added" => b.added.cmp(&a.added).then_with(by_artist),
             _ => by_artist(),
-        }
-    }
-
-    fn filter_changed(&self) {
-        if let Some(filter) = self.imp().filter.get() {
-            filter.changed(gtk::FilterChange::Different);
         }
     }
 
@@ -701,13 +838,10 @@ impl GatefoldWindow {
     fn update_albums_page(&self) {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
-        let shown = imp.filtered.get().map_or(0, |f| f.n_items());
         let page = if library.albums().n_items() == 0 && library.scanning() {
             "scanning"
         } else if library.albums().n_items() == 0 {
             "empty"
-        } else if shown == 0 {
-            "no-results"
         } else {
             "albums"
         };
@@ -723,12 +857,17 @@ impl GatefoldWindow {
     /// Development aid: `GATEFOLD_SCREENSHOT=out.png` renders the window to
     /// a PNG after `GATEFOLD_SCREENSHOT_DELAY` seconds (default 8) and quits.
     /// The steps below run after 2 seconds.
-    /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, e.g.
-    /// `win.open-player`; `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album
-    /// and `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
+    /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, separated
+    /// by spaces, with an optional `::target` (GVariant text; integers are
+    /// passed as int64 IDs), e.g. `win.open-player win.show-playlist::1`.
+    /// `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album and
+    /// `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
     /// opens an artist page; `GATEFOLD_SCREENSHOT_PANEL_ACTIONS` runs album
-    /// panel actions; `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences. Without `GATEFOLD_SCREENSHOT`,
-    /// only that album step runs.
+    /// panel actions (`panel.add-to-playlist`);
+    /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
+    /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
+    /// `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
+    /// Without `GATEFOLD_SCREENSHOT`, only that album step runs.
     fn setup_screenshot(&self) {
         // Without GATEFOLD_SCREENSHOT, only the album and actions steps run
         // (for playback tests); the app keeps running.
@@ -760,12 +899,13 @@ impl GatefoldWindow {
             for action in actions.split_whitespace() {
                 let (name, target) = match action.split_once("::") {
                     // GVariant text ("true", "42"), else a plain string.
+                    // Integers are IDs, which the actions take as int64.
                     Some((name, target)) => (
                         name,
-                        Some(
-                            glib::Variant::parse(None, target)
-                                .unwrap_or_else(|_| target.to_variant()),
-                        ),
+                        Some(match glib::Variant::parse(None, target) {
+                            Ok(v) => v.get::<i32>().map_or(v, |n| i64::from(n).to_variant()),
+                            Err(_) => target.to_variant(),
+                        }),
                     ),
                     None => (action, None),
                 };
@@ -812,6 +952,27 @@ impl GatefoldWindow {
                         tracing::warn!("Screenshot panel action {action}: {err}");
                     }
                 }
+            }
+            // `GATEFOLD_SCREENSHOT_SEARCH=text`: search for it.
+            if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_SEARCH") {
+                window.imp().search_bar.set_search_mode(true);
+                window.imp().search_entry.set_text(&text);
+            }
+            // `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8`: import and show a playlist.
+            if let Ok(path) = std::env::var("GATEFOLD_SCREENSHOT_IMPORT") {
+                let window = window.clone();
+                glib::spawn_future_local(async move {
+                    let library = GatefoldApplication::get().library();
+                    match library.import_playlist(path.into()).await {
+                        Ok((id, matched, total)) => {
+                            tracing::info!("Imported {matched} of {total}");
+                            if let Some(playlist) = library.playlist(id) {
+                                window.show_playlist(&playlist);
+                            }
+                        }
+                        Err(err) => tracing::warn!("Import failed: {err}"),
+                    }
+                });
             }
             // `GATEFOLD_SCREENSHOT_PREFS=integrations`: a Preferences page.
             if let Ok(page) = std::env::var("GATEFOLD_SCREENSHOT_PREFS") {
@@ -864,4 +1025,11 @@ impl GatefoldWindow {
         settings.set_boolean("is-maximized", self.is_maximized())?;
         Ok(())
     }
+}
+
+fn imp_toast(window: &GatefoldWindow, message: &str) {
+    window
+        .imp()
+        .toast_overlay
+        .add_toast(adw::Toast::new(message));
 }

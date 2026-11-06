@@ -254,9 +254,23 @@ impl TrackRow {
                 .tools()
                 .edit_tags(vec![path.clone()]);
         });
-        let actions = gtk::Box::builder().spacing(6).build();
+        let add_to_playlist = gtk::Button::builder()
+            .label(gettext("Add to Playlist…"))
+            .css_classes(["pill", "small"])
+            .build();
+        let track_id = self.track().id();
+        add_to_playlist.connect_clicked(move |button| {
+            super::playlist_picker::show(button, vec![track_id]);
+        });
+        let actions = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .column_spacing(6)
+            .row_spacing(6)
+            .max_children_per_line(4)
+            .build();
         actions.append(&play_next);
         actions.append(&add_to_queue);
+        actions.append(&add_to_playlist);
         actions.append(&edit_tags);
 
         let details = gtk::Box::builder()

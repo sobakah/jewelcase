@@ -67,6 +67,16 @@ mod imp {
                 let tracks = panel.imp().track_objects.borrow().clone();
                 GatefoldApplication::get().player().play_next(tracks);
             });
+            klass.install_action("panel.add-to-playlist", None, |panel, _, _| {
+                let ids: Vec<i64> = panel
+                    .imp()
+                    .track_objects
+                    .borrow()
+                    .iter()
+                    .map(TrackObject::id)
+                    .collect();
+                super::super::playlist_picker::show(panel, ids);
+            });
             klass.install_action("panel.edit-tags", None, |panel, _, _| {
                 let files = panel.track_paths();
                 GatefoldApplication::get().tools().edit_tags(files);

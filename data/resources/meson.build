@@ -5,6 +5,7 @@ blueprints = custom_target(
     'ui/artist_page.blp',
     'ui/mini_player.blp',
     'ui/player_view.blp',
+    'ui/playlist_panel.blp',
     'ui/preferences_dialog.blp',
     'ui/shortcuts_dialog.blp',
     'ui/window.blp',
