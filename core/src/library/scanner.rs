@@ -274,7 +274,8 @@ fn make_covers(
     let missing: Vec<(String, PathBuf)> = db
         .album_cover_sources()?
         .into_iter()
-        .filter(|(key, _)| !covers.has(key))
+        // Covers made before colors existed get theirs from the thumbnail.
+        .filter(|(key, _)| !(covers.has(key) && covers.ensure_color(key)))
         .collect();
     let total = missing.len();
     if total == 0 {

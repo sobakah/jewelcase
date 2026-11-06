@@ -714,6 +714,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "gatefold-core",
+ "gatefold-lyrics",
  "gatefold-metadata",
  "gettext-rs",
  "gtk4",
@@ -741,6 +742,16 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "gatefold-lyrics"
+version = "0.1.0"
+dependencies = [
+ "lofty",
+ "tempfile",
+ "tracing",
+ "unicode-script",
 ]
 
 [[package]]
@@ -2895,6 +2906,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-script"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa04c955db05429d464c74d495c1ee677e1866e783a4c3747f9c0cef7756cabf"
 
 [[package]]
 name = "untrusted"

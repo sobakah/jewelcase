@@ -71,3 +71,44 @@
   font-weight: bold;
   color: var(--accent-color);
 }
+
+/* Player view (CONCEPT.md §4.3): blurred cover behind a cover-color tint.
+   The tint's colors come from theme.rs, scoped to .player-view.themed. */
+.player-view .player-backdrop {
+  filter: blur(60px) saturate(1.3);
+  opacity: 0.35;
+}
+
+/* Lyrics (CONCEPT.md §5). */
+.lyrics-view .lyric-line {
+  padding: 6px 12px;
+  border-radius: 12px;
+}
+
+.lyrics-view .lyric-primary {
+  font-size: 1.35em;
+  font-weight: 800;
+}
+
+.lyrics-view .lyric-secondary {
+  font-size: 1em;
+  opacity: 0.75;
+}
+
+.lyrics-view .lyric-line.synced {
+  opacity: 0.45;
+  transition: opacity 250ms ease-out;
+}
+
+.lyrics-view .lyric-line.synced.active {
+  opacity: 1;
+}
+
+/* Queue (CONCEPT.md §6.2). */
+.queue-view .now-playing {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 18%, transparent);
+}
+
+.queue-view .drag-handle {
+  -gtk-icon-size: 16px;
+}

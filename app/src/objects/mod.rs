@@ -2,8 +2,10 @@
 
 mod album;
 mod artist;
+mod queue_entry;
 mod track;
 
 pub use album::AlbumObject;
 pub use artist::ArtistObject;
+pub use queue_entry::QueueEntry;
 pub use track::TrackObject;

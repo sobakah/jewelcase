@@ -69,6 +69,33 @@ impl CoverCache {
             .all(|&size| self.path(key, size).is_file())
     }
 
+    fn color_path(&self, key: &str) -> PathBuf {
+        self.dir.join(format!("{key}.color"))
+    }
+
+    /// The cover's dominant color (CONCEPT.md §4.3), once computed.
+    pub fn color(&self, key: &str) -> Option<[u8; 3]> {
+        let text = fs::read_to_string(self.color_path(key)).ok()?;
+        parse_hex(text.trim())
+    }
+
+    /// Computes the dominant color from the (trusted) grid thumbnail, for
+    /// covers made before colors existed. Returns false without a thumbnail.
+    pub fn ensure_color(&self, key: &str) -> bool {
+        if self.color(key).is_some() {
+            return true;
+        }
+        let Ok(image) = image::open(self.path(key, CoverSize::Grid)) else {
+            return false;
+        };
+        self.write_color(key, &image).is_ok()
+    }
+
+    fn write_color(&self, key: &str, image: &DynamicImage) -> io::Result<()> {
+        let [r, g, b] = dominant_color(image);
+        fs::write(self.color_path(key), format!("#{r:02x}{g:02x}{b:02x}\n"))
+    }
+
     /// Decodes `data` in glycin's sandbox and writes all thumbnail sizes.
     pub fn generate(&self, key: &str, data: Vec<u8>) -> Result<(), CoverError> {
         let image = decode(data)?;
@@ -89,6 +116,7 @@ impl CoverCache {
             }
             fs::rename(&partial, &path)?;
         }
+        self.write_color(key, &image)?;
         Ok(())
     }
 }
@@ -118,6 +146,45 @@ fn decode(data: Vec<u8>) -> Result<DynamicImage, CoverError> {
             .map(DynamicImage::ImageRgba8)
             .ok_or_else(|| CoverError::Decode("frame buffer is smaller than its size".into()))
     })
+}
+
+/// The most common color, preferring colorful over gray pixels: pixels go
+/// into 3-bit-per-channel buckets weighted by chroma² (so near-black,
+/// near-white and gray pixels count little); the heaviest bucket's
+/// average wins.
+/// Mostly black-and-white covers stay gray.
+pub fn dominant_color(image: &DynamicImage) -> [u8; 3] {
+    let small = image.thumbnail(48, 48).to_rgb8();
+    let mut buckets: std::collections::HashMap<u16, (f64, [f64; 3])> = Default::default();
+    for pixel in small.pixels() {
+        let [r, g, b] = pixel.0;
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let chroma = f64::from(max - min) / 255.0;
+        let weight = 0.002 + chroma * chroma;
+        let bucket = (u16::from(r >> 5) << 6) | (u16::from(g >> 5) << 3) | u16::from(b >> 5);
+        let entry = buckets.entry(bucket).or_insert((0.0, [0.0; 3]));
+        entry.0 += weight;
+        for (sum, channel) in entry.1.iter_mut().zip([r, g, b]) {
+            *sum += weight * f64::from(channel);
+        }
+    }
+    let Some((weight, sums)) = buckets
+        .into_values()
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .filter(|(weight, _)| *weight > 0.0)
+    else {
+        return [128, 128, 128];
+    };
+    sums.map(|sum| (sum / weight).round().clamp(0.0, 255.0) as u8)
+}
+
+fn parse_hex(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
 /// A cache key for cover bytes: `<prefix><FNV-1a 64 hash>`.
@@ -166,6 +233,36 @@ mod tests {
     fn keys_are_stable() {
         assert_eq!(cover_key('e', b""), "ecbf29ce484222325");
         assert_ne!(cover_key('e', b"a"), cover_key('e', b"b"));
+    }
+
+    #[test]
+    fn dominant_colors() {
+        // Mostly red with a white border: red wins over white.
+        let mut image = image::RgbImage::from_pixel(40, 40, image::Rgb([255, 255, 255]));
+        for x in 5..35 {
+            for y in 5..35 {
+                image.put_pixel(x, y, image::Rgb([200, 30, 30]));
+            }
+        }
+        let [r, g, b] = dominant_color(&DynamicImage::ImageRgb8(image));
+        assert!(r > 150 && g < 80 && b < 80, "{r} {g} {b}");
+
+        // Dark pants and hair on a pale cover: the skin tone wins, not black.
+        let mut photo = image::RgbImage::from_pixel(40, 40, image::Rgb([240, 240, 245]));
+        for x in 0..40 {
+            for y in 20..40 {
+                photo.put_pixel(x, y, image::Rgb([20, 2, 6]));
+            }
+            for y in 8..20 {
+                photo.put_pixel(x, y, image::Rgb([220, 170, 150]));
+            }
+        }
+        let [r, g, _] = dominant_color(&DynamicImage::ImageRgb8(photo));
+        assert!(r > 150 && g > 120, "{r} {g}");
+
+        let gray = image::RgbImage::from_pixel(10, 10, image::Rgb([90, 90, 90]));
+        assert_eq!(dominant_color(&DynamicImage::ImageRgb8(gray)), [90, 90, 90]);
+        assert_eq!(parse_hex("#0a0b0c"), Some([10, 11, 12]));
     }
 
     #[test]

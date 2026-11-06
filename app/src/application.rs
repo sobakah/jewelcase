@@ -132,6 +132,8 @@ impl GatefoldApplication {
             ("app.shortcuts", &["<Control>question"]),
             ("window.close", &["<Control>w"]),
             ("win.toggle-search", &["<Control>f"]),
+            ("win.toggle-lyrics", &["<Control>l"]),
+            ("win.toggle-queue", &["<Control>u"]),
             ("win.view::albums", &["<Control>1"]),
             ("win.view::artists", &["<Control>2"]),
             ("win.view::playlists", &["<Control>3"]),

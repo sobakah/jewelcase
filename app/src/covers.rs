@@ -63,6 +63,11 @@ pub fn portrait(key: &str, size: CoverSize) -> Option<gdk::Texture> {
     load(Kind::Portrait, key, size)
 }
 
+/// The cover's dominant color, if the scanner computed it.
+pub fn color(key: &str) -> Option<[u8; 3]> {
+    COVERS.with(|covers| covers.color(key))
+}
+
 /// A `file://` URI of a cover thumbnail, for MPRIS.
 pub fn uri(key: &str, size: CoverSize) -> Option<String> {
     let path = path(Kind::Cover, key, size);

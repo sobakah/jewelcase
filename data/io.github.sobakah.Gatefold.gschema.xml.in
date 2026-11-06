@@ -53,6 +53,16 @@
       <summary>Restore the queue on start</summary>
       <description>Reopen the last queue, paused at the last position.</description>
     </key>
+    <key name="lyrics-layout" type="s">
+      <choices>
+        <choice value="original-top"/>
+        <choice value="romanization-top"/>
+        <choice value="original-only"/>
+      </choices>
+      <default>"original-top"</default>
+      <summary>Dual-line lyrics layout</summary>
+      <description>Which line of original and romanization is shown large, or the original only.</description>
+    </key>
     <key name="online-metadata" type="b">
       <default>false</default>
       <summary>Look up artists online</summary>

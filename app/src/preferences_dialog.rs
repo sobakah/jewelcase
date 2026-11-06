@@ -12,6 +12,8 @@ use crate::library_folders;
 
 /// The `replaygain` setting values, in the order of the combo row.
 const REPLAYGAIN_MODES: [&str; 4] = ["off", "auto", "track", "album"];
+/// The `lyrics-layout` setting values, in the order of the combo row.
+const LYRICS_LAYOUTS: [&str; 3] = ["original-top", "romanization-top", "original-only"];
 
 mod imp {
     use super::*;
@@ -25,6 +27,8 @@ mod imp {
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub online_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -71,6 +75,18 @@ mod imp {
             );
             settings
                 .bind("restore-queue", &*self.restore_queue_row, "active")
+                .build();
+            settings
+                .bind("lyrics-layout", &*self.lyrics_layout_row, "selected")
+                .mapping(|value, _| {
+                    let layout = value.get::<String>()?;
+                    let index = LYRICS_LAYOUTS.iter().position(|l| *l == layout)?;
+                    Some((index as u32).to_value())
+                })
+                .set_mapping(|value, _| {
+                    let index = value.get::<u32>().ok()? as usize;
+                    LYRICS_LAYOUTS.get(index).map(|l| l.to_variant())
+                })
                 .build();
             settings
                 .bind("online-metadata", &*self.online_row, "active")

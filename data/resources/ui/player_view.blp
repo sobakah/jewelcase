@@ -1,255 +1,342 @@
 using Gtk 4.0;
 using Adw 1;
 
-// The full player in the expanded bottom sheet (CONCEPT.md §4.3). The
-// Queue toggle swaps the cover for the queue; lyrics arrive in phase 3.
+// The full player in the expanded bottom sheet (CONCEPT.md §4.3).
+// Wide: lyrics and queue panes sit next to the cover. Narrow: a pane
+// replaces the cover, and a small cover moves into the header. The
+// breakpoints are added in player_view.rs.
 template $GatefoldPlayerView: Adw.Bin {
   styles [
     "player-view",
   ]
 
-  child: Adw.ToolbarView {
-    [top]
-    Adw.HeaderBar {
-      show-title: false;
+  child: Adw.BreakpointBin breakpoint_bin {
+    width-request: 360;
+    height-request: 294;
 
-      [start]
-      Gtk.Button {
-        icon-name: "pan-down-symbolic";
-        tooltip-text: _("Hide Player");
-        action-name: "win.close-player";
+    child: Gtk.Overlay overlay {
+      // Blurred cover and the cover-color tint behind everything.
+      child: Gtk.Picture backdrop {
+        content-fit: cover;
+        can-shrink: true;
+
+        styles [
+          "player-backdrop",
+        ]
+      };
+
+      [overlay]
+      Gtk.Box tint {
+        can-target: false;
+
+        styles [
+          "player-tint",
+        ]
       }
-    }
 
-    content: Gtk.Box {
-      orientation: vertical;
-      spacing: 18;
-      margin-start: 24;
-      margin-end: 24;
-      margin-bottom: 24;
+      [overlay]
+      Adw.ToolbarView toolbar {
+        [top]
+        Adw.HeaderBar {
+          title-widget: Gtk.Box header_track {
+            spacing: 9;
+            visible: false;
 
-      Gtk.Stack pane_stack {
-        vexpand: true;
-        transition-type: crossfade;
+            $GatefoldCoverImage header_cover {
+              min-size: 28;
+              natural-size: 28;
+              kind: "grid";
+              valign: center;
+            }
 
-        Gtk.StackPage {
-          name: "cover";
+            Gtk.Label header_title {
+              ellipsize: end;
+              max-width-chars: 30;
 
-          child: $GatefoldCoverImage cover {
-            min-size: 96;
-            natural-size: 480;
-            kind: "player";
-            shrinkable: true;
+              styles [
+                "heading",
+              ]
+            }
           };
+
+          [start]
+          Gtk.Button {
+            icon-name: "pan-down-symbolic";
+            tooltip-text: _("Hide Player");
+            action-name: "win.close-player";
+          }
+
+          styles [
+            "flat",
+          ]
         }
 
-        Gtk.StackPage {
-          name: "queue";
+        // The first layout ("wide") is the default.
+        content: Adw.MultiLayoutView layout_view {
 
-          child: Adw.Clamp {
-            maximum-size: 560;
+          Adw.Layout {
+            name: "wide";
 
-            child: Gtk.Box {
-              orientation: vertical;
-              spacing: 6;
+            content: Gtk.Box {
+              spacing: 24;
+              margin-start: 24;
+              margin-end: 24;
+              margin-bottom: 24;
 
               Gtk.Box {
-                Gtk.Label {
-                  label: _("Queue");
-                  xalign: 0;
-                  hexpand: true;
+                orientation: vertical;
+                spacing: 18;
+                hexpand: true;
+
+                Adw.LayoutSlot {
+                  id: "cover";
+                  vexpand: true;
+                }
+
+                Adw.LayoutSlot {
+                  id: "info";
+                }
+              }
+
+              Adw.LayoutSlot {
+                id: "lyrics";
+              }
+
+              Adw.LayoutSlot {
+                id: "queue";
+              }
+            };
+          }
+
+          Adw.Layout {
+            name: "narrow";
+
+            content: Gtk.Box {
+              orientation: vertical;
+              spacing: 18;
+              margin-start: 18;
+              margin-end: 18;
+              margin-bottom: 18;
+
+              Gtk.Stack narrow_stack {
+                vexpand: true;
+                transition-type: crossfade;
+
+                Gtk.StackPage {
+                  name: "cover";
+
+                  child: Adw.LayoutSlot {
+                    id: "cover";
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "lyrics";
+
+                  child: Adw.LayoutSlot {
+                    id: "lyrics";
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "queue";
+
+                  child: Adw.LayoutSlot {
+                    id: "queue";
+                  };
+                }
+              }
+
+              Adw.LayoutSlot {
+                id: "info";
+              }
+            };
+          }
+
+          [cover]
+          $GatefoldCoverImage cover {
+            min-size: 96;
+            natural-size: 520;
+            kind: "player";
+            shrinkable: true;
+          }
+
+          [lyrics]
+          $GatefoldLyricsView lyrics_view {
+            width-request: 320;
+            hexpand: true;
+          }
+
+          [queue]
+          $GatefoldQueueView queue_view {
+            width-request: 340;
+          }
+
+          [info]
+          Gtk.Box {
+            orientation: vertical;
+            spacing: 18;
+
+            Gtk.Box {
+              orientation: vertical;
+              spacing: 3;
+
+              Gtk.Label title {
+                label: _("Not Playing");
+                ellipsize: end;
+
+                styles [
+                  "title-2",
+                ]
+              }
+
+              Gtk.Label subtitle {
+                label: _("Pick an album to start");
+                ellipsize: end;
+
+                styles [
+                  "dim-label",
+                ]
+              }
+            }
+
+            Adw.Clamp {
+              maximum-size: 560;
+
+              child: Gtk.Box {
+                spacing: 6;
+
+                Gtk.Label position_label {
+                  label: "0:00";
+                  width-chars: 5;
 
                   styles [
-                    "heading",
+                    "caption",
+                    "numeric",
+                  ]
+                }
+
+                Gtk.Scale seek {
+                  hexpand: true;
+
+                  adjustment: Gtk.Adjustment seek_adjustment {
+                    lower: 0;
+                    upper: 1;
+                    step-increment: 5000;
+                    page-increment: 30000;
+                  };
+                }
+
+                Gtk.Label duration_label {
+                  label: "0:00";
+                  width-chars: 5;
+
+                  styles [
+                    "caption",
+                    "numeric",
+                  ]
+                }
+              };
+            }
+
+            Gtk.CenterBox {
+              center-widget: Gtk.Box {
+                spacing: 18;
+
+                Gtk.ToggleButton {
+                  icon-name: "media-playlist-shuffle-symbolic";
+                  tooltip-text: _("Shuffle");
+                  action-name: "player.shuffle";
+                  valign: center;
+
+                  styles [
+                    "flat",
+                    "circular",
                   ]
                 }
 
                 Gtk.Button {
-                  label: _("_Clear");
-                  use-underline: true;
-                  tooltip-text: _("Clear Upcoming Songs");
-                  action-name: "player.clear-queue";
+                  icon-name: "media-skip-backward-symbolic";
+                  tooltip-text: _("Previous");
+                  action-name: "player.previous";
+                  valign: center;
 
                   styles [
                     "flat",
+                    "circular",
                   ]
                 }
-              }
 
-              Gtk.ScrolledWindow {
-                vexpand: true;
-                hscrollbar-policy: never;
-
-                child: Gtk.ListBox queue_list {
-                  selection-mode: none;
-                  valign: start;
+                Gtk.Button play_button {
+                  icon-name: "media-playback-start-symbolic";
+                  tooltip-text: _("Play");
+                  action-name: "player.play-pause";
 
                   styles [
-                    "boxed-list",
+                    "circular",
+                    "suggested-action",
+                    "play-button",
                   ]
+                }
+
+                Gtk.Button {
+                  icon-name: "media-skip-forward-symbolic";
+                  tooltip-text: _("Next");
+                  action-name: "player.next";
+                  valign: center;
+
+                  styles [
+                    "flat",
+                    "circular",
+                  ]
+                }
+
+                Gtk.Button repeat_button {
+                  icon-name: "media-playlist-consecutive-symbolic";
+                  tooltip-text: _("Repeat: Off");
+                  action-name: "player.repeat";
+                  valign: center;
+
+                  styles [
+                    "flat",
+                    "circular",
+                  ]
+                }
+              };
+            }
+
+            Gtk.Box {
+              halign: end;
+              spacing: 6;
+
+              Gtk.ToggleButton lyrics_button {
+                tooltip-text: _("Lyrics (Ctrl+L)");
+
+                child: Adw.ButtonContent {
+                  icon-name: "gatefold-lyrics-symbolic";
+                  label: _("Lyrics");
                 };
+
+                styles [
+                  "flat",
+                ]
               }
-            };
-          };
-        }
-      }
 
-      Gtk.Box {
-        orientation: vertical;
-        spacing: 3;
+              Gtk.ToggleButton queue_button {
+                tooltip-text: _("Queue (Ctrl+U)");
 
-        Gtk.Label title {
-          label: _("Not Playing");
-          ellipsize: end;
-          selectable: true;
+                child: Adw.ButtonContent {
+                  icon-name: "view-list-symbolic";
+                  label: _("Queue");
+                };
 
-          styles [
-            "title-2",
-          ]
-        }
-
-        Gtk.Label subtitle {
-          label: _("Pick an album to start");
-          ellipsize: end;
-
-          styles [
-            "dim-label",
-          ]
-        }
-      }
-
-      Adw.Clamp {
-        maximum-size: 560;
-
-        child: Gtk.Box {
-          spacing: 6;
-
-          Gtk.Label position_label {
-            label: "0:00";
-            width-chars: 5;
-
-            styles [
-              "caption",
-              "numeric",
-            ]
-          }
-
-          Gtk.Scale seek {
-            hexpand: true;
-
-            adjustment: Gtk.Adjustment seek_adjustment {
-              lower: 0;
-              upper: 1;
-              step-increment: 5000;
-              page-increment: 30000;
-            };
-          }
-
-          Gtk.Label duration_label {
-            label: "0:00";
-            width-chars: 5;
-
-            styles [
-              "caption",
-              "numeric",
-            ]
+                styles [
+                  "flat",
+                ]
+              }
+            }
           }
         };
-      }
-
-      Gtk.Box {
-        halign: center;
-        spacing: 18;
-
-        Gtk.ToggleButton {
-          icon-name: "media-playlist-shuffle-symbolic";
-          tooltip-text: _("Shuffle");
-          action-name: "player.shuffle";
-          valign: center;
-
-          styles [
-            "flat",
-            "circular",
-          ]
-        }
-
-        Gtk.Button {
-          icon-name: "media-skip-backward-symbolic";
-          tooltip-text: _("Previous");
-          action-name: "player.previous";
-          valign: center;
-
-          styles [
-            "flat",
-            "circular",
-          ]
-        }
-
-        Gtk.Button play_button {
-          icon-name: "media-playback-start-symbolic";
-          tooltip-text: _("Play");
-          action-name: "player.play-pause";
-
-          styles [
-            "circular",
-            "suggested-action",
-            "play-button",
-          ]
-        }
-
-        Gtk.Button {
-          icon-name: "media-skip-forward-symbolic";
-          tooltip-text: _("Next");
-          action-name: "player.next";
-          valign: center;
-
-          styles [
-            "flat",
-            "circular",
-          ]
-        }
-
-        Gtk.Button repeat_button {
-          icon-name: "media-playlist-consecutive-symbolic";
-          tooltip-text: _("Repeat: Off");
-          action-name: "player.repeat";
-          valign: center;
-
-          styles [
-            "flat",
-            "circular",
-          ]
-        }
-      }
-
-      Gtk.Box {
-        halign: end;
-        spacing: 6;
-
-        Gtk.ToggleButton {
-          action-name: "player.show-lyrics";
-          tooltip-text: _("Lyrics arrive in a later version");
-
-          child: Adw.ButtonContent {
-            icon-name: "gatefold-lyrics-symbolic";
-            label: _("Lyrics");
-          };
-
-          styles [
-            "flat",
-          ]
-        }
-
-        Gtk.ToggleButton queue_button {
-          child: Adw.ButtonContent {
-            icon-name: "view-list-symbolic";
-            label: _("Queue");
-          };
-
-          styles [
-            "flat",
-          ]
-        }
       }
     };
   };

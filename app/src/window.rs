@@ -21,6 +21,8 @@ mod imp {
         #[template_child]
         pub bottom_sheet: TemplateChild<adw::BottomSheet>,
         #[template_child]
+        pub player_view: TemplateChild<PlayerView>,
+        #[template_child]
         pub stack: TemplateChild<adw::ViewStack>,
         #[template_child]
         pub sort_button: TemplateChild<gtk::MenuButton>,
@@ -71,6 +73,14 @@ mod imp {
             klass.install_action("win.close-player", None, |win, _, _| {
                 win.imp().bottom_sheet.set_open(false);
             });
+            klass.install_action("win.toggle-lyrics", None, |win, _, _| {
+                win.imp().bottom_sheet.set_open(true);
+                win.imp().player_view.toggle_lyrics();
+            });
+            klass.install_action("win.toggle-queue", None, |win, _, _| {
+                win.imp().bottom_sheet.set_open(true);
+                win.imp().player_view.toggle_queue();
+            });
             klass.install_action("win.toggle-search", None, |win, _, _| {
                 let bar = &win.imp().search_bar;
                 bar.set_search_mode(!bar.is_search_mode());
@@ -118,7 +128,6 @@ mod imp {
 
             if config::is_development() {
                 obj.add_css_class("devel");
-                obj.setup_screenshot();
             }
 
             let settings = gio::Settings::new(APP_ID);
@@ -128,6 +137,9 @@ mod imp {
             obj.add_action(&settings.create_action("album-sort"));
             self.settings.set(settings).expect("settings are set once");
             obj.load_window_state();
+            if config::is_development() {
+                obj.setup_screenshot();
+            }
 
             let player = GatefoldApplication::get().player();
             obj.insert_action_group("player", Some(player.actions()));
@@ -585,6 +597,16 @@ impl GatefoldWindow {
             .and_then(|d| d.parse().ok())
             .unwrap_or(8);
         let actions = std::env::var("GATEFOLD_SCREENSHOT_ACTIONS").unwrap_or_default();
+        // `GATEFOLD_SCREENSHOT_SIZE=400x760`: the window size.
+        if let Some((w, h)) = std::env::var("GATEFOLD_SCREENSHOT_SIZE")
+            .ok()
+            .and_then(|size| {
+                let (w, h) = size.split_once('x')?;
+                Some((w.parse().ok()?, h.parse().ok()?))
+            })
+        {
+            self.set_default_size(w, h);
+        }
         let window = self.downgrade();
         let first_step = delay.clamp(1, 2);
         glib::timeout_add_seconds_local_once(first_step, move || {

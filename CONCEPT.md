@@ -549,7 +549,7 @@ These are small changes in lyrembed and cdimport that would make the integration
 - **MPRIS** (`mpris-server`): metadata, cover art URL (file:// to cached cover), position, shuffle/loop status. This gives GNOME Shell media controls and media keys.
 - **Notifications** on track change (optional, off by default since Shell already shows media controls).
 - **Background portal** for keep-playing-when-closed.
-- **Keyboard shortcuts** (`AdwShortcutsDialog`): Space play/pause, Ctrl+←/→ prev/next, Ctrl+F search, Ctrl+L lyrics, Ctrl+1/2/3 views. Ctrl+Q closes the window (and quits), as in other GNOME apps; the queue gets its own shortcut with the queue pane in phase 3.
+- **Keyboard shortcuts** (`AdwShortcutsDialog`): Space play/pause, Ctrl+←/→ prev/next, Ctrl+F search, Ctrl+L lyrics, Ctrl+U queue, Ctrl+1/2/3 views. Ctrl+Q closes the window (and quits), as in other GNOME apps.
 - **Drag & drop** of files/folders onto the window → play now / add to queue.
 - **Accessibility**: every cover has accessible labels, and lyrics are readable by Orca.
 

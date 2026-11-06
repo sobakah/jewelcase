@@ -52,6 +52,24 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     }
 
     Adw.PreferencesGroup {
+      title: _("Lyrics");
+
+      Adw.ComboRow lyrics_layout_row {
+        title: _("_Romanized Lyrics");
+        subtitle: _("For lyrics with an original and a romanized line");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Original on Top"),
+            _("Romanization on Top"),
+            _("Original Only"),
+          ]
+        };
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: _("Queue");
 
       Adw.SwitchRow restore_queue_row {

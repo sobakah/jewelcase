@@ -341,6 +341,40 @@ impl Queue {
         true
     }
 
+    /// Moves an upcoming item to another upcoming position (drag & drop).
+    /// Items dropped into or right after the "Next up" block become part of
+    /// it; items dropped among the album's tracks become context again.
+    /// Returns false for invalid moves (the current item stays put).
+    pub fn move_item(&mut self, from: usize, to: usize) -> bool {
+        let first_upcoming = self.current.map_or(0, |c| c + 1);
+        let len = self.items.len();
+        if from == to || from < first_upcoming || to < first_upcoming || from >= len || to >= len {
+            return false;
+        }
+        let mut item = self.items.remove(from);
+        // The "Next up" block as it is without the moved item.
+        let block_end = user_block_end(&self.items, first_upcoming);
+        item.origin = if to <= block_end {
+            Origin::User
+        } else {
+            Origin::Context
+        };
+        self.items.insert(to, item);
+
+        if let Some(order) = self.unshuffled.as_mut() {
+            // Follow the item before the new position, so turning shuffle
+            // off keeps the move.
+            order.retain(|&uid| uid != item.uid);
+            let before = self.items[to - 1].uid;
+            let at = order
+                .iter()
+                .position(|&uid| uid == before)
+                .map_or(order.len(), |p| p + 1);
+            order.insert(at, item.uid);
+        }
+        true
+    }
+
     pub fn clear_upcoming(&mut self) {
         let keep = self.current.map_or(0, |c| c + 1);
         let removed: Vec<u64> = self.items.drain(keep..).map(|i| i.uid).collect();
@@ -503,6 +537,35 @@ mod tests {
         assert_eq!(queue.current().unwrap().track_id, 3);
         queue.clear_upcoming();
         assert_eq!(ids(&queue), [2, 3]);
+    }
+
+    #[test]
+    fn moving_items_updates_next_up() {
+        let mut queue = album(Some(0));
+        queue.add(&[10]);
+        // [1*, 10u, 2, 3, 4, 5]
+        assert!(queue.move_item(4, 1));
+        assert_eq!(ids(&queue), [1, 4, 10, 2, 3, 5]);
+        assert_eq!(queue.items()[1].origin, Origin::User);
+        // Back among the album tracks: context again.
+        assert!(queue.move_item(1, 4));
+        assert_eq!(ids(&queue), [1, 10, 2, 3, 4, 5]);
+        assert_eq!(queue.items()[4].origin, Origin::Context);
+        // The current item can't move, and nothing moves before it.
+        assert!(!queue.move_item(0, 2));
+        assert!(!queue.move_item(3, 0));
+    }
+
+    #[test]
+    fn moves_survive_turning_shuffle_off() {
+        let mut queue = album(Some(0));
+        queue.set_shuffle(true, &mut rng());
+        let last = queue.items().len() - 1;
+        let moved = queue.items()[last].track_id;
+        assert!(queue.move_item(last, 1));
+        queue.set_shuffle(false, &mut rng());
+        assert_eq!(ids(&queue)[1], moved);
+        assert_eq!(queue.items().len(), 5);
     }
 
     #[test]

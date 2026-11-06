@@ -16,10 +16,10 @@ use gtk::{gio, glib};
 
 use crate::config::APP_ID;
 use crate::library::Library;
-use crate::objects::TrackObject;
+use crate::objects::{QueueEntry, TrackObject};
 
-/// How often the position is updated while playing.
-const TICK: Duration = Duration::from_millis(250);
+/// How often the position is updated while playing (lyrics follow it).
+const TICK: Duration = Duration::from_millis(150);
 /// The queue is saved this long after its last change (§6.2).
 const SAVE_DELAY: Duration = Duration::from_secs(2);
 /// "Previous" restarts the track instead when it has played this long.
@@ -60,7 +60,7 @@ mod imp {
         pub settings: OnceCell<gio::Settings>,
         pub actions: gio::SimpleActionGroup,
         pub queue: RefCell<Queue>,
-        /// Upcoming queue entries, current first, for the queue view.
+        /// Queue entries from the current one on, for the queue view.
         pub queue_model: OnceCell<gio::ListStore>,
         pub tracks: RefCell<HashMap<i64, TrackObject>>,
         pub state: Cell<State>,
@@ -98,7 +98,7 @@ mod imp {
             self.parent_constructed();
             self.repeat.replace(RepeatMode::Off.as_str().to_owned());
             self.queue_model
-                .set(gio::ListStore::new::<TrackObject>())
+                .set(gio::ListStore::new::<QueueEntry>())
                 .expect("set once");
         }
     }
@@ -329,6 +329,30 @@ impl Player {
             self.load_current(true, 0);
             self.queue_changed();
         }
+    }
+
+    /// Moves an upcoming entry (drag & drop); offsets as in the queue model.
+    pub fn move_upcoming(&self, from: usize, to: usize) {
+        let current = self.imp().queue.borrow().current_index().unwrap_or(0);
+        let moved = self
+            .imp()
+            .queue
+            .borrow_mut()
+            .move_item(current + from, current + to);
+        if moved {
+            self.queue_changed();
+        }
+    }
+
+    /// The album the queue was started from, for "Next From: …".
+    pub fn context_title(&self) -> Option<String> {
+        let album = self.imp().queue.borrow().context_album()?;
+        self.library()
+            .db()?
+            .album(album)
+            .ok()
+            .flatten()
+            .map(|a| a.title)
     }
 
     /// Removes the queue entry at `offset` in the queue model (> 0).
@@ -632,15 +656,21 @@ impl Player {
         let (shuffle, repeat, upcoming) = {
             let queue = imp.queue.borrow();
             let start = queue.current_index().unwrap_or(0);
-            let ids: Vec<i64> = queue
+            let items: Vec<_> = queue
                 .items()
                 .iter()
                 .skip(start)
-                .map(|i| i.track_id)
+                .map(|i| (i.track_id, i.origin))
                 .collect();
-            (queue.is_shuffled(), queue.repeat().as_str(), ids)
+            (queue.is_shuffled(), queue.repeat().as_str(), items)
         };
-        let objects: Vec<TrackObject> = upcoming.iter().filter_map(|&id| self.track(id)).collect();
+        let objects: Vec<QueueEntry> = upcoming
+            .iter()
+            .enumerate()
+            .filter_map(|(offset, &(id, origin))| {
+                Some(QueueEntry::new(offset, self.track(id)?, origin))
+            })
+            .collect();
         let model = self.queue_model();
         model.splice(0, model.n_items(), &objects);
 

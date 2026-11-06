@@ -89,3 +89,4 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Project skeleton (roadmap phase 0)
 - Library scanner, album grid and panel, playback, queue, MPRIS (phase 1)
 - Artists: grid, pages, online lookups, portraits (phase 2)
+- Player: cover colors, adaptive layouts, lyrics, queue sections (phase 3)

@@ -1,0 +1,16 @@
+[package]
+name = "gatefold-lyrics"
+description = "Gatefold's lyrics: LRC parsing, embedded and sidecar sources, dual-line pairing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+lofty.workspace = true
+tracing.workspace = true
+unicode-script.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

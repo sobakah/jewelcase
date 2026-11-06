@@ -9,6 +9,7 @@ mod mpris;
 mod objects;
 mod player;
 mod preferences_dialog;
+mod theme;
 mod widgets;
 mod window;
 
