@@ -10,35 +10,35 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
   child: Gtk.Box {
     orientation: vertical;
-    margin-start: 12;
-    margin-end: 12;
-    margin-top: 9;
-    margin-bottom: 6;
-    spacing: 3;
+    margin-start: 18;
+    margin-end: 18;
+    margin-top: 12;
+    margin-bottom: 9;
+    spacing: 6;
 
     Gtk.Box {
       spacing: 12;
 
       $GatefoldCoverImage cover {
-        min-size: 56;
-        natural-size: 56;
+        min-size: 68;
+        natural-size: 68;
         valign: center;
       }
 
-      Gtk.Box {
+      Gtk.Box text_box {
         orientation: vertical;
         valign: center;
         hexpand: true;
-        width-request: 140;
+        width-request: 180;
 
         Gtk.Label title {
           label: _("Not Playing");
           xalign: 0;
           ellipsize: end;
-          max-width-chars: 28;
+          max-width-chars: 30;
 
           styles [
-            "heading",
+            "title-4",
           ]
         }
 
@@ -56,7 +56,7 @@ template $GatefoldMiniPlayer: Adw.Bin {
       }
 
       Gtk.Box {
-        spacing: 3;
+        spacing: 9;
         valign: center;
 
         Gtk.ToggleButton shuffle_button {

@@ -24,6 +24,16 @@ use crate::objects::TrackObject;
 use crate::player::Player;
 use crate::{covers, format, theme};
 
+/// Below this window width: one pane at a time, replacing the cover.
+const NARROW_BELOW: i32 = 640;
+/// From this window width, lyrics and queue fit next to each other.
+const WIDE_FROM: i32 = 1400;
+const MAIN_MIN: i32 = 620;
+const MAIN_MAX: i32 = 820;
+const PANE_WIDTH: i32 = 420;
+/// Room left beside the player, so it reads as a card.
+const SIDE_GAP: i32 = 24;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Width {
     #[default]
@@ -97,6 +107,8 @@ mod imp {
         #[template_child]
         pub volume_adjustment: TemplateChild<gtk::Adjustment>,
         pub width: Cell<Width>,
+        /// The window's width (see set_available_width).
+        pub available: Cell<i32>,
         /// Avoids re-entrant toggling while panes are updated.
         pub updating: Cell<bool>,
     }
@@ -126,7 +138,37 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for PlayerView {}
+    // The player lays out its child itself (no layout manager, see setup)
+    // to ask for its target width rather than its content's.
+    impl WidgetImpl for PlayerView {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::ConstantSize
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let Some(child) = self.obj().child() else {
+                return (0, 0, -1, -1);
+            };
+            let (min, natural, _, _) = child.measure(orientation, for_size);
+            if orientation == gtk::Orientation::Horizontal {
+                let target = self.obj().target_width();
+                (
+                    min,
+                    if target > 0 { target.max(min) } else { natural },
+                    -1,
+                    -1,
+                )
+            } else {
+                (min, natural, -1, -1)
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.obj().child() {
+                child.allocate(width, height, baseline, None);
+            }
+        }
+    }
     impl BinImpl for PlayerView {}
 }
 
@@ -138,11 +180,11 @@ glib::wrapper! {
 
 impl PlayerView {
     fn setup(&self) {
+        self.set_layout_manager(None::<gtk::LayoutManager>);
         let imp = self.imp();
         let player = GatefoldApplication::get().player();
         // The overlay sizes itself from the controls, not the backdrop.
         imp.overlay.set_measure_overlay(&*imp.toolbar, true);
-        self.setup_breakpoints();
 
         player.connect_current_track_notify(glib::clone!(
             #[weak(rename_to = view)]
@@ -200,6 +242,15 @@ impl PlayerView {
                 glib::Propagation::Proceed
             }
         ));
+
+        super::mini_player::make_end_time_toggle(
+            &imp.duration_label,
+            glib::clone!(
+                #[weak(rename_to = view)]
+                self,
+                move || view.update_position(&GatefoldApplication::get().player())
+            ),
+        );
 
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {
@@ -260,44 +311,49 @@ impl PlayerView {
         update_play_button(&imp.play_button, player.playing());
     }
 
-    fn setup_breakpoints(&self) {
+    /// The window's width, from which the player picks its layout and its
+    /// own width (it isn't full width: the main column stays in the
+    /// middle, side panes widen it). Deciding from the window, not from
+    /// the player's own width, keeps opening panes from changing the
+    /// layout class.
+    pub fn set_available_width(&self, available: i32) {
         let imp = self.imp();
-        // Only the last matching breakpoint applies: medium, then narrow.
-        for (condition, width) in [
-            ("max-width: 1000sp", Width::Medium),
-            ("max-width: 640sp", Width::Narrow),
-        ] {
-            let breakpoint = adw::Breakpoint::new(
-                adw::BreakpointCondition::parse(condition).expect("valid breakpoint"),
-            );
-            breakpoint.connect_apply(glib::clone!(
-                #[weak(rename_to = view)]
-                self,
-                move |_| view.set_width(width)
-            ));
-            breakpoint.connect_unapply(glib::clone!(
-                #[weak(rename_to = view)]
-                self,
-                move |_| {
-                    // Back to the next wider class.
-                    let wider = match width {
-                        Width::Narrow => Width::Medium,
-                        _ => Width::Wide,
-                    };
-                    if view.imp().width.get() == width {
-                        view.set_width(wider);
-                    }
-                }
-            ));
-            imp.breakpoint_bin.add_breakpoint(breakpoint);
+        if imp.available.replace(available) == available {
+            return;
         }
+        let width = if available < NARROW_BELOW {
+            Width::Narrow
+        } else if available < WIDE_FROM {
+            Width::Medium
+        } else {
+            Width::Wide
+        };
+        if width != imp.width.get() {
+            self.set_width(width);
+        } else {
+            self.queue_resize();
+        }
+    }
+
+    /// The width the player asks for: the main column plus open panes.
+    fn target_width(&self) -> i32 {
+        let imp = self.imp();
+        let available = imp.available.get();
+        if available <= 0 || imp.width.get() == Width::Narrow {
+            return available.max(0);
+        }
+        let main = (available * 6 / 10).clamp(MAIN_MIN, MAIN_MAX);
+        let panes = [&*imp.lyrics_button, &*imp.queue_button]
+            .iter()
+            .filter(|b| b.is_active())
+            .count() as i32;
+        (main + panes * PANE_WIDTH).min(available - SIDE_GAP)
     }
 
     fn set_width(&self, width: Width) {
         let imp = self.imp();
         imp.width.set(width);
-        // Narrow: icon-only pane buttons, tighter transport, and no info or
-        // volume (the system volume and MPRIS remain).
+        // Narrow: icon-only pane buttons and a tighter transport.
         let narrow = width == Width::Narrow;
         imp.lyrics_content.set_label(&if narrow {
             String::new()
@@ -310,8 +366,6 @@ impl PlayerView {
             gettext("Queue")
         });
         imp.transport.set_spacing(if narrow { 6 } else { 18 });
-        imp.info_button.set_visible(!narrow);
-        imp.volume_button.set_visible(!narrow);
         self.update_panes();
     }
 
@@ -376,6 +430,7 @@ impl PlayerView {
             imp.queue_view.set_visible(queue);
             imp.header_track.set_visible(false);
         }
+        self.queue_resize();
     }
 
     fn update_volume_icon(&self, volume: f64) {
@@ -450,7 +505,11 @@ impl PlayerView {
         imp.seek_adjustment.set_value(player.position() as f64);
         imp.position_label
             .set_label(&format::duration(player.position()));
-        imp.duration_label.set_label(&format::duration(duration));
+        imp.duration_label.set_label(&format::end_time(
+            player.position(),
+            duration,
+            super::mini_player::show_remaining(),
+        ));
     }
 
     fn update_repeat(&self, player: &Player) {

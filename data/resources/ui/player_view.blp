@@ -65,6 +65,22 @@ template $GatefoldPlayerView: Adw.Bin {
             action-name: "win.close-player";
           }
 
+          // More about the song: format, bitrate, release, tags.
+
+          [end]
+          Gtk.MenuButton info_button {
+            icon-name: "info-outline-symbolic";
+            tooltip-text: _("Song Info");
+            direction: down;
+
+            popover: Gtk.Popover info_popover {};
+
+            styles [
+              "flat",
+              "circular",
+            ]
+          }
+
           styles [
             "flat",
           ]
@@ -177,27 +193,54 @@ template $GatefoldPlayerView: Adw.Bin {
             orientation: vertical;
             spacing: 18;
 
-            Gtk.Box {
-              orientation: vertical;
-              spacing: 3;
+            Gtk.CenterBox {
+              center-widget: Gtk.Box {
+                orientation: vertical;
+                spacing: 3;
 
-              Gtk.Label title {
-                label: _("Not Playing");
-                ellipsize: end;
+                Gtk.Label title {
+                  label: _("Not Playing");
+                  ellipsize: end;
+
+                  styles [
+                    "title-2",
+                  ]
+                }
+
+                Gtk.Label subtitle {
+                  label: _("Pick an album to start");
+                  ellipsize: end;
+
+                  styles [
+                    "dim-label",
+                  ]
+                }
+              };
+
+              end-widget: Gtk.MenuButton volume_button {
+                icon-name: "audio-volume-high-symbolic";
+                tooltip-text: _("Volume");
+                direction: up;
+
+                popover: Gtk.Popover {
+                  child: Gtk.Scale volume_scale {
+                    width-request: 200;
+                    draw-value: false;
+
+                    adjustment: Gtk.Adjustment volume_adjustment {
+                      lower: 0;
+                      upper: 1;
+                      step-increment: 0.05;
+                      page-increment: 0.1;
+                    };
+                  };
+                };
 
                 styles [
-                  "title-2",
+                  "flat",
+                  "circular",
                 ]
-              }
-
-              Gtk.Label subtitle {
-                label: _("Pick an album to start");
-                ellipsize: end;
-
-                styles [
-                  "dim-label",
-                ]
-              }
+              };
             }
 
             Adw.Clamp {
@@ -321,44 +364,6 @@ template $GatefoldPlayerView: Adw.Bin {
               end-widget: Gtk.Box {
                 spacing: 6;
                 valign: center;
-                // More about the song: format, bitrate, release, tags.
-                Gtk.MenuButton info_button {
-                  icon-name: "info-outline-symbolic";
-                  tooltip-text: _("Song Info");
-                  direction: up;
-
-                  popover: Gtk.Popover info_popover {};
-
-                  styles [
-                    "flat",
-                    "circular",
-                  ]
-                }
-
-                Gtk.MenuButton volume_button {
-                  icon-name: "audio-volume-high-symbolic";
-                  tooltip-text: _("Volume");
-                  direction: up;
-
-                  popover: Gtk.Popover {
-                    child: Gtk.Scale volume_scale {
-                      width-request: 200;
-                      draw-value: false;
-
-                      adjustment: Gtk.Adjustment volume_adjustment {
-                        lower: 0;
-                        upper: 1;
-                        step-increment: 0.05;
-                        page-increment: 0.1;
-                      };
-                    };
-                  };
-
-                  styles [
-                    "flat",
-                    "circular",
-                  ]
-                }
 
                 Gtk.ToggleButton queue_button {
                   tooltip-text: _("Queue (Ctrl+U)");

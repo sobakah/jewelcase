@@ -43,6 +43,7 @@ mod imp {
             self.sections.set_margin_bottom(24);
             let clamp = adw::Clamp::builder()
                 .maximum_size(720)
+                .css_classes(["bottom-room"])
                 .margin_start(12)
                 .margin_end(12)
                 .child(&self.sections)

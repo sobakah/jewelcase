@@ -36,11 +36,9 @@ template $GatefoldWindow: Adw.ApplicationWindow {
     // the player sheet only as wide as it needs (CONCEPT.md §4.3).
     child: Adw.BottomSheet bottom_sheet {
       full-width: false;
-      // The sheet doesn't pad its content, so keep the switcher bar and the
-      // ends of the lists clear of the mini player.
-      content: Adw.ToolbarView {
-        margin-bottom: bind bottom_sheet.bottom-bar-height;
-
+      // The mini player floats over the content (window.rs keeps the
+      // switcher bar clear of it on narrow windows).
+      content: Adw.ToolbarView library_toolbar {
         [top]
         Adw.HeaderBar header_bar {
           title-widget: Adw.ViewSwitcher {

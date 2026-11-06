@@ -6,11 +6,12 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     name: "library";
     title: _("Library");
     icon-name: "folder-music-symbolic";
-
     // Rows are added from preferences_dialog.rs.
     Adw.PreferencesGroup folders_group {
       title: _("Music Folders");
-      description: _("Gatefold reads music from these folders. Symlinked folders and folders inside another music folder can't be added.");
+      description: _(
+        "Gatefold reads music from these folders. Symlinked folders and folders inside another music folder can't be added."
+      );
 
       header-suffix: Gtk.Button {
         valign: center;
@@ -89,7 +90,9 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
     Adw.PreferencesGroup {
       title: _("Artist Information");
-      description: _("Photos, links and short biographies of album artists. Only artist names and MusicBrainz IDs are sent.");
+      description: _(
+        "Photos, links and short biographies of album artists. Only artist names and MusicBrainz IDs are sent."
+      );
 
       Adw.SwitchRow online_row {
         title: _("_Look Up Artists Online");
@@ -140,7 +143,9 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
       Adw.ActionRow layout_hint {
         title: _("Romanization Layout");
-        subtitle: _("lyrembed replaces the original lyrics with the romanization. Set “romanization_layout” to “below” in its config to see both.");
+        subtitle: _(
+          "lyrembed replaces the original lyrics with the romanization. Set “romanization_layout” to “below” in its config to see both."
+        );
         visible: false;
       }
 

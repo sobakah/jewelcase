@@ -33,8 +33,19 @@
 }
 
 .mini-player .mini-play-button {
-  min-width: 40px;
-  min-height: 40px;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+/* The floating mini player covers the end of scrolled content: leave room
+   to scroll the last items above it. */
+.floating-player .album-grid,
+.floating-player .artist-grid {
+  padding-bottom: 120px;
+}
+
+.floating-player .bottom-room {
+  margin-bottom: 100px;
 }
 
 .mini-player .mini-seek {

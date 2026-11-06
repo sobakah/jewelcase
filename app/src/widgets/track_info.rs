@@ -112,18 +112,29 @@ pub fn grid(track: &TrackObject, full: bool) -> gtk::Grid {
             add(gettext("Barcode"), barcode.clone());
         }
     }
-    if let Some(lyrics) = &tags.lyrics {
-        let kind = if lyrics.synced {
-            gettext("Synced lyrics")
+    // What kind of lyrics there are, not the text.
+    let path = &track.track().record.path;
+    let mut lyrics = Vec::new();
+    if let Some(embedded) = &tags.lyrics {
+        lyrics.push(if embedded.synced {
+            gettext("Synced, embedded")
         } else {
-            gettext("Lyrics")
-        };
-        if full {
-            add(kind, gettext("Yes"));
-        } else {
-            add(kind, lyrics.excerpt.clone());
-        }
+            gettext("Plain, embedded")
+        });
     }
+    if path.with_extension("lrc").is_file() {
+        lyrics.push(gettext("Synced, separate file (.lrc)"));
+    } else if path.with_extension("txt").is_file() {
+        lyrics.push(gettext("Plain, separate file (.txt)"));
+    }
+    add(
+        gettext("Lyrics"),
+        if lyrics.is_empty() {
+            gettext("None")
+        } else {
+            lyrics.join("; ")
+        },
+    );
     if full {
         add(
             gettext("File"),

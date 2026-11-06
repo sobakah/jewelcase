@@ -55,6 +55,8 @@ mod imp {
         #[template_child]
         pub mini_player: TemplateChild<MiniPlayer>,
         #[template_child]
+        pub library_toolbar: TemplateChild<adw::ToolbarView>,
+        #[template_child]
         pub artist_split: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub artist_holder: TemplateChild<adw::Bin>,
@@ -228,6 +230,7 @@ mod imp {
             obj.setup_playlists();
             obj.setup_artist_overlay();
             obj.setup_panel_resizers();
+            obj.setup_floating_player();
             obj.setup_messages();
             obj.setup_tools();
 
@@ -652,9 +655,10 @@ impl GatefoldWindow {
         reveal_sidebar(&imp.artist_split);
     }
 
-    /// A collapsed split view ignores the width fraction, so keep the
-    /// artist panel at most of the window, with some grid showing beside it
-    /// (or all of it on narrow windows).
+    /// Follows the window width: a collapsed split view ignores the width
+    /// fraction, so keep the artist panel at most of the window, with some
+    /// grid showing beside it (or all of it on narrow windows); and the
+    /// player picks its layout and width from it.
     fn setup_artist_overlay(&self) {
         self.connect_realize(|window| {
             let Some(surface) = window.surface() else {
@@ -666,15 +670,48 @@ impl GatefoldWindow {
                 move |surface: &gtk::gdk::Surface| {
                     let width = surface.width();
                     let panel = if width < 600 { width } else { width * 88 / 100 };
-                    window
-                        .imp()
-                        .artist_split
-                        .set_max_sidebar_width(f64::from(panel));
+                    let imp = window.imp();
+                    imp.artist_split.set_max_sidebar_width(f64::from(panel));
+                    imp.player_view.set_available_width(width);
                 }
             );
             update(&surface);
             surface.connect_width_notify(update);
         });
+    }
+
+    /// Wide windows: the mini player floats over the content, which keeps
+    /// scroll room for it (`.floating-player .bottom-room`). Narrow: the
+    /// bar spans the bottom, and the content (with the view switcher)
+    /// ends above it.
+    fn setup_floating_player(&self) {
+        let update = glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move || {
+                let imp = window.imp();
+                let floating = !imp.bottom_sheet.is_full_width();
+                imp.library_toolbar.set_margin_bottom(if floating {
+                    0
+                } else {
+                    imp.bottom_sheet.bottom_bar_height()
+                });
+                if floating {
+                    window.add_css_class("floating-player");
+                } else {
+                    window.remove_css_class("floating-player");
+                }
+            }
+        );
+        let on_width = update.clone();
+        self.imp()
+            .bottom_sheet
+            .connect_full_width_notify(move |_| on_width());
+        let on_height = update.clone();
+        self.imp()
+            .bottom_sheet
+            .connect_bottom_bar_height_notify(move |_| on_height());
+        update();
     }
 
     fn setup_panel_resizers(&self) {

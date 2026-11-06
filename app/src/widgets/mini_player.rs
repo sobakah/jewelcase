@@ -37,6 +37,8 @@ mod imp {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
+        pub text_box: TemplateChild<gtk::Box>,
+        #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
         pub artist: TemplateChild<gtk::Label>,
@@ -104,6 +106,25 @@ mod imp {
                     popover.set_child(Some(&queue));
                 }
             });
+            make_end_time_toggle(
+                &self.duration_label,
+                glib::clone!(
+                    #[weak]
+                    obj,
+                    move || obj.update_progress(&GatefoldApplication::get().player())
+                ),
+            );
+            // Compact (narrow windows): a smaller cover, a title that may
+            // shrink.
+            obj.connect_compact_notify(|obj| {
+                let imp = obj.imp();
+                let compact = obj.compact();
+                let size = if compact { 52 } else { 68 };
+                imp.cover.set_min_size(size);
+                imp.cover.set_natural_size(size);
+                imp.text_box
+                    .set_width_request(if compact { 60 } else { 180 });
+            });
             obj.update_track(&player);
             update_repeat_button(&self.repeat_button, &player);
             super::update_play_button(&self.play_button, player.playing());
@@ -154,8 +175,36 @@ impl MiniPlayer {
         imp.seek.set_sensitive(player.current_track().is_some());
         imp.position_label
             .set_label(&format::duration(player.position()));
-        imp.duration_label.set_label(&format::duration(duration));
+        imp.duration_label.set_label(&format::end_time(
+            player.position(),
+            duration,
+            show_remaining(),
+        ));
     }
+}
+
+/// Clicking the time right of the seek bar switches between the song's
+/// length and the remaining time (a shared setting).
+pub(super) fn make_end_time_toggle(label: &gtk::Label, on_change: impl Fn() + 'static) {
+    let player = GatefoldApplication::get().player();
+    let settings = player.settings().clone();
+    label.set_tooltip_text(Some(&gettext("Show Remaining Time")));
+    label.set_cursor_from_name(Some("pointer"));
+    let click = gtk::GestureClick::new();
+    let toggle_settings = settings.clone();
+    click.connect_released(move |_, _, _, _| {
+        let remaining = toggle_settings.boolean("show-remaining-time");
+        let _ = toggle_settings.set_boolean("show-remaining-time", !remaining);
+    });
+    label.add_controller(click);
+    settings.connect_changed(Some("show-remaining-time"), move |_, _| on_change());
+}
+
+pub(super) fn show_remaining() -> bool {
+    GatefoldApplication::get()
+        .player()
+        .settings()
+        .boolean("show-remaining-time")
 }
 
 /// Repeat's icon and tooltip for its current mode.

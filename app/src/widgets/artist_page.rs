@@ -616,11 +616,9 @@ impl ArtistPage {
     }
 }
 
-/// `spotify:` if the Spotify app handles it, else the web player (§4.2).
+/// The artist's page on the Spotify website (§4.2). Not a `spotify:` URI:
+/// the Linux Spotify app takes those as "play", so it would start the
+/// artist's music instead of showing the page.
 fn spotify_uri(id: &str) -> String {
-    if gio::AppInfo::default_for_uri_scheme("spotify").is_some() {
-        format!("spotify:artist:{id}")
-    } else {
-        format!("https://open.spotify.com/artist/{id}")
-    }
+    format!("https://open.spotify.com/artist/{id}")
 }

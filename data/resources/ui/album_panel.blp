@@ -1,6 +1,5 @@
 using Gtk 4.0;
 using Adw 1;
-
 // The album detail side panel (CONCEPT.md §4.1).
 template $GatefoldAlbumPanel: Adw.Bin {
   styles [
@@ -30,6 +29,10 @@ template $GatefoldAlbumPanel: Adw.Bin {
       hscrollbar-policy: never;
 
       child: Adw.Clamp {
+        styles [
+          "bottom-room",
+        ]
+
         maximum-size: 560;
         margin-start: 18;
         margin-end: 18;

@@ -53,3 +53,12 @@ pub fn audio_format(tags: &TrackTags) -> String {
     }
     parts.join(" · ")
 }
+
+/// The time label right of a seek bar: the length, or what's left ("-1:23").
+pub fn end_time(position_ms: u64, duration_ms: u64, remaining: bool) -> String {
+    if remaining {
+        format!("-{}", duration(duration_ms.saturating_sub(position_ms)))
+    } else {
+        duration(duration_ms)
+    }
+}
