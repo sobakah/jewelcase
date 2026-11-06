@@ -29,7 +29,7 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
     let overlay = gtk::Overlay::builder().child(&sidebar).build();
     overlay.add_overlay(&handle);
     split.set_sidebar(Some(&overlay));
-    StableContent::wrap(split);
+    let stable = StableContent::wrap(split);
     // Overlaid (collapsed) panels take the whole width; nothing to resize.
     split
         .bind_property("collapsed", &handle, "visible")
@@ -57,12 +57,21 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
 
     let drag = gtk::GestureDrag::new();
     let start = std::rc::Rc::new(std::cell::Cell::new(0));
+    // While dragging, only the panel changes: the grid behind keeps its
+    // width and reflows once at the end, instead of on every motion.
+    let begin_stable = stable.clone();
+    let cancel_stable = stable.clone();
     drag.connect_drag_begin(glib::clone!(
         #[weak]
         overlay,
         #[strong]
         start,
-        move |_, _, _| start.set(overlay.width())
+        move |_, _, _| {
+            start.set(overlay.width());
+            if let Some(stable) = &begin_stable {
+                stable.set_frozen(true);
+            }
+        }
     ));
     let clamp = glib::clone!(
         #[weak]
@@ -89,8 +98,17 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
         move |_, dx, _| {
             let width = clamp(f64::from(start.get()) - dx);
             let _ = settings.set_int(KEY, width);
+            if let Some(stable) = &stable {
+                stable.set_frozen(false);
+            }
         }
     ));
+    // A cancelled drag (e.g. a grab elsewhere) must not leave it frozen.
+    drag.connect_cancel(move |_, _| {
+        if let Some(stable) = &cancel_stable {
+            stable.set_frozen(false);
+        }
+    });
     handle.add_controller(drag);
 }
 
@@ -107,6 +125,8 @@ mod stable_imp {
         pub split: glib::WeakRef<adw::OverlaySplitView>,
         /// The content width while the panel is shown.
         pub narrow: Cell<i32>,
+        /// While the panel's edge is dragged: the content keeps this width.
+        pub frozen: Cell<Option<i32>>,
     }
 
     #[glib::object_subclass]
@@ -149,6 +169,9 @@ mod stable_imp {
                 return;
             };
             let child_width = match self.split.upgrade() {
+                Some(split) if !split.is_collapsed() && self.frozen.get().is_some() => {
+                    self.frozen.get().unwrap_or(width)
+                }
                 Some(split) if !split.is_collapsed() => {
                     let full = split.width();
                     if split.shows_sidebar() {
@@ -182,10 +205,17 @@ glib::wrapper! {
 }
 
 impl StableContent {
-    fn wrap(split: &adw::OverlaySplitView) {
-        let Some(content) = split.content() else {
-            return;
-        };
+    /// Keeps the content at its current width (resizing the panel), or
+    /// lets it follow again, with one reflow.
+    fn set_frozen(&self, frozen: bool) {
+        let imp = self.imp();
+        let width = imp.child.borrow().as_ref().map(|c| c.width());
+        imp.frozen.set(if frozen { width } else { None });
+        self.queue_allocate();
+    }
+
+    fn wrap(split: &adw::OverlaySplitView) -> Option<Self> {
+        let content = split.content()?;
         split.set_content(None::<&gtk::Widget>);
         let stable: Self = glib::Object::new();
         let imp = stable.imp();
@@ -203,5 +233,6 @@ impl StableContent {
                 ),
             );
         }
+        Some(stable)
     }
 }

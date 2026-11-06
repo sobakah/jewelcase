@@ -120,6 +120,11 @@
       <summary>Width of the album and playlist panels</summary>
       <description>Set by dragging the panel’s edge; 0 sizes them automatically.</description>
     </key>
+    <key name="spotify-links-in-app" type="b">
+      <default>false</default>
+      <summary>Open Spotify links in the Spotify app</summary>
+      <description>Off: in the browser. The Spotify app starts playing what a link points to.</description>
+    </key>
     <key name="show-remaining-time" type="b">
       <default>false</default>
       <summary>Show the remaining time instead of the song’s length</summary>

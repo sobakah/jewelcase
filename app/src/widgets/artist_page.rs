@@ -486,6 +486,7 @@ impl ArtistPage {
             .build();
         for track in tracks {
             let row = adw::ActionRow::builder()
+                .use_markup(false)
                 .title(track.title())
                 .subtitle(
                     [
@@ -497,7 +498,6 @@ impl ArtistPage {
                     .collect::<Vec<_>>()
                     .join(" — "),
                 )
-                .use_markup(false)
                 .activatable(true)
                 .build();
             let cover: CoverImage = glib::Object::builder()
@@ -618,11 +618,19 @@ impl ArtistPage {
     }
 }
 
-/// The artist's page on the Spotify website (§4.2). Not a `spotify:` URI:
-/// the Linux Spotify app takes those as "play", so it would start the
-/// artist's music instead of showing the page.
+/// The artist on Spotify (§4.2): the web page, or with the setting (and
+/// the app installed) a `spotify:` link for the app, which the Linux
+/// Spotify app takes as "play".
 fn spotify_uri(id: &str) -> String {
-    format!("https://open.spotify.com/artist/{id}")
+    let in_app = GatefoldApplication::get()
+        .player()
+        .settings()
+        .boolean("spotify-links-in-app");
+    if in_app && gio::AppInfo::default_for_uri_scheme("spotify").is_some() {
+        format!("spotify:artist:{id}")
+    } else {
+        format!("https://open.spotify.com/artist/{id}")
+    }
 }
 
 /// Play (its album, from this song), Add to Queue and Add to Playlist for

@@ -132,9 +132,9 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
     };
     for playlist in &playlists {
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(&playlist.playlist().name)
             .subtitle(crate::format::song_count(playlist.playlist().item_count))
-            .use_markup(false)
             .activatable(true)
             .build();
         list.append(&row);

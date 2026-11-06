@@ -202,6 +202,7 @@ impl PlaylistPanel {
                 continue;
             };
             let row = adw::ActionRow::builder()
+                .use_markup(false)
                 .title(track.title())
                 .subtitle(
                     [track.artist(), track.track().album_title.clone()]
@@ -210,7 +211,6 @@ impl PlaylistPanel {
                         .collect::<Vec<_>>()
                         .join(" — "),
                 )
-                .use_markup(false)
                 .build();
             let cover: CoverImage = glib::Object::builder()
                 .property("min-size", 40)

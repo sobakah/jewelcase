@@ -100,9 +100,9 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
                             .flatten()
                             .collect();
                             let row = adw::ActionRow::builder()
+                                .use_markup(false)
                                 .title(&candidate.name)
                                 .subtitle(details.join(" · "))
-                                .use_markup(false)
                                 .activatable(true)
                                 .build();
                             row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));

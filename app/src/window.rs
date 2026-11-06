@@ -880,10 +880,7 @@ impl GatefoldWindow {
                     None,
                     move |values| {
                         let message = values[1].get::<String>().ok()?;
-                        window
-                            .imp()
-                            .toast_overlay
-                            .add_toast(adw::Toast::new(&message));
+                        imp_toast(&window, &message);
                         None
                     }
                 ),
@@ -1216,11 +1213,12 @@ impl GatefoldWindow {
     }
 }
 
+/// A message toast: short confirmations ("Added to Queue") go quickly,
+/// longer messages stay a bit longer.
 fn imp_toast(window: &GatefoldWindow, message: &str) {
-    window
-        .imp()
-        .toast_overlay
-        .add_toast(adw::Toast::new(message));
+    let toast = adw::Toast::new(message);
+    toast.set_timeout(if message.chars().count() <= 40 { 2 } else { 4 });
+    window.imp().toast_overlay.add_toast(toast);
 }
 
 /// Shows a split view's sidebar. Revealing it before the split view has had

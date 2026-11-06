@@ -59,6 +59,8 @@ mod imp {
         pub fanart_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub fanart_key_row: TemplateChild<adw::PasswordEntryRow>,
+        #[template_child]
+        pub spotify_app_row: TemplateChild<adw::SwitchRow>,
         pub folder_rows: RefCell<Vec<adw::ActionRow>>,
         pub settings: OnceCell<gio::Settings>,
     }
@@ -121,6 +123,9 @@ mod imp {
                 .build();
             settings
                 .bind("fanart-api-key", &*self.fanart_key_row, "text")
+                .build();
+            settings
+                .bind("spotify-links-in-app", &*self.spotify_app_row, "active")
                 .build();
             self.setup_integrations(&settings);
             // Answering here counts as answering the Artists view's question.
@@ -259,9 +264,9 @@ impl PreferencesDialog {
             |name| name.to_string_lossy().into_owned(),
         );
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(name)
             .subtitle(folder.display().to_string())
-            .use_markup(false)
             .build();
         row.add_prefix(&gtk::Image::from_icon_name("folder-music-symbolic"));
 

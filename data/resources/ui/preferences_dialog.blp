@@ -120,6 +120,18 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         sensitive: bind fanart_row.active;
       }
     }
+
+    Adw.PreferencesGroup {
+      title: _("Links");
+
+      Adw.SwitchRow spotify_app_row {
+        title: _("Open Spotify Links in the _App");
+        subtitle: _(
+          "Otherwise they open in the browser. Careful: the Spotify app starts playing the artist right away, alongside Gatefold."
+        );
+        use-underline: true;
+      }
+    }
   }
 
   Adw.PreferencesPage {

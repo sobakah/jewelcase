@@ -114,9 +114,9 @@ impl SearchView {
 
     fn row(title: &str, subtitle: &str, prefix: &impl IsA<gtk::Widget>) -> adw::ActionRow {
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(title)
             .subtitle(subtitle)
-            .use_markup(false)
             .activatable(true)
             .build();
         row.add_prefix(prefix);
