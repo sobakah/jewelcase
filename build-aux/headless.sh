@@ -3,7 +3,7 @@
 # disturb the desktop:
 #
 # - a headless mutter with a virtual monitor (nothing appears on screen)
-# - its own D-Bus session bus (no clash with a running Gatefold, no MPRIS
+# - its own runtime dir and D-Bus session bus (no clash with a running Gatefold, no MPRIS
 #   entry in GNOME Shell)
 # - in-memory GSettings (the real settings stay untouched)
 # - its own data and cache folders, in $GATEFOLD_HEADLESS_STATE
@@ -22,15 +22,35 @@ fi
 state=${GATEFOLD_HEADLESS_STATE:-$PWD/_build/headless}
 mkdir -p "$state/data" "$state/cache"
 
-export GATEFOLD_HEADLESS_DATA="$state/data" GATEFOLD_HEADLESS_CACHE="$state/cache"
-exec dbus-run-session -- sh -c '
-    export XDG_DATA_HOME="$GATEFOLD_HEADLESS_DATA" XDG_CACHE_HOME="$GATEFOLD_HEADLESS_CACHE"
-    export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1
-    # No portals or gvfs inside the private session.
-    export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none
-    export WAYLAND_DISPLAY="gatefold-headless-$$"
-    unset DISPLAY
+# A private runtime dir. Everything the private bus starts on demand (the
+# document portal, gvfs, other portals) inherits the bus daemon's
+# environment, so these variables must be set *before* dbus-run-session.
+# With the real /run/user/$UID, the private document portal takes over
+# /run/user/$UID/doc, the desktop's portal exits, and Flatpak apps can no
+# longer open files or links until it is restarted.
+runtime=$(mktemp -d "${TMPDIR:-/tmp}/gatefold-headless.XXXXXX")
+chmod 700 "$runtime"
+cleanup() {
+    for mount in "$runtime/doc" "$runtime/gvfs"; do
+        fusermount3 -u -q "$mount" 2>/dev/null || true
+    done
+    # Never descend into a mount that is still there (the document portal
+    # exposes real files).
+    rm -rf --one-file-system "$runtime" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
+export XDG_RUNTIME_DIR="$runtime"
+export XDG_DATA_HOME="$state/data" XDG_CACHE_HOME="$state/cache"
+export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1
+# Keep GTK away from portals, gvfs and the accessibility bus.
+export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none
+export WAYLAND_DISPLAY="gatefold-headless-$$"
+unset DISPLAY
+
+status=0
+dbus-run-session -- sh -c '
     mutter --headless --wayland --no-x11 --wayland-display "$WAYLAND_DISPLAY" \
         --virtual-monitor 1100x760 >/dev/null 2>&1 &
     mutter=$!
@@ -44,4 +64,5 @@ exec dbus-run-session -- sh -c '
     kill "$mutter" 2>/dev/null || true
     wait "$mutter" 2>/dev/null || true
     exit "$status"
-' sh "$@"
+' sh "$@" || status=$?
+exit "$status"

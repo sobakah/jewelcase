@@ -554,15 +554,28 @@ impl Tools {
                     return;
                 };
                 let argv: Vec<OsString> = command.into_iter().map(OsString::from).collect();
-                // The editor returns at once; nothing to wait for.
+                // Nothing to wait for, but an editor that fails right away
+                // (e.g. Flatpak's sandbox setup) shouldn't do so silently.
+                let started = std::time::Instant::now();
+                let name = editor.name().to_owned();
                 tools.spawn(
                     &argv,
                     |_| {},
-                    |code| {
-                        if code != 0 {
+                    glib::clone!(
+                        #[weak]
+                        tools,
+                        move |code| {
+                            if code == 0 {
+                                return;
+                            }
                             tracing::info!("Tag editor exited with {code}");
+                            if started.elapsed() < std::time::Duration::from_secs(5) {
+                                tools.message(
+                                    &gettext("{} couldn't be opened").replace("{}", &name),
+                                );
+                            }
                         }
-                    },
+                    ),
                 );
             }
         ));
