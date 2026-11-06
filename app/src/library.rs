@@ -549,8 +549,12 @@ impl Library {
         created
     }
 
-    pub fn add_to_playlist(&self, id: i64, tracks: &[i64]) {
+    /// `announce`: confirm with a toast (not needed where the list shows it).
+    pub fn add_to_playlist(&self, id: i64, tracks: &[i64], announce: bool) {
         self.playlist_op(|db, now| db.add_to_playlist(id, tracks, None, now));
+        if !announce {
+            return;
+        }
         let name = self
             .playlist(id)
             .map(|p| p.playlist().name.clone())

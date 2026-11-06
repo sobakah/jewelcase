@@ -124,3 +124,22 @@
   padding: 0;
   border-radius: 12px;
 }
+
+/* Drag handle on the inner edge of the album and playlist panels. */
+.panel-resize-handle {
+  transition: background-color 150ms ease-out;
+}
+
+.panel-resize-handle:hover {
+  background-color: alpha(currentColor, 0.08);
+}
+
+/* Quick actions on song rows stay quiet until the row is pointed at. */
+.track-row .row-action {
+  opacity: 0.55;
+  transition: opacity 150ms ease-out;
+}
+
+.track-row:hover .row-action {
+  opacity: 1;
+}

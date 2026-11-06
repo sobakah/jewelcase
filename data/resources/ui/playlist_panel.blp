@@ -1,6 +1,5 @@
 using Gtk 4.0;
 using Adw 1;
-
 // A playlist in the side panel (CONCEPT.md §4.1): editable order (drag
 // and drop), remove, rename, cover, export.
 template $GatefoldPlaylistPanel: Adw.Bin {
@@ -51,12 +50,13 @@ template $GatefoldPlaylistPanel: Adw.Bin {
             };
           }
 
-          Gtk.Label name {
-            wrap: true;
-            xalign: 0;
+          // Click the name to rename the playlist.
+          Gtk.EditableLabel name {
+            tooltip-text: _("Rename");
 
             styles [
               "title-2",
+              "playlist-name",
             ]
           }
 
@@ -123,10 +123,26 @@ template $GatefoldPlaylistPanel: Adw.Bin {
             }
           }
 
+          // Find songs in the library and add them right here.
+          Gtk.SearchEntry add_search {
+            placeholder-text: _("Add Songs…");
+            margin-bottom: 6;
+          }
+
+          Gtk.ListBox add_results {
+            selection-mode: none;
+            visible: false;
+            margin-bottom: 12;
+
+            styles [
+              "boxed-list",
+            ]
+          }
+
           Adw.StatusPage empty {
             icon-name: "view-list-bullet-symbolic";
             title: _("Empty Playlist");
-            description: _("Add songs with “Add to Playlist…” in an album or the queue.");
+            description: _("Search above to add songs, or use “Add to Playlist…” on an album or song.");
             visible: false;
 
             styles [

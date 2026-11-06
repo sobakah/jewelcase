@@ -11,7 +11,7 @@ use crate::objects::PlaylistObject;
 use crate::objects::{AlbumObject, ArtistObject};
 use crate::widgets::{
     AlbumPanel, AlbumTile, ArtistPage, ArtistTile, MiniPlayer, PlayerView, PlaylistPanel,
-    PlaylistTile, SearchView, playlist_picker,
+    PlaylistTile, SearchView, panel_resizer, playlist_picker,
 };
 
 mod imp {
@@ -222,6 +222,7 @@ mod imp {
             obj.setup_artists();
             obj.setup_playlists();
             obj.setup_artist_overlay();
+            obj.setup_panel_resizers();
             obj.setup_messages();
             obj.setup_tools();
 
@@ -641,6 +642,7 @@ impl GatefoldWindow {
                 }
             ),
         );
+        panel_resizer::attach(&page.split_view(), self.settings());
         imp.artist_holder.set_child(Some(&page));
         reveal_sidebar(&imp.artist_split);
     }
@@ -668,6 +670,12 @@ impl GatefoldWindow {
             update(&surface);
             surface.connect_width_notify(update);
         });
+    }
+
+    fn setup_panel_resizers(&self) {
+        let imp = self.imp();
+        panel_resizer::attach(&imp.split_view, self.settings());
+        panel_resizer::attach(&imp.playlist_split, self.settings());
     }
 
     fn artist_page(&self) -> Option<ArtistPage> {
@@ -898,6 +906,7 @@ impl GatefoldWindow {
     /// panel actions (`panel.add-to-playlist`);
     /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
     /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
+    /// `GATEFOLD_SCREENSHOT_ADD_SONGS=text` searches in the playlist panel;
     /// `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
     /// Without `GATEFOLD_SCREENSHOT`, only that album step runs.
     fn setup_screenshot(&self) {
@@ -989,6 +998,10 @@ impl GatefoldWindow {
             if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_SEARCH") {
                 window.imp().search_bar.set_search_mode(true);
                 window.imp().search_entry.set_text(&text);
+            }
+            // `GATEFOLD_SCREENSHOT_ADD_SONGS=text`: search in the playlist panel.
+            if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_ADD_SONGS") {
+                window.imp().playlist_panel.search_for_songs(&text);
             }
             // `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8`: import and show a playlist.
             if let Ok(path) = std::env::var("GATEFOLD_SCREENSHOT_IMPORT") {

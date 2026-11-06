@@ -6,6 +6,7 @@ mod cover_image;
 mod identify_dialog;
 mod lyrics_view;
 mod mini_player;
+pub mod panel_resizer;
 mod player_view;
 mod playlist_panel;
 pub mod playlist_picker;

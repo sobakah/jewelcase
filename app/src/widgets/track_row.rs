@@ -1,5 +1,6 @@
 //! A song row in the album panel. The chevron expands details in place
-//! (CONCEPT.md §4.1); activating the row (double-click, Enter) plays it.
+//! (CONCEPT.md §4.1); activating the row (double-click, Enter, or the play
+//! button that replaces the number on hover) plays it.
 
 use std::cell::{OnceCell, RefCell};
 
@@ -20,6 +21,9 @@ mod imp {
         pub track: OnceCell<TrackObject>,
         pub number: gtk::Label,
         pub playing_icon: gtk::Image,
+        pub lead: gtk::Stack,
+        pub playing: std::cell::Cell<bool>,
+        pub hovered: std::cell::Cell<bool>,
         pub revealer: gtk::Revealer,
         pub details_built: RefCell<bool>,
     }
@@ -64,12 +68,42 @@ impl TrackRow {
         imp.playing_icon
             .set_icon_name(Some("media-playback-start-symbolic"));
         imp.playing_icon.add_css_class("accent");
-        imp.playing_icon.set_visible(false);
         imp.playing_icon.set_tooltip_text(Some(&gettext("Playing")));
-        let number_box = gtk::Box::builder().width_request(24).build();
-        number_box.append(&imp.number);
-        number_box.append(&imp.playing_icon);
-        imp.number.set_hexpand(true);
+        let play = gtk::Button::builder()
+            .icon_name("media-playback-start-symbolic")
+            .tooltip_text(gettext("Play"))
+            .valign(gtk::Align::Center)
+            .halign(gtk::Align::End)
+            .css_classes(["flat", "circular", "row-play"])
+            .build();
+        play.connect_clicked(glib::clone!(
+            #[weak]
+            row,
+            move |_| {
+                row.activate();
+            }
+        ));
+        imp.lead
+            .set_transition_type(gtk::StackTransitionType::Crossfade);
+        imp.lead.set_transition_duration(100);
+        imp.lead.set_width_request(34);
+        imp.lead.add_named(&imp.number, Some("number"));
+        imp.lead.add_named(&imp.playing_icon, Some("playing"));
+        imp.lead.add_named(&play, Some("play"));
+        // The play button shows while the pointer is over the row.
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_enter(glib::clone!(
+            #[weak]
+            row,
+            move |_, _, _| row.set_hovered(true)
+        ));
+        motion.connect_leave(glib::clone!(
+            #[weak]
+            row,
+            move |_| row.set_hovered(false)
+        ));
+        row.add_controller(motion);
+        row.update_lead();
 
         let title = gtk::Label::builder()
             .label(track.title())
@@ -105,6 +139,32 @@ impl TrackRow {
             .css_classes(["dim-label", "numeric"])
             .build();
 
+        let add_to_queue = gtk::Button::builder()
+            .icon_name("list-add-symbolic")
+            .tooltip_text(gettext("Add to Queue"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular", "row-action"])
+            .build();
+        add_to_queue.connect_clicked(glib::clone!(
+            #[strong]
+            track,
+            move |_| {
+                GatefoldApplication::get()
+                    .player()
+                    .add_to_queue(vec![track.clone()]);
+            }
+        ));
+        let add_to_playlist = gtk::Button::builder()
+            .icon_name("view-list-bullet-symbolic")
+            .tooltip_text(gettext("Add to Playlist…"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular", "row-action"])
+            .build();
+        let track_id = track.id();
+        add_to_playlist.connect_clicked(move |button| {
+            super::playlist_picker::show(button, vec![track_id]);
+        });
+
         let expand = gtk::ToggleButton::builder()
             .icon_name("pan-down-symbolic")
             .tooltip_text(gettext("Details"))
@@ -118,15 +178,17 @@ impl TrackRow {
         ));
 
         let line = gtk::Box::builder()
-            .spacing(12)
-            .margin_start(12)
+            .spacing(6)
+            .margin_start(6)
             .margin_end(6)
             .margin_top(6)
             .margin_bottom(6)
             .build();
-        line.append(&number_box);
+        line.append(&imp.lead);
         line.append(&text);
         line.append(&duration);
+        line.append(&add_to_queue);
+        line.append(&add_to_playlist);
         line.append(&expand);
 
         imp.revealer
@@ -146,14 +208,31 @@ impl TrackRow {
     }
 
     pub fn set_playing(&self, playing: bool) {
-        let imp = self.imp();
-        imp.number.set_visible(!playing);
-        imp.playing_icon.set_visible(playing);
+        self.imp().playing.set(playing);
         if playing {
             self.add_css_class("playing");
         } else {
             self.remove_css_class("playing");
         }
+        self.update_lead();
+    }
+
+    fn set_hovered(&self, hovered: bool) {
+        self.imp().hovered.set(hovered);
+        self.update_lead();
+    }
+
+    /// Number, "playing" icon, or (under the pointer) the play button.
+    fn update_lead(&self) {
+        let imp = self.imp();
+        let page = if imp.hovered.get() {
+            "play"
+        } else if imp.playing.get() {
+            "playing"
+        } else {
+            "number"
+        };
+        imp.lead.set_visible_child_name(page);
     }
 
     fn set_expanded(&self, expanded: bool) {
@@ -227,22 +306,11 @@ impl TrackRow {
             .label(gettext("Play Next"))
             .css_classes(["pill", "small"])
             .build();
-        let add_to_queue = gtk::Button::builder()
-            .label(gettext("Add to Queue"))
-            .css_classes(["pill", "small"])
-            .build();
         let track = track.clone();
-        play_next.connect_clicked(glib::clone!(
-            #[strong]
-            track,
-            move |_| GatefoldApplication::get()
-                .player()
-                .play_next(vec![track.clone()])
-        ));
-        add_to_queue.connect_clicked(move |_| {
+        play_next.connect_clicked(move |_| {
             GatefoldApplication::get()
                 .player()
-                .add_to_queue(vec![track.clone()]);
+                .play_next(vec![track.clone()]);
         });
         let edit_tags = gtk::Button::builder()
             .label(gettext("Edit Tags…"))
@@ -254,14 +322,6 @@ impl TrackRow {
                 .tools()
                 .edit_tags(vec![path.clone()]);
         });
-        let add_to_playlist = gtk::Button::builder()
-            .label(gettext("Add to Playlist…"))
-            .css_classes(["pill", "small"])
-            .build();
-        let track_id = self.track().id();
-        add_to_playlist.connect_clicked(move |button| {
-            super::playlist_picker::show(button, vec![track_id]);
-        });
         let actions = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .column_spacing(6)
@@ -269,8 +329,6 @@ impl TrackRow {
             .max_children_per_line(4)
             .build();
         actions.append(&play_next);
-        actions.append(&add_to_queue);
-        actions.append(&add_to_playlist);
         actions.append(&edit_tags);
 
         let details = gtk::Box::builder()

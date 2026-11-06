@@ -25,7 +25,11 @@ mod imp {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
-        pub name: TemplateChild<gtk::Label>,
+        pub name: TemplateChild<gtk::EditableLabel>,
+        #[template_child]
+        pub add_search: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub add_results: TemplateChild<gtk::ListBox>,
         #[template_child]
         pub meta: TemplateChild<gtk::Label>,
         #[template_child]
@@ -94,6 +98,23 @@ mod imp {
                 obj,
                 move |_, row| obj.play(Some(row.index() as usize), false)
             ));
+            // Renaming: commit when editing ends (Enter or focus leaves).
+            self.name.connect_editing_notify(glib::clone!(
+                #[weak]
+                obj,
+                move |label| {
+                    if !label.is_editing() {
+                        obj.commit_name();
+                    }
+                }
+            ));
+            self.add_search.connect_search_changed(glib::clone!(
+                #[weak]
+                obj,
+                move |entry| obj.search_songs(&entry.text())
+            ));
+            self.add_search
+                .connect_stop_search(|entry| entry.set_text(""));
             GatefoldApplication::get().library().connect_local(
                 "playlists-changed",
                 false,
@@ -131,8 +152,96 @@ impl PlaylistPanel {
     }
 
     pub fn set_playlist(&self, playlist: &PlaylistObject) {
-        self.imp().playlist.replace(Some(playlist.clone()));
+        let imp = self.imp();
+        let changed = self.playlist_id() != Some(playlist.id());
+        imp.playlist.replace(Some(playlist.clone()));
+        if changed {
+            imp.add_search.set_text("");
+        }
         self.refresh();
+        // A new, empty playlist: go straight to finding songs.
+        if changed && playlist.playlist().item_count == 0 {
+            imp.add_search.grab_focus();
+        }
+    }
+
+    /// Types `text` into the "Add Songs" field (screenshot hook).
+    pub fn search_for_songs(&self, text: &str) {
+        self.imp().add_search.set_text(text);
+    }
+
+    fn commit_name(&self) {
+        let imp = self.imp();
+        let Some(playlist) = imp.playlist.borrow().clone() else {
+            return;
+        };
+        let name = imp.name.text().trim().to_owned();
+        if name.is_empty() || name == playlist.playlist().name {
+            imp.name.set_text(&playlist.playlist().name);
+            return;
+        }
+        GatefoldApplication::get()
+            .library()
+            .rename_playlist(playlist.id(), &name);
+    }
+
+    /// Library songs matching `query`, each with a button to add it.
+    fn search_songs(&self, query: &str) {
+        let imp = self.imp();
+        imp.add_results.remove_all();
+        let query = query.trim();
+        let Some(playlist_id) = self.playlist_id().filter(|_| !query.is_empty()) else {
+            imp.add_results.set_visible(false);
+            return;
+        };
+        let library = GatefoldApplication::get().library();
+        let ids = library.search(query, 8).tracks;
+        let tracks = library.tracks(&ids);
+        for id in &ids {
+            let Some(track) = tracks.get(id).cloned().map(TrackObject::new) else {
+                continue;
+            };
+            let row = adw::ActionRow::builder()
+                .title(track.title())
+                .subtitle(
+                    [track.artist(), track.track().album_title.clone()]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" — "),
+                )
+                .use_markup(false)
+                .build();
+            let cover: CoverImage = glib::Object::builder()
+                .property("min-size", 40)
+                .property("natural-size", 40)
+                .build();
+            cover.set_cover(track.cover_key());
+            cover.set_valign(gtk::Align::Center);
+            row.add_prefix(&cover);
+            let add = gtk::Button::builder()
+                .icon_name("list-add-symbolic")
+                .tooltip_text(gettext("Add to Playlist"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build();
+            let track_id = track.id();
+            add.connect_clicked(move |button| {
+                GatefoldApplication::get().library().add_to_playlist(
+                    playlist_id,
+                    &[track_id],
+                    false,
+                );
+                // Added: show it, and don't add it twice by accident.
+                button.set_icon_name("object-select-symbolic");
+                button.set_sensitive(false);
+            });
+            row.add_suffix(&add);
+            row.set_activatable_widget(Some(&add));
+            imp.add_results.append(&row);
+        }
+        imp.add_results
+            .set_visible(imp.add_results.first_child().is_some());
     }
 
     /// Shows the current state of the playlist, or closes when it's gone.
@@ -147,7 +256,9 @@ impl PlaylistPanel {
         };
         let info = playlist.playlist();
         imp.cover.set_cover(playlist.cover_key().as_deref());
-        imp.name.set_label(&info.name);
+        if !imp.name.is_editing() {
+            imp.name.set_text(&info.name);
+        }
         imp.meta.set_label(&format!(
             "{} · {}",
             format::song_count(info.item_count),

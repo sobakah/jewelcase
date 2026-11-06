@@ -118,7 +118,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                 }
                 index => {
                     if let Some(playlist) = playlists.get(index as usize - 1) {
-                        library.add_to_playlist(playlist.id(), &tracks);
+                        library.add_to_playlist(playlist.id(), &tracks, true);
                     }
                     dialog.close();
                 }

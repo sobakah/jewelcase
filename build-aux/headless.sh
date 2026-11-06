@@ -11,6 +11,7 @@
 # - silent audio (GATEFOLD_SILENT=1)
 #
 # Usage: build-aux/headless.sh COMMAND [ARGS...]
+# GATEFOLD_HEADLESS_MONITOR=WxH sets the virtual monitor (default 1100x760).
 # Example: GATEFOLD_SCREENSHOT=/tmp/shot.png build-aux/headless.sh _build/app/gatefold
 set -eu
 
@@ -52,7 +53,7 @@ unset DISPLAY
 status=0
 dbus-run-session -- sh -c '
     mutter --headless --wayland --no-x11 --wayland-display "$WAYLAND_DISPLAY" \
-        --virtual-monitor 1100x760 >/dev/null 2>&1 &
+        --virtual-monitor "${GATEFOLD_HEADLESS_MONITOR:-1100x760}" >/dev/null 2>&1 &
     mutter=$!
     for _ in $(seq 100); do
         [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && break
