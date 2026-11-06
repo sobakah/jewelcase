@@ -323,7 +323,7 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 **Similarity data:**
 - Genre (normalized, §3.4) and artist come from tags and are free to use instantly. Genre alone is coarse (half the reference library is "K-POP"), so it works best combined with the other criteria.
 - **Analysis pass** (wanted, see Q4), once per track, in a low-priority background worker (nice'd, pausable, resumes after restart, paused on battery):
-  - **bliss-rs** → feature vector BLOB (tempo, timbre, chroma, loudness) for *sounds similar*.
+  - **bliss-rs** → feature vector BLOB (tempo, timbre, chroma, loudness) for *sounds similar*. Only bliss's analysis is used: Gatefold decodes with GStreamer (one pass feeds bliss and `bpmdetect`), so whatever plays can be analyzed and neither FFmpeg nor Symphonia is needed.
   - **GStreamer `bpmdetect`** → BPM number, because there are no BPM tags in the library. A `BPM`/`TBPM`/`tmpo` tag, if one ever exists, takes precedence.
   - Expect roughly 1–3 s CPU per track: about 15–30 min for the current ~600 tracks. Progress shows in Preferences → Library, and features that depend on the analysis are greyed out per track until it's done.
   - Results are keyed by file content hash (not path), so moved or renamed files (cdimport's moves, identical tracks in merged editions) aren't analyzed twice.

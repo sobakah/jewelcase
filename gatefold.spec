@@ -12,6 +12,8 @@ Summary:        Album-focused local music player
 
 # Gatefold itself. The vendored crates' licenses are listed in
 # LICENSE.dependencies; add them here before publishing this anywhere.
+# Note: bliss-audio (smart shuffle) is GPL-3.0-only, so the built program
+# as a whole is GPL-3.0 (without "or later").
 License:        GPL-3.0-or-later
 URL:            https://github.com/sobakah/gatefold
 Source0:        %{name}-%{version}.tar.xz
@@ -94,3 +96,4 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Player: cover colors, adaptive layouts, lyrics, queue sections (phase 3)
 - Companion tools: lyrembed, cdimport, tag editor (phase 4)
 - Playlists, M3U8/XSPF import and export, search (phase 5)
+- Smart shuffle: song analysis, similar songs, album shuffle (phase 6)

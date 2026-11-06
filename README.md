@@ -36,6 +36,8 @@ Development aids:
   see `setup_screenshot` in `app/src/window.rs` for the other variables.
 - `cargo run -p gatefold-core --example scan -- DB COVERS FOLDER…` scans
   into a throwaway database and lists the albums.
+- `cargo run -p gatefold-core --example analyze -- FILE…` analyzes songs
+  like the smart shuffle worker (fingerprint, bliss features, BPM).
 
 ## Build and run
 

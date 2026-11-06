@@ -20,6 +20,7 @@ mod imp {
         pub library: OnceCell<Library>,
         pub player: OnceCell<Player>,
         pub tools: OnceCell<Tools>,
+        pub analyzer: OnceCell<crate::analyzer::Analyzer>,
     }
 
     #[glib::object_subclass]
@@ -48,6 +49,32 @@ mod imp {
             }
             let player = Player::new(&library);
             self.library.set(library).expect("set once");
+            let analyzer = crate::analyzer::Analyzer::new();
+            analyzer.start();
+            // New or changed songs after a scan: analyze them too.
+            let to_wake = analyzer.clone();
+            self.library
+                .get()
+                .expect("just set")
+                .connect_local("reloaded", false, move |_| {
+                    to_wake.wake();
+                    None
+                });
+            // Smart shuffle picks from fresh data.
+            let to_reload = player.clone();
+            analyzer.connect_local("results-changed", false, move |_| {
+                to_reload.reload_similarity();
+                None
+            });
+            let to_reload = player.clone();
+            self.library
+                .get()
+                .expect("just set")
+                .connect_local("reloaded", false, move |_| {
+                    to_reload.reload_similarity();
+                    None
+                });
+            self.analyzer.set(analyzer).expect("set once");
             self.player.set(player.clone()).expect("set once");
             player.restore();
             crate::mpris::start(&app, &player);
@@ -105,6 +132,10 @@ impl GatefoldApplication {
 
     pub fn player(&self) -> Player {
         self.imp().player.get().expect("set in startup()").clone()
+    }
+
+    pub fn analyzer(&self) -> crate::analyzer::Analyzer {
+        self.imp().analyzer.get().expect("set in startup()").clone()
     }
 
     fn setup_actions(&self) {

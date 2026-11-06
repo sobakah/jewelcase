@@ -28,6 +28,42 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         ]
       };
     }
+
+    // Smart shuffle's analysis (CONCEPT.md §7), filled in from
+    // preferences_dialog.rs.
+    Adw.PreferencesGroup {
+      title: _("Song Analysis");
+      description: _(
+        "Tempo and sound of each song, for “Mix In Similar Songs” and “Keep Playing”. Runs in the background at low priority and waits while on battery."
+      );
+
+      Adw.SwitchRow analysis_row {
+        title: _("_Analyze Songs");
+        use-underline: true;
+      }
+
+      Adw.ActionRow analysis_progress_row {
+        title: _("Progress");
+
+        [suffix]
+        Gtk.ProgressBar analysis_bar {
+          valign: center;
+          width-request: 120;
+        }
+
+        [suffix]
+        Gtk.Button analysis_pause {
+          valign: center;
+          icon-name: "media-playback-pause-symbolic";
+          tooltip-text: _("Pause");
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+      }
+    }
   }
 
   Adw.PreferencesPage {

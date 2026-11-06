@@ -1,3 +1,4 @@
+mod analyzer;
 mod application;
 mod config;
 mod covers;

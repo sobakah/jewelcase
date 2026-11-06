@@ -61,6 +61,14 @@ mod imp {
         pub fanart_key_row: TemplateChild<adw::PasswordEntryRow>,
         #[template_child]
         pub spotify_app_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub analysis_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub analysis_progress_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub analysis_bar: TemplateChild<gtk::ProgressBar>,
+        #[template_child]
+        pub analysis_pause: TemplateChild<gtk::Button>,
         pub folder_rows: RefCell<Vec<adw::ActionRow>>,
         pub settings: OnceCell<gio::Settings>,
     }
@@ -127,6 +135,7 @@ mod imp {
             settings
                 .bind("spotify-links-in-app", &*self.spotify_app_row, "active")
                 .build();
+            self.setup_analysis(&settings);
             self.setup_integrations(&settings);
             // Answering here counts as answering the Artists view's question.
             self.online_row.connect_active_notify(glib::clone!(
@@ -154,6 +163,81 @@ mod imp {
     }
 
     impl PreferencesDialog {
+        /// Song analysis: on/off, progress, pause (§7).
+        fn setup_analysis(&self, settings: &gio::Settings) {
+            settings
+                .bind("analysis-enabled", &*self.analysis_row, "active")
+                .build();
+            let analyzer = crate::application::GatefoldApplication::get().analyzer();
+            let row = self.analysis_progress_row.get();
+            let bar = self.analysis_bar.get();
+            let pause = self.analysis_pause.get();
+            let update = glib::clone!(
+                #[weak]
+                row,
+                #[weak]
+                bar,
+                #[weak]
+                pause,
+                #[strong]
+                settings,
+                move |analyzer: &crate::analyzer::Analyzer| {
+                    let (done, total) = (analyzer.analyzed(), analyzer.total());
+                    bar.set_fraction(if total > 0 {
+                        f64::from(done) / f64::from(total)
+                    } else {
+                        0.0
+                    });
+                    // Translators: {done} and {total} are song counts.
+                    row.set_title(
+                        &gettext("{done} of {total} songs analyzed")
+                            .replace("{done}", &done.to_string())
+                            .replace("{total}", &total.to_string()),
+                    );
+                    let status = if total > 0 && done >= total {
+                        gettext("Done")
+                    } else if !settings.boolean("analysis-enabled") {
+                        gettext("Off")
+                    } else if analyzer.paused() {
+                        gettext("Paused")
+                    } else if analyzer.on_battery() {
+                        gettext("Waiting while on battery")
+                    } else if analyzer.busy() {
+                        gettext("Analyzing…")
+                    } else {
+                        gettext("Waiting")
+                    };
+                    row.set_subtitle(&status);
+                    let paused = analyzer.paused();
+                    pause.set_icon_name(if paused {
+                        "media-playback-start-symbolic"
+                    } else {
+                        "media-playback-pause-symbolic"
+                    });
+                    pause.set_tooltip_text(Some(&if paused {
+                        gettext("Resume")
+                    } else {
+                        gettext("Pause")
+                    }));
+                    pause.set_visible(done < total && settings.boolean("analysis-enabled"));
+                }
+            );
+            update(&analyzer);
+            for property in ["analyzed", "total", "busy", "paused", "on-battery"] {
+                let update = update.clone();
+                analyzer.connect_notify_local(Some(property), move |analyzer, _| update(analyzer));
+            }
+            let on_setting = update.clone();
+            let analyzer_for_setting = analyzer.clone();
+            settings.connect_changed(Some("analysis-enabled"), move |_, _| {
+                on_setting(&analyzer_for_setting)
+            });
+            pause.connect_clicked(move |_| {
+                analyzer.set_paused(!analyzer.paused());
+                update(&analyzer);
+            });
+        }
+
         fn setup_integrations(&self, settings: &gio::Settings) {
             // Paths apply when the entry is confirmed (Enter), not per key.
             for (row, key) in [

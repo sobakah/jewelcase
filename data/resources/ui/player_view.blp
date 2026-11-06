@@ -299,17 +299,33 @@ template $GatefoldPlayerView: Adw.Bin {
 
               center-widget: Gtk.Box transport {
                 spacing: 18;
-
-                Gtk.ToggleButton {
-                  icon-name: "media-playlist-shuffle-symbolic";
-                  tooltip-text: _("Shuffle");
-                  action-name: "player.shuffle";
+                // Shuffle, and its options (smart shuffle, §7).
+                Gtk.Box {
                   valign: center;
 
-                  styles [
-                    "flat",
-                    "circular",
-                  ]
+                  Gtk.ToggleButton {
+                    icon-name: "media-playlist-shuffle-symbolic";
+                    tooltip-text: _("Shuffle");
+                    action-name: "player.shuffle";
+                    valign: center;
+
+                    styles [
+                      "flat",
+                      "circular",
+                    ]
+                  }
+
+                  Gtk.MenuButton shuffle_options {
+                    icon-name: "pan-down-symbolic";
+                    tooltip-text: _("Shuffle Options");
+                    valign: center;
+                    direction: up;
+
+                    styles [
+                      "flat",
+                      "options-arrow",
+                    ]
+                  }
                 }
 
                 Gtk.Button {
@@ -348,16 +364,33 @@ template $GatefoldPlayerView: Adw.Bin {
                   ]
                 }
 
-                Gtk.Button repeat_button {
-                  icon-name: "media-playlist-consecutive-symbolic";
-                  tooltip-text: _("Repeat: Off");
-                  action-name: "player.repeat";
+                // Repeat cycles; the arrow picks a mode directly.
+                Gtk.Box {
                   valign: center;
 
-                  styles [
-                    "flat",
-                    "circular",
-                  ]
+                  Gtk.Button repeat_button {
+                    icon-name: "media-playlist-consecutive-symbolic";
+                    tooltip-text: _("Repeat: Off");
+                    action-name: "player.repeat";
+                    valign: center;
+
+                    styles [
+                      "flat",
+                      "circular",
+                    ]
+                  }
+
+                  Gtk.MenuButton repeat_options {
+                    icon-name: "pan-down-symbolic";
+                    tooltip-text: _("Repeat Options");
+                    valign: center;
+                    direction: up;
+
+                    styles [
+                      "flat",
+                      "options-arrow",
+                    ]
+                  }
                 }
               };
 

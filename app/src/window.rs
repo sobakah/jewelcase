@@ -1048,6 +1048,7 @@ impl GatefoldWindow {
     /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
     /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
     /// `GATEFOLD_SCREENSHOT_ADD_SONGS=text` searches in the playlist panel;
+    /// `GATEFOLD_SCREENSHOT_SETTINGS="key=value …"` sets GSettings first;
     /// `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
     /// Without `GATEFOLD_SCREENSHOT`, only that album step runs.
     fn setup_screenshot(&self) {
@@ -1062,6 +1063,21 @@ impl GatefoldWindow {
             .and_then(|d| d.parse().ok())
             .unwrap_or(8);
         let actions = std::env::var("GATEFOLD_SCREENSHOT_ACTIONS").unwrap_or_default();
+        // `GATEFOLD_SCREENSHOT_SETTINGS="mix-similar=true mix-every=1"`:
+        // GSettings values (GVariant text), set first.
+        if let Ok(values) = std::env::var("GATEFOLD_SCREENSHOT_SETTINGS") {
+            let settings = self.settings();
+            for pair in values.split_whitespace() {
+                let Some((key, value)) = pair.split_once('=') else {
+                    continue;
+                };
+                let value =
+                    glib::Variant::parse(None, value).unwrap_or_else(|_| value.to_variant());
+                if let Err(err) = settings.set_value(key, &value) {
+                    tracing::warn!("Screenshot setting {key}: {err}");
+                }
+            }
+        }
         // `GATEFOLD_SCREENSHOT_SIZE=400x760`: the window size.
         if let Some((w, h)) = std::env::var("GATEFOLD_SCREENSHOT_SIZE")
             .ok()

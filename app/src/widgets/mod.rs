@@ -15,6 +15,7 @@ mod portrait_dialog;
 mod queue_view;
 mod reorder;
 mod search_view;
+mod shuffle_options;
 mod track_info;
 mod track_row;
 

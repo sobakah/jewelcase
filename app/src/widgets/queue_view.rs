@@ -367,10 +367,17 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .build(),
     );
-    if let Some(artist) = track.artist() {
+    // Smart shuffle's picks say so (§7).
+    let suggested = entry.entry().origin == Origin::Suggested;
+    let subtitle = match (track.artist(), suggested) {
+        (Some(artist), true) => Some(format!("{artist} · {}", gettext("Mixed in"))),
+        (None, true) => Some(gettext("Mixed in")),
+        (artist, false) => artist,
+    };
+    if let Some(subtitle) = subtitle {
         text.append(
             &gtk::Label::builder()
-                .label(artist)
+                .label(subtitle)
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .css_classes(["dim-label", "caption"])

@@ -104,6 +104,14 @@
   opacity: 0.35;
 }
 
+/* The small arrows next to Shuffle and Repeat (their options). */
+.options-arrow {
+  min-width: 16px;
+  min-height: 24px;
+  padding: 0 2px;
+  -gtk-icon-size: 12px;
+}
+
 /* Lyrics (CONCEPT.md §5). */
 .lyrics-view .lyric-line {
   padding: 6px 12px;

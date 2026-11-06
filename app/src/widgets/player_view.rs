@@ -95,6 +95,10 @@ mod imp {
         #[template_child]
         pub info_popover: TemplateChild<gtk::Popover>,
         #[template_child]
+        pub shuffle_options: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub repeat_options: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub info_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub transport: TemplateChild<gtk::Box>,
@@ -251,6 +255,11 @@ impl PlayerView {
                 move || view.update_position(&GatefoldApplication::get().player())
             ),
         );
+
+        imp.shuffle_options
+            .set_popover(Some(&super::shuffle_options::shuffle_popover()));
+        imp.repeat_options
+            .set_popover(Some(&super::shuffle_options::repeat_popover()));
 
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {

@@ -2,13 +2,14 @@
 //! `player.*` actions (CONCEPT.md §6, §7).
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
 use gatefold_core::playback::{self, PlayerEvent};
-use gatefold_core::queue::{Queue, RepeatMode};
+use gatefold_core::queue::{Origin, Queue, RepeatMode};
+use gatefold_core::similar::{self, Criteria, SongFeatures};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
@@ -66,6 +67,10 @@ mod imp {
         /// Queue entries from the current one on, for the queue view.
         pub queue_model: OnceCell<gio::ListStore>,
         pub tracks: RefCell<HashMap<i64, TrackObject>>,
+        /// Album songs started since the last mixed-in suggestion (§7).
+        pub mix_count: Cell<u32>,
+        /// The library's similarity data, loaded when first needed.
+        pub similarity: RefCell<Option<std::rc::Rc<Vec<SongFeatures>>>>,
         pub state: Cell<State>,
         /// Queue item handed to GStreamer for gapless playback.
         pub pending_next: Cell<Option<u64>>,
@@ -129,6 +134,20 @@ impl Player {
                 #[weak]
                 player,
                 move |_, _| player.apply_replaygain()
+            ),
+        );
+        // Songs ↔ albums while shuffled: shuffle again the new way.
+        settings.connect_changed(
+            Some("shuffle-albums"),
+            glib::clone!(
+                #[weak]
+                player,
+                move |_, _| {
+                    if player.imp().queue.borrow().is_shuffled() {
+                        player.set_shuffle(false);
+                        player.set_shuffle(true);
+                    }
+                }
             ),
         );
         imp.settings.set(settings).expect("set once");
@@ -530,10 +549,14 @@ impl Player {
     }
 
     pub fn set_shuffle(&self, shuffle: bool) {
-        self.imp()
-            .queue
-            .borrow_mut()
-            .set_shuffle(shuffle, &mut rand::rng());
+        // "Shuffle albums" (§7): albums in random order, each in order.
+        let albums = self.settings().boolean("shuffle-albums");
+        let album_of = |id: i64| self.track(id).and_then(|t| t.track().album_id);
+        self.imp().queue.borrow_mut().set_shuffle_by(
+            shuffle,
+            albums.then_some(album_of),
+            &mut rand::rng(),
+        );
         self.queue_changed();
         self.apply_replaygain();
     }
@@ -582,12 +605,119 @@ impl Player {
         self.set_position(start_ms);
         self.set_state(if play { State::Playing } else { State::Paused });
         self.emit_by_name::<()>("seeked", &[]);
+        if play {
+            self.track_started();
+        }
         self.update_next();
+    }
+
+    // Smart shuffle (§7) ------------------------------------------------
+
+    /// Forgets the similarity data (new analysis results, a rescan).
+    pub fn reload_similarity(&self) {
+        self.imp().similarity.replace(None);
+    }
+
+    fn similarity(&self) -> std::rc::Rc<Vec<SongFeatures>> {
+        if let Some(data) = self.imp().similarity.borrow().as_ref() {
+            return data.clone();
+        }
+        let data = std::rc::Rc::new(
+            self.library()
+                .db()
+                .and_then(|db| db.similarity_features().ok())
+                .unwrap_or_default(),
+        );
+        self.imp().similarity.replace(Some(data.clone()));
+        data
+    }
+
+    /// A song like `seed_id` that isn't queued or recently played.
+    fn suggest_after(&self, seed_id: i64) -> Option<i64> {
+        let settings = self.settings();
+        let pool = self.similarity();
+        let seed = pool.iter().find(|f| f.track_id == seed_id)?;
+        let mut exclude: HashSet<i64> = self.queued_track_ids().into_iter().collect();
+        let hours = i64::from(settings.int("mix-skip-recent-hours"));
+        if hours > 0
+            && let Some(played) = self
+                .library()
+                .db()
+                .and_then(|db| db.played_since(crate::metadata::now() - hours * 3600).ok())
+        {
+            exclude.extend(played);
+        }
+        let criteria = Criteria {
+            genre: settings.boolean("mix-genre"),
+            bpm: settings.boolean("mix-bpm"),
+            artist: settings.boolean("mix-artist"),
+            sound: settings.boolean("mix-sound"),
+            bpm_tolerance: f64::from(settings.int("mix-bpm-tolerance")) / 100.0,
+        };
+        similar::suggest(seed, &pool, &exclude, &criteria, &mut rand::rng())
+    }
+
+    /// A song started: after every few album songs, mix one in.
+    fn track_started(&self) {
+        let imp = self.imp();
+        let (current, next_suggested) = {
+            let queue = imp.queue.borrow();
+            let next = queue
+                .current_index()
+                .and_then(|i| queue.items().get(i + 1))
+                .map(|i| i.origin);
+            (queue.current().copied(), next == Some(Origin::Suggested))
+        };
+        let Some(current) = current else { return };
+        if current.origin != Origin::Context {
+            return;
+        }
+        imp.mix_count.set(imp.mix_count.get() + 1);
+        let settings = self.settings();
+        let every = settings.int("mix-every").max(1) as u32;
+        if !settings.boolean("mix-similar") || imp.mix_count.get() < every || next_suggested {
+            return;
+        }
+        if let Some(id) = self.suggest_after(current.track_id) {
+            tracing::debug!("Mixing in track {id} after {}", current.track_id);
+            imp.mix_count.set(0);
+            imp.queue.borrow_mut().mix_in(id);
+            self.queue_changed();
+        }
+    }
+
+    /// "Keep playing similar music when the queue ends": nothing after the
+    /// current song? Add a suggestion, so gapless playback has a next one.
+    /// True if one was added (and the queue updated).
+    fn keep_playing(&self) -> bool {
+        let imp = self.imp();
+        if !self.settings().boolean("keep-playing-similar") {
+            return false;
+        }
+        let current = {
+            let queue = imp.queue.borrow();
+            if queue.peek_next(true).is_some() {
+                return false;
+            }
+            queue.current().map(|i| i.track_id)
+        };
+        let Some(current) = current else { return false };
+        let Some(id) = self.suggest_after(current) else {
+            return false;
+        };
+        tracing::debug!("Keep playing: track {id} after {current}");
+        imp.queue.borrow_mut().append_suggestion(id);
+        self.queue_changed();
+        true
     }
 
     /// Hands the following track to GStreamer for gapless playback.
     fn update_next(&self) {
         let Some(engine) = self.engine() else { return };
+        // A suggestion was added: queue_changed() already handed it over.
+        if self.keep_playing() {
+            return;
+        }
         let next = {
             let queue = self.imp().queue.borrow();
             queue.peek_next(true).map(|i| queue.items()[i])
@@ -614,6 +744,7 @@ impl Player {
                         self.set_current_track(current.and_then(|i| self.track(i.track_id)));
                         self.set_position(0);
                         self.emit_by_name::<()>("seeked", &[]);
+                        self.track_started();
                         self.update_next();
                         self.queue_changed();
                     }
