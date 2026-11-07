@@ -39,12 +39,19 @@ custom_target(
   ],
 )
 
+# Without streaming, the librespot crate isn't built for the tests either
+# (it alone takes minutes). A release build of all tests takes a while on
+# small builders (RPM %check, CI): up to an hour.
+test_options = []
+if not get_option('spotify_stream')
+  test_options += ['--exclude', 'gatefold-stream']
+endif
 test(
   'cargo-test',
   cargo,
-  args: ['test', '--workspace', cargo_options],
+  args: ['test', '--workspace', test_options, cargo_options],
   env: cargo_env,
   workdir: meson.project_source_root(),
-  timeout: 900,
+  timeout: 3600,
   is_parallel: false,
 )

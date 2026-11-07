@@ -1,0 +1,96 @@
+# Builds the Fedora RPM in a clean Fedora 45 container (CONCEPT.md §12).
+#
+# - Pushing a tag like v0.1.0 builds it and puts the packages on a draft
+#   release (a pre-release for 0.x versions and tags with "-"); check it,
+#   then publish it on GitHub.
+# - "Run workflow" in the Actions tab builds it as a test; tick "release"
+#   to also make a draft release for the version in meson.build.
+name: RPM
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Also make a draft release with the packages
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  rpm:
+    name: Build the RPM (Fedora 45)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 120
+    steps:
+      - name: Install the tools
+        run: >
+          dnf -y install git make tar xz rpm-build dnf5-plugins
+          rust-srpm-macros cargo-rpm-macros
+
+      - uses: actions/checkout@v4
+
+      - name: Install the build dependencies
+        run: dnf -y builddep gatefold.spec
+
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -n "s/^  version: '\(.*\)',$/\1/p" meson.build)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::The tag ${GITHUB_REF_NAME} doesn't match the version $version in meson.build"
+            exit 1
+          fi
+
+      # Source and vendored Rust dependencies (CONCEPT.md §12).
+      - name: Source tarballs
+        run: make tarballs
+
+      - name: Build
+        run: rpmbuild -ba --define "_topdir $PWD/rpmbuild" gatefold.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gatefold-${{ steps.version.outputs.version }}-rpms
+          path: |
+            rpmbuild/RPMS/*/*.rpm
+            rpmbuild/SRPMS/*.src.rpm
+          if-no-files-found: error
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  release:
+    name: Draft release
+    needs: rpm
+    if: github.ref_type == 'tag' || inputs.release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gatefold-${{ needs.rpm.outputs.version }}-rpms
+          path: dist
+
+      - name: Draft release with the packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.rpm.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          # 0.x versions and tags like v1.0.0-beta1 are pre-releases.
+          prerelease=""
+          case "$VERSION" in 0.*|*-*) prerelease="--prerelease" ;; esac
+          # The program and the source package; debuginfo stays in the
+          # workflow's artifact.
+          files=$(find dist -name '*.rpm' ! -name '*-debuginfo-*' ! -name '*-debugsource-*')
+          gh release create "$tag" $files \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Gatefold $VERSION" \
+            --draft $prerelease \
+            --generate-notes
