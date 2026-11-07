@@ -65,6 +65,9 @@ pub struct Track {
     pub id: Option<String>,
     pub name: String,
     pub artists: Vec<String>,
+    /// The artists' Spotify IDs, in the same order (where Spotify gives
+    /// them).
+    pub artist_ids: Vec<String>,
     pub album: Option<String>,
     pub album_id: Option<String>,
     pub duration_ms: u64,
@@ -93,6 +96,10 @@ impl Track {
             artists: value["artists"]
                 .as_array()
                 .map(|artists| artists.iter().filter_map(|a| string(&a["name"])).collect())
+                .unwrap_or_default(),
+            artist_ids: value["artists"]
+                .as_array()
+                .map(|artists| artists.iter().filter_map(|a| string(&a["id"])).collect())
                 .unwrap_or_default(),
             album: string(&album["name"]),
             album_id: string(&album["id"]),
@@ -272,6 +279,8 @@ pub struct PlaylistEntry {
     pub uri: Option<String>,
     /// `None` for anything that isn't a track.
     pub track: Option<Track>,
+    /// When it was added (Unix seconds); Spotify knows it for most.
+    pub added_at: Option<i64>,
 }
 
 impl PlaylistEntry {
@@ -296,7 +305,12 @@ impl PlaylistEntry {
             }
             track
         });
-        Self { uri, track }
+        let added_at = row["added_at"].as_str().and_then(unix_time);
+        Self {
+            uri,
+            track,
+            added_at,
+        }
     }
 }
 
@@ -335,6 +349,29 @@ pub(crate) fn parse_queue(value: &Value) -> Vec<Track> {
         .unwrap_or_default()
 }
 
+/// Unix seconds of a UTC time like `2024-05-01T12:30:00Z` (Spotify's
+/// form; fractions of seconds are ignored).
+pub(crate) fn unix_time(text: &str) -> Option<i64> {
+    let (date, time) = text.trim_end_matches('Z').split_once('T')?;
+    let mut date = date.split('-').map(str::parse::<i64>);
+    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let time = time.split('.').next()?;
+    let mut time = time.split(':').map(str::parse::<i64>);
+    let (hour, minute, second) = (time.next()?.ok()?, time.next()?.ok()?, time.next()?.ok()?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // Days since 1970-01-01 (Howard Hinnant's days_from_civil).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
 fn string(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
@@ -354,6 +391,21 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn spotify_times_become_unix_seconds() {
+        assert_eq!(unix_time("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(unix_time("2024-02-29T12:30:15Z"), Some(1_709_209_815));
+        assert_eq!(unix_time("2026-11-07T21:00:00.123Z"), Some(1_794_085_200));
+        assert_eq!(unix_time("yesterday"), None);
+        let row = json!({"added_at": "2020-01-01T00:00:00Z", "item": {
+            "type": "track", "uri": "spotify:track:a", "id": "a", "name": "Song",
+            "duration_ms": 1000, "artists": [{"name": "A", "id": "artist-a"}]
+        }});
+        let entry = PlaylistEntry::parse(&row);
+        assert_eq!(entry.added_at, Some(1_577_836_800));
+        assert_eq!(entry.track.unwrap().artist_ids, ["artist-a"]);
+    }
 
     #[test]
     fn a_relinked_entry_keeps_the_playlists_uri() {

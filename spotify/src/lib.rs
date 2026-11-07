@@ -672,6 +672,11 @@ impl Client {
         Ok(items.iter().filter_map(Album::parse).collect())
     }
 
+    /// One song: its album and artists (for links to their pages).
+    pub fn track(&self, id: &str) -> Result<Track> {
+        Track::parse(&self.get(&format!("/tracks/{id}"), &[])?).ok_or(Error::Format("track"))
+    }
+
     /// An album and its songs.
     pub fn album(&self, id: &str) -> Result<(Album, Vec<AlbumTrack>)> {
         let value = self.get(&format!("/albums/{id}"), &[])?;
@@ -723,6 +728,10 @@ impl Client {
 
     /// Up to 10 tracks; `query` may use filters like `isrc:USA2P2025832`
     /// or `track:… artist:…`.
+    ///
+    /// Without `market=from_token`: since 2026 Spotify answers a search
+    /// that names it with "403 Insufficient client scope" (it would need
+    /// `user-read-private`), though playlist reads still accept it.
     pub fn search_tracks(&self, query: &str, limit: u32) -> Result<Vec<Track>> {
         let value = self.get(
             "/search",
@@ -730,7 +739,6 @@ impl Client {
                 ("q", query.to_owned()),
                 ("type", "track".into()),
                 ("limit", limit.clamp(1, MAX_SEARCH_RESULTS).to_string()),
-                ("market", "from_token".into()),
             ],
         )?;
         Ok(value["tracks"]["items"]

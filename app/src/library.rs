@@ -428,6 +428,28 @@ impl Library {
             .collect()
     }
 
+    /// The library's album artist for a Spotify artist: by Spotify ID,
+    /// else by name (lyrembed's aliases count).
+    pub fn artist_for_spotify(&self, spotify_id: &str, name: &str) -> Option<i64> {
+        let aliases = self.aliases();
+        let wanted = aliases.identity(name);
+        let store = self.artists();
+        let mut by_name = None;
+        for i in 0..store.n_items() {
+            let Some(artist) = store.item(i).and_downcast::<ArtistObject>() else {
+                continue;
+            };
+            let artist = artist.artist();
+            if artist.meta.spotify_id.as_deref() == Some(spotify_id) {
+                return Some(artist.id);
+            }
+            if by_name.is_none() && aliases.identity(&artist.name) == wanted {
+                by_name = Some(artist.id);
+            }
+        }
+        by_name
+    }
+
     /// The album artists of an album: (artist id, name).
     pub fn album_artists(&self, album_id: i64) -> Vec<(i64, String)> {
         self.db()

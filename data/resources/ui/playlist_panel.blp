@@ -159,6 +159,19 @@ template $GatefoldPlaylistPanel: Adw.Bin {
               ]
             }
 
+            // Sorted like on Spotify; only the view, remembered per
+            // playlist.
+            Gtk.MenuButton {
+              icon-name: "view-sort-descending-symbolic";
+              tooltip-text: _("Sort");
+              menu-model: sort_menu;
+              valign: center;
+
+              styles [
+                "circular",
+              ]
+            }
+
             Gtk.MenuButton {
               icon-name: "view-more-symbolic";
               tooltip-text: _("More");
@@ -234,7 +247,71 @@ template $GatefoldPlaylistPanel: Adw.Bin {
   };
 }
 
+menu sort_menu {
+  section {
+    item {
+      label: _("_Custom Order");
+      action: "sort.by";
+      target: "custom";
+    }
+
+    item {
+      label: _("_Title");
+      action: "sort.by";
+      target: "title";
+    }
+
+    item {
+      label: _("_Artist");
+      action: "sort.by";
+      target: "artist";
+    }
+
+    item {
+      label: _("A_lbum");
+      action: "sort.by";
+      target: "album";
+    }
+
+    item {
+      label: _("_Date Added");
+      action: "sort.by";
+      target: "added";
+    }
+
+    item {
+      label: _("D_uration");
+      action: "sort.by";
+      target: "duration";
+    }
+  }
+
+  section {
+    item {
+      label: _("_Reverse Order");
+      action: "sort.reversed";
+    }
+  }
+}
+
 menu playlist_menu {
+  section {
+    item {
+      label: _("Play _Next");
+      action: "playlist.play-next";
+    }
+
+    item {
+      label: _("_Add to Queue");
+      action: "playlist.add-to-queue";
+    }
+
+    item {
+      label: _("Add to _Playlist…");
+      action: "playlist.add-to-playlist";
+    }
+  }
+
   section {
     item {
       label: _("_Rename…");

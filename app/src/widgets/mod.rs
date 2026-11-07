@@ -78,3 +78,60 @@ pub fn spotify_icon() -> gtk::Image {
         .tooltip_text(gettextrs::gettext("Plays from Spotify"))
         .build()
 }
+
+/// The artist or album page of a Spotify song (`uri`): the library's when
+/// the library has them, else Spotify's. Spotify is asked which they are.
+pub fn open_song_page(uri: String, artist: bool) {
+    use gettextrs::gettext;
+    use gtk::prelude::*;
+
+    use crate::application::GatefoldApplication;
+    use crate::window::GatefoldWindow;
+
+    gtk::glib::spawn_future_local(async move {
+        let app = GatefoldApplication::get();
+        let spotify = app.spotify();
+        let unanswered = || {
+            app.library()
+                .emit_by_name::<()>("message", &[&gettext("Spotify can’t be asked right now")]);
+        };
+        let Some(links) = spotify.track_links(&uri).await else {
+            return unanswered();
+        };
+        let Some(window) = app.active_window().and_downcast::<GatefoldWindow>() else {
+            return;
+        };
+        if artist {
+            let Some((id, name)) = links.artists.first() else {
+                return;
+            };
+            match app.library().artist_for_spotify(id, name) {
+                Some(local) => {
+                    let _ = WidgetExt::activate_action(
+                        &window,
+                        "win.show-artist",
+                        Some(&local.to_variant()),
+                    );
+                }
+                None => window.show_spotify_artist(id),
+            }
+            return;
+        }
+        let Some(album_id) = links.album_id else {
+            return;
+        };
+        let Some(album) = spotify.album_by_id(&album_id).await else {
+            return unanswered();
+        };
+        match app.library().local_album_for(&album) {
+            Some(local) => {
+                let _ = WidgetExt::activate_action(
+                    &window,
+                    "win.show-album",
+                    Some(&local.album().id.to_variant()),
+                );
+            }
+            None => window.show_spotify_album(&album),
+        }
+    });
+}

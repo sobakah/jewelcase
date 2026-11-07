@@ -29,6 +29,25 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       };
     }
 
+    Adw.PreferencesGroup {
+      title: _("Start");
+
+      Adw.ComboRow start_view_row {
+        title: _("_Open With");
+        subtitle: _("The view shown when Gatefold starts");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Last Used View"),
+            _("Albums"),
+            _("Artists"),
+            _("Playlists"),
+          ]
+        };
+      }
+    }
+
     // Smart shuffle's analysis (CONCEPT.md §7), filled in from
     // preferences_dialog.rs.
     Adw.PreferencesGroup {
@@ -139,6 +158,39 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         title: _("Also Within _Albums");
         subtitle: _("Off: an album playing in order stays gapless");
         use-underline: true;
+      }
+    }
+
+    // Whether the player opens with its side panes (CONCEPT.md §4.3).
+    Adw.PreferencesGroup {
+      title: _("Player");
+
+      Adw.ComboRow lyrics_pane_row {
+        title: _("_Lyrics Pane");
+        subtitle: _("Shown when the player opens");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("As Last Left"),
+            _("Shown"),
+            _("Hidden"),
+          ]
+        };
+      }
+
+      Adw.ComboRow queue_pane_row {
+        title: _("Queue _Pane");
+        subtitle: _("Shown when the player opens");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("As Last Left"),
+            _("Shown"),
+            _("Hidden"),
+          ]
+        };
       }
     }
 

@@ -40,6 +40,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/015_declined_suggestions.sql")),
     M::up(include_str!("db/016_indexes.sql")),
     M::up(include_str!("db/017_app_state.sql")),
+    M::up(include_str!("db/018_playlist_sort.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -177,6 +178,8 @@ pub struct PlaylistItem {
     pub suggested_spotify: Option<String>,
     /// The Spotify album image, for entries not in the library.
     pub image_url: Option<String>,
+    /// When it was added (Unix seconds), if known.
+    pub added: Option<i64>,
 }
 
 /// What a search found, best first per kind.
@@ -789,10 +792,32 @@ impl Database {
         Ok(())
     }
 
+    /// How a playlist is listed: ("custom" | "title" | "artist" | "album"
+    /// | "added" | "duration", reversed).
+    pub fn playlist_sort(&self, id: i64) -> Result<(String, bool)> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT sort_by, sort_reversed FROM playlist WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| ("custom".to_owned(), false)))
+    }
+
+    pub fn set_playlist_sort(&mut self, id: i64, by: &str, reversed: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE playlist SET sort_by = ?2, sort_reversed = ?3 WHERE id = ?1",
+            params![id, by, reversed],
+        )?;
+        Ok(())
+    }
+
     pub fn playlist_items(&self, id: i64) -> Result<Vec<PlaylistItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, position, local_track_id, title, artist, album, duration_ms, match_state,
-                    spotify_uri, suggested_track_id, suggested_spotify, image_url
+                    spotify_uri, suggested_track_id, suggested_spotify, image_url, added
              FROM playlist_item WHERE playlist_id = ?1 ORDER BY position",
         )?;
         let rows: Vec<(PlaylistItem, Option<i64>, Option<i64>)> = stmt
@@ -811,6 +836,7 @@ impl Database {
                         suggested_track: None,
                         suggested_spotify: row.get(10)?,
                         image_url: row.get(11)?,
+                        added: row.get(12)?,
                     },
                     row.get(2)?,
                     row.get(9)?,
@@ -2061,6 +2087,33 @@ mod tests {
             .into_iter()
             .map(|t| (t.tags.title.clone().unwrap(), t.id))
             .collect()
+    }
+
+    #[test]
+    fn a_playlist_keeps_its_sort_and_when_songs_were_added() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/Adele/25/01.flac", "25", "Hello", 1)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let ids = track_ids(&db);
+        let playlist = db.create_playlist("Mix", 5).unwrap();
+        assert_eq!(
+            db.playlist_sort(playlist).unwrap(),
+            ("custom".to_owned(), false)
+        );
+        db.set_playlist_sort(playlist, "added", true).unwrap();
+        assert_eq!(
+            db.playlist_sort(playlist).unwrap(),
+            ("added".to_owned(), true)
+        );
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        db.add_to_playlist(playlist, &[ids["Hello"]], None, 6)
+            .unwrap();
+        let added = db.playlist_items(playlist).unwrap()[0].added.unwrap();
+        assert!((before - 1..=before + 5).contains(&added), "{added}");
     }
 
     #[test]

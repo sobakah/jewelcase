@@ -176,6 +176,8 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 - **Narrow windows** (`AdwBreakpoint` < ~700 px): the side panel turns into an overlay sheet that covers the grid, and the mini bar stays visible.
 - **Artists**: grid of circular portraits (`AdwAvatar`-style, with the actual image) and names, using only album artists. Clicking one pushes the **artist page** onto an `AdwNavigationView`. This is the **only** real page navigation in the app.
 - **Playlists**: grid of playlist covers (custom image or an automatic 2×2 cover mosaic). Clicking opens the same detail side panel with an editable track order (drag & drop, remove, rename).
+  - Like on Spotify, a playlist can be listed by its own order, title, artist, album, date added or duration, each also reversed. It's remembered per playlist and only changes the view (and what Play plays), not the stored order; dragging only works in the playlist's own order. The date added is Spotify's for Spotify entries, else when the song was added (unknown for entries from before 0.2).
+  - Its songs have the same actions as an album's: Add to queue on the row, Play next, Add to playlist, Go to album and Go to artist in its menu (Spotify songs too: their pages are looked up on Spotify). The playlist's menu has Play next, Add to queue and Add to playlist for all of it.
 - **Search**: a single search field (`GtkSearchBar`) backed by SQLite FTS5. Results are grouped into Artists / Albums / Songs / Playlists in a popover-like card that floats over the current view. The field takes typing as soon as search opens; Escape, the search button, a click beside the card or opening a result closes it.
 
 ### 4.2 Artist page
@@ -202,6 +204,7 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 ```
 
 - Album tiles show **only cover and album title** (the artist is the page itself). Albums are grouped by release type (§3.4: `RELEASETYPE`, iTunes suffix, track count/length rule, soundtrack genre) and sorted by year.
+- The page covers three quarters of the window (all of it below 600 px), with the grid visible beside it. A tall arrow button on its left edge, halfway down, closes it; it slides back out to the right.
 - Clicking an album opens the same side panel as in the library.
 - **"Appears on"** (decided: yes) is a collapsed `AdwExpanderRow`-style section listing tracks where the artist is only a track/featured artist on *other* album artists' albums. It only exists on pages of artists that have their own album-artist entry, and track artists never get a page of their own. Examples from the library:
   - YEONJUN's page lists his solo tracks from TOMORROW X TOGETHER albums.
@@ -231,7 +234,9 @@ Default (sleek):
 └──────────────────────────────────────────────┘
 ```
 
-Expanded: the **Lyrics** and **Queue** toggles open side panes. On wide windows the cover moves left and the pane sits next to it (`AdwMultiLayoutView` switching between "cover only", "cover + lyrics", "cover + queue" and "cover + lyrics + queue" layouts depending on width). On narrow windows the pane replaces the cover and a small cover stays in the header.
+The artist and album under the title open their pages: the library's for library songs; for Spotify songs (streamed, or on a Spotify device) the song is looked up on Spotify, and the artist's page is the library's when the artist is there.
+
+Expanded: the **Lyrics** and **Queue** toggles open side panes. Whether they're open when Gatefold starts is a preference each (as last left, shown, hidden). On wide windows the cover moves left and the pane sits next to it (`AdwMultiLayoutView` switching between "cover only", "cover + lyrics", "cover + queue" and "cover + lyrics + queue" layouts depending on width). On narrow windows the pane replaces the cover and a small cover stays in the header.
 
 - Accent color: the dominant cover color is applied through a scoped CSS provider (`@accent_bg_color`, background gradient) **only inside the player view**, with contrast checked against WCAG AA. The rest of the app follows the system accent.
 - Cover sources, in priority order: embedded picture (front) → `cover.*`/`folder.*`/`front.*` in the album folder → (optional, opt-in) Cover Art Archive by release MBID. Cached thumbnails go in `~/.cache/io.github.sobakah.Gatefold/covers/` at 3 sizes (grid, panel, player), decoded with glycin.
@@ -358,7 +363,7 @@ Online metadata is **opt-in at first launch** (one `AdwStatusPage` explaining wh
 ## 9. Spotify Integration
 
 ### 9.1 Current platform constraints (as of Nov 2026)
-- **Since Feb/Mar 2026**, Web API apps in Development Mode require the **app owner to have Spotify Premium**, are limited to **5 authorized users**, and have fewer endpoints. `/search` is capped at 10 results. Several batch endpoints, `/artists/{id}/top-tracks` and others were removed. Extended Quota Mode, which has no such limits, is effectively only open to large organizations.
+- **Since Feb/Mar 2026**, Web API apps in Development Mode require the **app owner to have Spotify Premium**, are limited to **5 authorized users**, and have fewer endpoints. `/search` is capped at 10 results, and answers `403 Insufficient client scope` when it's given `market=from_token` (playlist reads still accept that), so searches leave the market out. Several batch endpoints, `/artists/{id}/top-tracks` and others were removed. Extended Quota Mode, which has no such limits, is effectively only open to large organizations.
 - **Since Nov 2024**, recommendations, audio features/analysis and related artists are unavailable to new apps.
 - Still available: `GET /artists/{id}`, `GET /artists/{id}/albums`, `GET /albums/{id}`, `/me/playlists`, `/playlists/{id}/items` (own/collaborative playlists only), `/me/tracks`, and **all `/me/player/*` endpoints**.
 

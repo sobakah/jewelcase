@@ -57,6 +57,10 @@ mod imp {
         /// download.
         pub spotify_covers:
             RefCell<std::collections::HashMap<String, Vec<glib::WeakRef<CoverImage>>>>,
+        /// How the playlist is listed: (by, reversed); see `Sort`.
+        pub sort: RefCell<(String, bool)>,
+        /// The "sort.by" and "sort.reversed" actions, to show the sort.
+        pub sort_actions: std::cell::OnceCell<(gio::SimpleAction, gio::SimpleAction)>,
     }
 
     #[glib::object_subclass]
@@ -72,6 +76,30 @@ mod imp {
                 panel.emit_by_name::<()>("close", &[]);
             });
             klass.install_action("playlist.play", None, |panel, _, _| panel.play(None, false));
+            klass.install_action("playlist.play-next", None, |panel, _, _| {
+                let tracks = panel.queueable();
+                if !tracks.is_empty() {
+                    GatefoldApplication::get().player().play_next(tracks);
+                }
+            });
+            klass.install_action("playlist.add-to-queue", None, |panel, _, _| {
+                let tracks = panel.queueable();
+                if !tracks.is_empty() {
+                    GatefoldApplication::get().player().add_to_queue(tracks);
+                }
+            });
+            klass.install_action("playlist.add-to-playlist", None, |panel, _, _| {
+                let ids: Vec<i64> = panel
+                    .imp()
+                    .entries
+                    .borrow()
+                    .iter()
+                    .filter_map(entry_track_id)
+                    .collect();
+                if !ids.is_empty() {
+                    super::super::playlist_picker::show(panel, ids);
+                }
+            });
             klass.install_action("playlist.shuffle", None, |panel, _, _| {
                 panel.play(None, true)
             });
@@ -183,6 +211,7 @@ mod imp {
             ));
             self.add_search
                 .connect_stop_search(|entry| entry.set_text(""));
+            obj.setup_sort();
             GatefoldApplication::get().library().connect_local(
                 "playlists-changed",
                 false,
@@ -437,13 +466,22 @@ impl PlaylistPanel {
         let same_playlist = imp.playlist.borrow().as_ref().map(|p| p.id()) == Some(id);
         imp.playlist.replace(Some(playlist.clone()));
 
-        let entries = library.playlist_items(id);
+        let sort = library
+            .db()
+            .and_then(|db| db.playlist_sort(id).ok())
+            .unwrap_or_else(|| ("custom".to_owned(), false));
+        self.show_sort(&sort);
+        let mut entries = library.playlist_items(id);
+        sort_entries(&mut entries, &sort.0, sort.1);
+        let sort_changed = *imp.sort.borrow() != sort;
+        imp.sort.replace(sort);
         let hidden = !info.readable;
         imp.hidden.set_visible(hidden);
         imp.empty.set_visible(entries.is_empty() && !hidden);
         imp.items.set_visible(!entries.is_empty());
         // Unchanged (another playlist changed, a sync): keep the rows.
-        let same = *imp.entries.borrow() == entries && imp.items.first_child().is_some();
+        let same =
+            !sort_changed && *imp.entries.borrow() == entries && imp.items.first_child().is_some();
         if same {
             return;
         }
@@ -582,8 +620,8 @@ impl PlaylistPanel {
             .margin_bottom(6)
             .build();
         // Reordering Spotify playlists comes later; adding and removing
-        // work.
-        let reorderable = editable && !linked;
+        // work. Sorted, the order can't be changed by dragging.
+        let reorderable = editable && !linked && self.in_own_order();
         if reorderable {
             line.append(
                 &gtk::Image::builder()
@@ -632,9 +670,25 @@ impl PlaylistPanel {
                     .build(),
             );
         }
-        if entry.spotify_uri.is_some() {
-            line.append(&entry_menu(entry, track.as_ref()));
+        // Like an album's songs: to the queue, and more in the menu.
+        let entry_ref = entry.clone();
+        if has_song(entry) {
+            let queue = gtk::Button::builder()
+                .icon_name("list-add-symbolic")
+                .tooltip_text(gettext("Add to Queue"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular", "row-action"])
+                .build();
+            queue.connect_clicked(move |_| {
+                if let Some(track) = queueable_entry(&entry_ref) {
+                    GatefoldApplication::get()
+                        .player()
+                        .add_to_queue(vec![track]);
+                }
+            });
+            line.append(&queue);
         }
+        line.append(&entry_menu(entry, track.as_ref()));
         let item_id = entry.id;
         if editable {
             let remove = gtk::Button::builder()
@@ -658,7 +712,10 @@ impl PlaylistPanel {
         if let Some(question) = suggestion(playlist_id, entry, editable) {
             content.append(&question);
         }
-        let row = gtk::ListBoxRow::builder().child(&content).build();
+        let row = gtk::ListBoxRow::builder()
+            .child(&content)
+            .css_classes(["track-row"])
+            .build();
         let remote = GatefoldApplication::get().player().is_remote() && linked;
         let streamable = streamable(entry);
         if track.is_none() && !((remote || streamable) && entry.spotify_uri.is_some()) {
@@ -693,16 +750,8 @@ impl PlaylistPanel {
             .is_some_and(|e| e.track.is_none() && e.spotify_uri.is_some());
         let app = GatefoldApplication::get();
         if only_on_spotify && !app.player().is_remote() && !app.spotify().can_stream() {
-            let hint = if crate::spotify::Spotify::streaming_built() {
-                gettext(
-                    "This song is only on Spotify; turn on streaming in Preferences, or choose a device under Play On…",
-                )
-            } else {
-                gettext(
-                    "This song is only on Spotify; choose a device under Play On… to play it there",
-                )
-            };
-            app.library().emit_by_name::<()>("message", &[&hint]);
+            app.library()
+                .emit_by_name::<()>("message", &[&only_on_spotify_hint()]);
             return;
         }
         self.play(Some(index), false);
@@ -747,12 +796,21 @@ impl PlaylistPanel {
                         .count() as u32
                 })
                 .unwrap_or(0);
+            // Sorted: the songs in this order, not Spotify's playlist.
+            let order = (!self.in_own_order()).then(|| {
+                entries
+                    .iter()
+                    .filter_map(|e| e.spotify_uri.clone())
+                    .collect::<Vec<_>>()
+            });
             let spotify = app.spotify();
             glib::spawn_future_local(async move {
                 if shuffle {
                     let _ = spotify.call(|c| c.set_shuffle(true)).await;
                 }
-                spotify.play_playlist_remote(&spotify_id, offset).await;
+                spotify
+                    .play_playlist_remote(&spotify_id, offset, order)
+                    .await;
             });
             return;
         }
@@ -816,6 +874,94 @@ impl PlaylistPanel {
         GatefoldApplication::get()
             .player()
             .play_tracks(tracks, start, shuffle, name);
+    }
+
+    /// The sort menu's actions ("sort.by", "sort.reversed").
+    fn setup_sort(&self) {
+        let group = gio::SimpleActionGroup::new();
+        let by = gio::SimpleAction::new_stateful(
+            "by",
+            Some(glib::VariantTy::STRING),
+            &"custom".to_variant(),
+        );
+        by.connect_activate(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, param| {
+                if let Some(by) = param.and_then(|p| p.get::<String>()) {
+                    let reversed = panel.imp().sort.borrow().1;
+                    panel.set_sort(&by, reversed);
+                }
+            }
+        ));
+        let reversed = gio::SimpleAction::new_stateful("reversed", None, &false.to_variant());
+        reversed.connect_activate(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, _| {
+                let (by, reversed) = panel.imp().sort.borrow().clone();
+                panel.set_sort(&by, !reversed);
+            }
+        ));
+        group.add_action(&by);
+        group.add_action(&reversed);
+        self.insert_action_group("sort", Some(&group));
+        let _ = self.imp().sort_actions.set((by, reversed));
+    }
+
+    /// Lists the playlist sorted (remembered per playlist).
+    fn set_sort(&self, by: &str, reversed: bool) {
+        let Some(id) = self.playlist_id() else { return };
+        let library = GatefoldApplication::get().library();
+        if let Some(mut db) = library.db()
+            && let Err(err) = db.set_playlist_sort(id, by, reversed)
+        {
+            tracing::warn!("Cannot keep the playlist's sort: {err}");
+        }
+        self.refresh();
+    }
+
+    fn show_sort(&self, (by, reversed): &(String, bool)) {
+        if let Some((by_action, reversed_action)) = self.imp().sort_actions.get() {
+            by_action.set_state(&by.to_variant());
+            reversed_action.set_state(&reversed.to_variant());
+        }
+    }
+
+    /// In the playlist's own order (not sorted, not reversed): songs can
+    /// be dragged.
+    fn in_own_order(&self) -> bool {
+        let sort = self.imp().sort.borrow();
+        sort.0 == "custom" && !sort.1
+    }
+
+    /// The entries that can go to the queue, in order: library songs, and
+    /// Spotify songs when they can play (streaming, or a Spotify device).
+    fn queueable(&self) -> Vec<TrackObject> {
+        let app = GatefoldApplication::get();
+        let spotify_plays = app.player().is_remote() || app.spotify().can_stream();
+        let entries = self.imp().entries.borrow().clone();
+        let tracks: Vec<TrackObject> = entries
+            .iter()
+            .filter(|e| e.track.is_some() || spotify_plays)
+            .filter_map(entry_object)
+            .collect();
+        let skipped = entries
+            .iter()
+            .filter(|e| e.track.is_none() && e.spotify_uri.is_some())
+            .count();
+        if !spotify_plays && skipped > 0 {
+            app.library().emit_by_name::<()>(
+                "message",
+                &[&ngettext(
+                    "{} song is only on Spotify and is skipped",
+                    "{} songs are only on Spotify and are skipped",
+                    skipped as u32,
+                )
+                .replace("{}", &skipped.to_string())],
+            );
+        }
+        tracks
     }
 
     async fn rename(&self) {
@@ -977,6 +1123,120 @@ impl PlaylistPanel {
     }
 }
 
+/// Sorts entries for the view: by "title", "artist", "album", "added"
+/// or "duration" ("custom": the playlist's order), ties in the playlist's
+/// order; `reversed` turns the result around.
+fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
+    let text = |value: Option<String>| value.unwrap_or_default().to_lowercase();
+    let title = |e: &PlaylistItem| {
+        text(
+            e.track
+                .as_ref()
+                .and_then(|t| t.record.tags.title.clone())
+                .or(e.title.clone()),
+        )
+    };
+    let artist = |e: &PlaylistItem| {
+        text(
+            e.track
+                .as_ref()
+                .and_then(|t| t.record.tags.artist.clone().or(t.album_artist.clone()))
+                .or(e.artist.clone()),
+        )
+    };
+    let album = |e: &PlaylistItem| {
+        text(
+            e.track
+                .as_ref()
+                .and_then(|t| t.album_title.clone())
+                .or(e.album.clone()),
+        )
+    };
+    // Songs of one album in album order.
+    let place = |e: &PlaylistItem| {
+        e.track.as_ref().map_or((0, 0), |t| {
+            (
+                t.album_disc.or(t.record.tags.disc).unwrap_or(1),
+                t.record.tags.number.unwrap_or(0),
+            )
+        })
+    };
+    let duration = |e: &PlaylistItem| {
+        e.track
+            .as_ref()
+            .map(|t| t.record.tags.duration_ms)
+            .or(e.duration_ms)
+            .unwrap_or(0)
+    };
+    match by {
+        "title" => entries.sort_by_cached_key(|e| (title(e), e.position)),
+        "artist" => {
+            entries.sort_by_cached_key(|e| (artist(e), album(e), place(e), e.position));
+        }
+        "album" => entries.sort_by_cached_key(|e| (album(e), place(e), e.position)),
+        // Unknown dates (entries from before Gatefold kept them) first.
+        "added" => entries.sort_by_key(|e| (e.added.unwrap_or(0), e.position)),
+        "duration" => entries.sort_by_key(|e| (duration(e), e.position)),
+        _ => entries.sort_by_key(|e| e.position),
+    }
+    if reversed {
+        entries.reverse();
+    }
+}
+
+/// The track ID an entry adds to a playlist: the library song, or the
+/// Spotify song (as one to stream, a negative ID).
+fn entry_track_id(entry: &PlaylistItem) -> Option<i64> {
+    if let Some(track) = &entry.track {
+        return Some(track.record.id);
+    }
+    entry
+        .spotify_uri
+        .as_deref()
+        .filter(|uri| uri.starts_with("spotify:track:"))?;
+    GatefoldApplication::get()
+        .library()
+        .db()?
+        .stream_track_for_item(entry.id)
+        .ok()?
+}
+
+/// An entry as a song for the queue: the library song, else the Spotify
+/// song to stream.
+fn entry_object(entry: &PlaylistItem) -> Option<TrackObject> {
+    if let Some(track) = &entry.track {
+        return Some(TrackObject::new(track.clone()));
+    }
+    let id = entry_track_id(entry)?;
+    let app = GatefoldApplication::get();
+    let track = app.library().tracks(&[id]).remove(&id)?;
+    app.spotify().fetch_stream_covers(vec![id]);
+    Some(TrackObject::new(track))
+}
+
+/// One entry for the queue, or a hint when it's a Spotify song that
+/// can't play here.
+fn queueable_entry(entry: &PlaylistItem) -> Option<TrackObject> {
+    let app = GatefoldApplication::get();
+    if entry.track.is_none() && !app.player().is_remote() && !app.spotify().can_stream() {
+        app.library()
+            .emit_by_name::<()>("message", &[&only_on_spotify_hint()]);
+        return None;
+    }
+    entry_object(entry)
+}
+
+/// How a song that is only on Spotify can play.
+fn only_on_spotify_hint() -> String {
+    if crate::spotify::Spotify::streaming_built() {
+        gettext(
+            "This song is only on Spotify; turn on streaming in Preferences, or choose a device under Play On…",
+        )
+    } else {
+        gettext("This song is only on Spotify; choose a device under Play On… to play it there")
+    }
+}
+
 /// "Spotify playlist by Max · 2 changes waiting".
 fn source_line(info: &gatefold_core::db::Playlist) -> String {
     let mut parts = Vec::new();
@@ -1099,63 +1359,145 @@ fn suggestion(playlist_id: i64, entry: &PlaylistItem, editable: bool) -> Option<
     Some(line)
 }
 
-/// The menu of a Spotify entry: which version plays, and where to find it.
+/// A song to play or add: in the library, or a Spotify song.
+fn has_song(entry: &PlaylistItem) -> bool {
+    entry.track.is_some()
+        || (entry.title.is_some()
+            && entry
+                .spotify_uri
+                .as_deref()
+                .is_some_and(|uri| uri.starts_with("spotify:track:")))
+}
+
+/// The menu of an entry: the queue and playlists as for an album's songs,
+/// which version plays (Spotify entries), and where to find it.
 fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuButton {
     let item = entry.id;
     let actions = gio::SimpleActionGroup::new();
     let menu = gio::Menu::new();
-    let choose = gio::SimpleAction::new("use-local", None);
-    let query = [entry.title.clone(), entry.artist.clone()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-    choose.connect_activate(move |_, _| {
-        let query = query.clone();
-        glib::spawn_future_local(async move {
-            let window = GatefoldApplication::get().active_window();
-            if let Some(track) = choose_library_song(window.as_ref(), &query).await {
-                GatefoldApplication::get()
-                    .library()
-                    .choose_local_match(item, Some(track));
+    let button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .tooltip_text(gettext("More"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular"])
+        .build();
+
+    if has_song(entry) {
+        let queue = gio::Menu::new();
+        let play_next = gio::SimpleAction::new("play-next", None);
+        let for_next = entry.clone();
+        play_next.connect_activate(move |_, _| {
+            if let Some(track) = queueable_entry(&for_next) {
+                GatefoldApplication::get().player().play_next(vec![track]);
             }
         });
-    });
-    actions.add_action(&choose);
-    menu.append(
-        Some(&gettext("_Use Song from Library…")),
-        Some("entry.use-local"),
-    );
-    if entry.match_state == "user_pinned_spotify" || entry.match_state == "user_matched" {
-        let auto = gio::SimpleAction::new("auto", None);
-        auto.connect_activate(move |_, _| {
-            GatefoldApplication::get()
-                .library()
-                .choose_local_match(item, None);
+        actions.add_action(&play_next);
+        queue.append(Some(&gettext("Play _Next")), Some("entry.play-next"));
+        let add = gio::SimpleAction::new("add-to-playlist", None);
+        let for_playlist = entry.clone();
+        let anchor = button.downgrade();
+        add.connect_activate(move |_, _| {
+            if let (Some(id), Some(anchor)) = (entry_track_id(&for_playlist), anchor.upgrade()) {
+                super::playlist_picker::show(&anchor, vec![id]);
+            }
         });
-        actions.add_action(&auto);
-        menu.append(Some(&gettext("_Match Automatically")), Some("entry.auto"));
-    } else if track.is_some() {
-        let pin = gio::SimpleAction::new("pin", None);
-        pin.connect_activate(move |_, _| GatefoldApplication::get().library().pin_spotify(item));
-        actions.add_action(&pin);
-        menu.append(
-            Some(&gettext("Always Play from _Spotify")),
-            Some("entry.pin"),
+        actions.add_action(&add);
+        queue.append(
+            Some(&gettext("Add to _Playlist…")),
+            Some("entry.add-to-playlist"),
         );
+        menu.append_section(None, &queue);
     }
-    let section = gio::Menu::new();
-    if let Some(album) = track.and_then(|t| t.track().album_id) {
-        section.append(
-            Some(&gettext("Show in _Library")),
+
+    if entry.spotify_uri.is_some() {
+        let versions = gio::Menu::new();
+        let choose = gio::SimpleAction::new("use-local", None);
+        let query = [entry.title.clone(), entry.artist.clone()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        choose.connect_activate(move |_, _| {
+            let query = query.clone();
+            glib::spawn_future_local(async move {
+                let window = GatefoldApplication::get().active_window();
+                if let Some(track) = choose_library_song(window.as_ref(), &query).await {
+                    GatefoldApplication::get()
+                        .library()
+                        .choose_local_match(item, Some(track));
+                }
+            });
+        });
+        actions.add_action(&choose);
+        versions.append(
+            Some(&gettext("_Use Song from Library…")),
+            Some("entry.use-local"),
+        );
+        if entry.match_state == "user_pinned_spotify" || entry.match_state == "user_matched" {
+            let auto = gio::SimpleAction::new("auto", None);
+            auto.connect_activate(move |_, _| {
+                GatefoldApplication::get()
+                    .library()
+                    .choose_local_match(item, None);
+            });
+            actions.add_action(&auto);
+            versions.append(Some(&gettext("_Match Automatically")), Some("entry.auto"));
+        } else if track.is_some() {
+            let pin = gio::SimpleAction::new("pin", None);
+            pin.connect_activate(move |_, _| {
+                GatefoldApplication::get().library().pin_spotify(item)
+            });
+            actions.add_action(&pin);
+            versions.append(
+                Some(&gettext("Always Play from _Spotify")),
+                Some("entry.pin"),
+            );
+        }
+        menu.append_section(None, &versions);
+    }
+
+    // Where it's from: the library's pages, else Spotify's.
+    let pages = gio::Menu::new();
+    let song_uri = entry
+        .spotify_uri
+        .clone()
+        .filter(|uri| uri.starts_with("spotify:track:"));
+    let album_id = track.and_then(|t| t.track().album_id);
+    if let Some(album) = album_id {
+        pages.append(
+            Some(&gettext("Go to _Album")),
             Some(&gio::Action::print_detailed_name(
                 "win.show-album",
                 Some(&album.to_variant()),
             )),
         );
+        let artist = GatefoldApplication::get()
+            .library()
+            .album_artists(album)
+            .first()
+            .map(|(id, _)| *id);
+        if let Some(artist) = artist {
+            pages.append(
+                Some(&gettext("Go to A_rtist")),
+                Some(&gio::Action::print_detailed_name(
+                    "win.show-artist",
+                    Some(&artist.to_variant()),
+                )),
+            );
+        }
+    } else if let Some(uri) = &song_uri {
+        for (name, label, artist) in [
+            ("album", gettext("Go to _Album"), false),
+            ("artist", gettext("Go to A_rtist"), true),
+        ] {
+            let action = gio::SimpleAction::new(name, None);
+            let uri = uri.clone();
+            action.connect_activate(move |_, _| super::open_song_page(uri.clone(), artist));
+            actions.add_action(&action);
+            pages.append(Some(&label), Some(&format!("entry.{name}")));
+        }
     }
-    if let Some(id) = entry
-        .spotify_uri
+    if let Some(id) = song_uri
         .as_deref()
         .and_then(|u| u.strip_prefix("spotify:track:"))
     {
@@ -1163,16 +1505,10 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         let open = gio::SimpleAction::new("open", None);
         open.connect_activate(move |_, _| crate::spotify::open_on_spotify("track", &id));
         actions.add_action(&open);
-        section.append(Some(&gettext("_Open in Spotify")), Some("entry.open"));
+        pages.append(Some(&gettext("_Open in Spotify")), Some("entry.open"));
     }
-    menu.append_section(None, &section);
-    let button = gtk::MenuButton::builder()
-        .icon_name("view-more-symbolic")
-        .tooltip_text(gettext("More"))
-        .valign(gtk::Align::Center)
-        .menu_model(&menu)
-        .css_classes(["flat", "circular"])
-        .build();
+    menu.append_section(None, &pages);
+    button.set_menu_model(Some(&menu));
     button.insert_action_group("entry", Some(&actions));
     button
 }

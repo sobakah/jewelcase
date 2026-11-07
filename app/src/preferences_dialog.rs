@@ -18,6 +18,10 @@ const TAG_EDITORS: [&str; 5] = ["auto", "eartag", "kid3", "picard", "custom"];
 /// "analysis-mode" values, in the order of the Analyze Songs row.
 const ANALYSIS_MODES: [&str; 3] = ["off", "background", "full"];
 const LYRICS_LAYOUTS: [&str; 3] = ["original-top", "romanization-top", "original-only"];
+/// The "start-view" choices, in the row's order.
+const START_VIEWS: [&str; 4] = ["last", "albums", "artists", "playlists"];
+/// The "lyrics-pane" and "queue-pane" choices, in the rows' order.
+const PANE_MODES: [&str; 3] = ["remember", "open", "closed"];
 
 mod imp {
     use super::*;
@@ -41,6 +45,12 @@ mod imp {
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub start_view_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub lyrics_pane_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub queue_pane_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub online_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -118,6 +128,9 @@ mod imp {
             settings
                 .bind("restore-queue", &*self.restore_queue_row, "active")
                 .build();
+            bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
+            bind_choice(&settings, "lyrics-pane", &self.lyrics_pane_row, &PANE_MODES);
+            bind_choice(&settings, "queue-pane", &self.queue_pane_row, &PANE_MODES);
             settings
                 .bind("lyrics-layout", &*self.lyrics_layout_row, "selected")
                 .mapping(|value, _| {
@@ -551,4 +564,26 @@ fn folder_error_message(err: &FolderError) -> String {
         }
         FolderError::Io(_) => gettext("The folder can't be read"),
     }
+}
+
+/// A string setting with choices shown as a combo row (`values` in the
+/// row's order).
+fn bind_choice(
+    settings: &gio::Settings,
+    key: &str,
+    row: &adw::ComboRow,
+    values: &'static [&'static str],
+) {
+    settings
+        .bind(key, row, "selected")
+        .mapping(move |value, _| {
+            let value = value.get::<String>()?;
+            let index = values.iter().position(|v| *v == value)?;
+            Some((index as u32).to_value())
+        })
+        .set_mapping(move |value, _| {
+            let index = value.get::<u32>().ok()? as usize;
+            values.get(index).map(|v| v.to_variant())
+        })
+        .build();
 }

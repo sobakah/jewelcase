@@ -296,3 +296,21 @@ button.smart-shuffle {
 .player-subtitle > link:hover {
   text-decoration-line: underline;
 }
+
+/* The tall arrow on an artist page's left edge closes it (§4.2). */
+.artist-close-handle {
+  min-width: 22px;
+  min-height: 112px;
+  padding: 0;
+  margin-left: 4px;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.artist-close-handle:hover {
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.artist-close-handle:active {
+  background-color: color-mix(in srgb, currentColor 22%, transparent);
+}

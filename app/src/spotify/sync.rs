@@ -207,6 +207,7 @@ fn remote_entries(entries: &[PlaylistEntry]) -> Vec<RemoteEntry> {
             uri: entry.uri.clone(),
             image_url: entry.track.as_ref().and_then(|t| t.image_url.clone()),
             track: entry.track.as_ref().map(remote_track),
+            added: entry.added_at,
         })
         .collect()
 }
@@ -1243,7 +1244,25 @@ fn refused_change(err: &Error) -> bool {
 
 /// Why Spotify couldn't be searched, for the user.
 pub fn search_error(err: &Error) -> String {
-    match err {
+    request_error(err).unwrap_or_else(|| {
+        // Translators: {} is Spotify's own error message.
+        gettext("Spotify couldn't be searched ({}).").replace("{}", &err.to_string())
+    })
+}
+
+/// Why Spotify didn't answer, for the user (an artist's releases, an
+/// album).
+pub fn answer_error(err: &Error) -> String {
+    request_error(err).unwrap_or_else(|| {
+        // Translators: {} is Spotify's own error message.
+        gettext("Spotify said no ({}).").replace("{}", &err.to_string())
+    })
+}
+
+/// The reasons that read the same for every request; `None` for
+/// Spotify's own error messages.
+fn request_error(err: &Error) -> Option<String> {
+    Some(match err {
         // Spotify limits how much an app may search; after many searches
         // (matching a large library) it can ask to wait for hours.
         Error::RateLimited(wait) if wait.as_secs() >= 90 => {
@@ -1256,9 +1275,8 @@ pub fn search_error(err: &Error) -> String {
         }
         Error::LoggedOut => gettext("Not connected to Spotify; connect in Preferences."),
         Error::Http(_) => gettext("Spotify can't be reached; Gatefold tries again later."),
-        // Translators: {} is Spotify's own error message.
-        _ => gettext("Spotify couldn't be searched ({}).").replace("{}", &err.to_string()),
-    }
+        _ => return None,
+    })
 }
 
 /// "3 h", "20 min".

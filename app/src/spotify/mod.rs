@@ -33,7 +33,7 @@ use crate::config::APP_ID;
 
 pub use remote::RemoteCommand;
 pub use stream::{StreamNote, fetch_covers, fetch_covers_in_batches, image_cover_key};
-pub use sync::{Op, parse_suggestion, search_error};
+pub use sync::{Op, answer_error, parse_suggestion, search_error};
 
 /// How long the browser has to come back.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);

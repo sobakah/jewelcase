@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use gatefold_core::db::{SpotifyAlbum, SpotifyArtist, StreamInfo};
 use gatefold_core::matching::{Confidence, RemoteTrack};
 use gatefold_spotify::Error;
+use gettextrs::gettext;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
@@ -28,6 +29,16 @@ pub struct LibraryState {
     albums: HashMap<String, Vec<gatefold_spotify::AlbumTrack>>,
     /// Spotify IDs found by name for library artists (`None`: not found).
     artist_ids: HashMap<String, Option<String>>,
+    /// Where the pages of songs played this session are, by URI.
+    links: HashMap<String, TrackLinks>,
+}
+
+/// A Spotify song's album and artists, for the player's links.
+#[derive(Debug, Clone, Default)]
+pub struct TrackLinks {
+    pub album_id: Option<String>,
+    /// (Spotify ID, name), the main artist first.
+    pub artists: Vec<(String, String)>,
 }
 
 pub fn album_from(album: &gatefold_spotify::Album) -> SpotifyAlbum {
@@ -115,8 +126,9 @@ impl Spotify {
     }
 
     /// An artist's albums, EPs and singles on Spotify: read again after a
-    /// day; when Spotify can't be asked, what was read before.
-    pub async fn discography(&self, artist_id: &str) -> Option<Vec<SpotifyAlbum>> {
+    /// day; when Spotify can't be asked, what was read before, else why
+    /// not (for the user).
+    pub async fn discography(&self, artist_id: &str) -> Result<Vec<SpotifyAlbum>, String> {
         let library = GatefoldApplication::get().library();
         let cached = library
             .db()
@@ -124,10 +136,12 @@ impl Spotify {
         if let Some((albums, read)) = &cached
             && now() - read < DISCOGRAPHY_AGE_S
         {
-            return Some(albums.clone());
+            return Ok(albums.clone());
         }
         if !self.is_connected() {
-            return cached.map(|(albums, _)| albums);
+            return cached
+                .map(|(albums, _)| albums)
+                .ok_or_else(|| gettext("Not connected to Spotify; connect in Preferences."));
         }
         let id = artist_id.to_owned();
         match self.call(move |client| client.artist_albums(&id)).await {
@@ -138,11 +152,13 @@ impl Spotify {
                 {
                     tracing::warn!("Cannot store a discography: {err}");
                 }
-                Some(albums)
+                Ok(albums)
             }
             Err(err) => {
-                tracing::info!("Cannot read the releases of {artist_id}: {err}");
-                cached.map(|(albums, _)| albums)
+                tracing::warn!("Cannot read the releases of {artist_id}: {err}");
+                cached
+                    .map(|(albums, _)| albums)
+                    .ok_or_else(|| super::answer_error(&err))
             }
         }
     }
@@ -275,6 +291,60 @@ impl Spotify {
                 })
                 .collect(),
         )
+    }
+
+    /// Where a Spotify song's album and artist pages are; asked once per
+    /// session. `None` if Spotify can't be asked.
+    pub async fn track_links(&self, uri: &str) -> Option<TrackLinks> {
+        if let Some(links) = self.imp().library.borrow().links.get(uri) {
+            return Some(links.clone());
+        }
+        let id = uri.strip_prefix("spotify:track:")?.to_owned();
+        let track = match self.call(move |client| client.track(&id)).await {
+            Ok(track) => track,
+            Err(err) => {
+                tracing::warn!("Cannot read the Spotify song {uri}: {err}");
+                return None;
+            }
+        };
+        let links = TrackLinks {
+            album_id: track.album_id.clone(),
+            artists: track
+                .artist_ids
+                .iter()
+                .cloned()
+                .zip(track.artists.iter().cloned())
+                .collect(),
+        };
+        self.imp()
+            .library
+            .borrow_mut()
+            .links
+            .insert(uri.to_owned(), links.clone());
+        Some(links)
+    }
+
+    /// A Spotify album by ID: stored (saved albums, discographies), else
+    /// asked for; its songs are kept for playing it.
+    pub async fn album_by_id(&self, album_id: &str) -> Option<SpotifyAlbum> {
+        if let Some(album) = self.stored_album(album_id) {
+            return Some(album);
+        }
+        let id = album_id.to_owned();
+        match self.call(move |client| client.album(&id)).await {
+            Ok((album, tracks)) => {
+                self.imp()
+                    .library
+                    .borrow_mut()
+                    .albums
+                    .insert(album_id.to_owned(), tracks);
+                Some(album_from(&album))
+            }
+            Err(err) => {
+                tracing::warn!("Cannot read the Spotify album {album_id}: {err}");
+                None
+            }
+        }
     }
 
     /// Spotify albums by Spotify ID, from the database.

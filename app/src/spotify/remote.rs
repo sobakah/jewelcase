@@ -19,6 +19,9 @@ use super::Spotify;
 use crate::application::GatefoldApplication;
 use crate::objects::TrackObject;
 
+/// Songs sent in one play request (a sorted playlist); Spotify refuses
+/// very long lists.
+const MAX_PLAY_URIS: usize = 100;
 /// How often a remote device is asked what it plays.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// After a command, the next report comes sooner.
@@ -80,6 +83,8 @@ pub struct RemoteState {
     /// them again (covers arrived) without asking again.
     last_state: Option<gatefold_spotify::PlaybackState>,
     last_queue: Vec<gatefold_spotify::Track>,
+    /// Stand-in track ID → Spotify URI, for the player's links.
+    stand_ins: HashMap<i64, String>,
 }
 
 impl Spotify {
@@ -285,20 +290,35 @@ impl Spotify {
     }
 
     /// Plays a Spotify playlist on the remote device, from an entry.
-    pub async fn play_playlist_remote(&self, spotify_id: &str, offset: u32) {
+    /// Plays a Spotify playlist on the device from its `offset`-th song;
+    /// with `order` (the songs sorted), those songs in that order instead.
+    pub async fn play_playlist_remote(
+        &self,
+        spotify_id: &str,
+        offset: u32,
+        order: Option<Vec<String>>,
+    ) {
         let device = self.remote_device_id();
-        let uri = format!("spotify:playlist:{spotify_id}");
+        let request = match order {
+            // A sorted playlist isn't a Spotify context; its songs from
+            // the chosen one, as many as one request takes.
+            Some(uris) => PlayRequest::Tracks {
+                uris: uris
+                    .into_iter()
+                    .skip(offset as usize)
+                    .take(MAX_PLAY_URIS)
+                    .collect(),
+                offset: 0,
+                position_ms: 0,
+            },
+            None => PlayRequest::Context {
+                uri: format!("spotify:playlist:{spotify_id}"),
+                offset,
+                position_ms: 0,
+            },
+        };
         let result = self
-            .call(move |client| {
-                client.play(
-                    device.as_deref(),
-                    Some(PlayRequest::Context {
-                        uri,
-                        offset,
-                        position_ms: 0,
-                    }),
-                )
-            })
+            .call(move |client| client.play(device.as_deref(), Some(request)))
             .await;
         if let Err(err) = result {
             tracing::warn!("Cannot play the playlist remotely: {err}");
@@ -622,10 +642,33 @@ impl Spotify {
                     None
                 }
             });
-            objects.push(TrackObject::new(stand_in(track, cover_key)));
+            let stand_in = stand_in(track, cover_key);
+            self.imp()
+                .remote
+                .borrow_mut()
+                .stand_ins
+                .insert(stand_in.record.id, track.uri.clone());
+            objects.push(TrackObject::new(stand_in));
         }
         self.want_covers(missing);
         objects
+    }
+
+    /// The Spotify URI of a song that isn't in the library: streamed, or
+    /// playing on a Spotify device.
+    pub fn stand_in_uri(&self, track_id: i64) -> Option<String> {
+        if track_id >= 0 {
+            return None;
+        }
+        if let Some(uri) = self.imp().remote.borrow().stand_ins.get(&track_id) {
+            return Some(uri.clone());
+        }
+        GatefoldApplication::get()
+            .library()
+            .db()?
+            .stream_uri(track_id)
+            .ok()
+            .flatten()
     }
 
     /// Downloads Spotify's covers in the background, in the order given

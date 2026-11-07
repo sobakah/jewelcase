@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Playlists can be sorted like on Spotify: by title, artist, album, date added or duration, or in their own order, each also reversed. The choice is kept per playlist.
+- A playlist's songs have the same actions as an album's: Add to Queue, Play Next, Add to Playlist, Go to Album and Go to Artist; the playlist's menu adds all of it to the queue or another playlist.
+- The artist and album of a Spotify song in the player open their pages, like for your own songs.
+- Preferences → Library → Start: open with the last view or a fixed one. Preferences → Playback → Player: whether lyrics and queue are shown when Gatefold starts.
+- Artist pages cover less of the artist grid and have a tall arrow on the left to close them.
+- Fixed: searching Spotify always failed with "403: Insufficient client scope".
+- When Spotify doesn't show an artist's releases, the page now says why.
+
 ## 0.1.0 (pre-release)
 
 The first public version of Gatefold, a local-first music player for GNOME built around albums, artists and playlists. It's a pre-release: everything described here works, but expect rough edges, and keep backups of playlists you care about (“Export…” in a playlist’s menu).

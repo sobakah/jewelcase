@@ -275,6 +275,11 @@ mod imp {
             settings
                 .bind("library-view", &*self.stack, "visible-child-name")
                 .build();
+            // A fixed view to start with, else the last one.
+            let start = settings.string("start-view");
+            if start != "last" {
+                self.stack.set_visible_child_name(&start);
+            }
             obj.add_action(&settings.create_action("album-sort"));
             self.settings.set(settings).expect("settings are set once");
             obj.load_window_state();
@@ -1033,9 +1038,9 @@ impl GatefoldWindow {
     }
 
     /// Follows the window width: a collapsed split view ignores the width
-    /// fraction, so keep the artist panel at most of the window, with some
-    /// grid showing beside it (or all of it on narrow windows); and the
-    /// player picks its layout and width from it.
+    /// fraction, so keep the artist panel at three quarters of the window,
+    /// with the grid showing beside it (all of it on narrow windows); and
+    /// the player picks its layout and width from it.
     fn setup_artist_overlay(&self) {
         self.connect_realize(|window| {
             let Some(surface) = window.surface() else {
@@ -1046,7 +1051,7 @@ impl GatefoldWindow {
                 window,
                 move |surface: &gtk::gdk::Surface| {
                     let width = surface.width();
-                    let panel = if width < 600 { width } else { width * 88 / 100 };
+                    let panel = if width < 600 { width } else { width * 3 / 4 };
                     let imp = window.imp();
                     imp.artist_split.set_max_sidebar_width(f64::from(panel));
                     imp.player_view.set_available_width(width);

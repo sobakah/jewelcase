@@ -490,19 +490,22 @@ impl ArtistPage {
                 }
                 page.clear_sections();
                 let note = match &albums {
-                    None => Some(gettext(
-                        "Spotify can’t show this artist’s releases right now",
+                    Err(why) => Some(format!(
+                        "{}\n{why}",
+                        gettext("Spotify can’t show this artist’s releases right now")
                     )),
-                    Some(albums) if albums.is_empty() => {
+                    Ok(albums) if albums.is_empty() => {
                         Some(gettext("No albums, EPs or singles on Spotify"))
                     }
-                    Some(_) => None,
+                    Ok(_) => None,
                 };
                 if let Some(note) = note {
                     page.imp().sections.append(
                         &gtk::Label::builder()
                             .label(note)
                             .xalign(0.0)
+                            .wrap(true)
+                            .selectable(true)
                             .css_classes(["dim-label"])
                             .build(),
                     );
@@ -587,7 +590,7 @@ impl ArtistPage {
                 let Some(id) = spotify.artist_id_for(&name, known.as_deref()).await else {
                     return;
                 };
-                let Some(albums) = spotify.discography(&id).await else {
+                let Ok(albums) = spotify.discography(&id).await else {
                     return;
                 };
                 if page.imp().generation.get() != generation {

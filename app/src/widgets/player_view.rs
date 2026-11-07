@@ -9,7 +9,7 @@
 //! The cover's dominant color themes the view (theme.rs), with the blurred
 //! cover as the backdrop.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
@@ -128,9 +128,14 @@ mod imp {
         /// The lyrics pane was closed for a Spotify song without lyrics and
         /// opens again with the next library song.
         pub lyrics_suspended: Cell<bool>,
+        /// A pane opens or closes by itself (not the user's choice, so not
+        /// remembered).
+        pub pane_auto: Cell<bool>,
         /// What the artist and album links under the title open.
         pub artist_link: Cell<Option<i64>>,
         pub album_link: Cell<Option<i64>>,
+        /// The Spotify song shown (not in the library), for its links.
+        pub spotify_uri: RefCell<Option<String>>,
     }
 
     #[glib::object_subclass]
@@ -216,6 +221,10 @@ impl PlayerView {
                 let (action, id) = match uri {
                     "artist" => ("win.show-artist", imp.artist_link.get()),
                     "album" => ("win.show-album", imp.album_link.get()),
+                    "spotify-artist" | "spotify-album" => {
+                        view.open_spotify_link(uri == "spotify-artist");
+                        return glib::Propagation::Stop;
+                    }
                     _ => return glib::Propagation::Proceed,
                 };
                 if let Some(id) = id {
@@ -355,6 +364,17 @@ impl PlayerView {
             ),
         );
 
+        // The panes as chosen in Preferences, or as they were left.
+        let settings = player.settings();
+        let open_at_start = |mode: &str, was: &str| match settings.string(mode).as_str() {
+            "open" => true,
+            "closed" => false,
+            _ => settings.boolean(was),
+        };
+        imp.lyrics_button
+            .set_active(open_at_start("lyrics-pane", "lyrics-pane-open"));
+        imp.queue_button
+            .set_active(open_at_start("queue-pane", "queue-pane-open"));
         for button in [&*imp.lyrics_button, &*imp.queue_button] {
             button.connect_toggled(glib::clone!(
                 #[weak(rename_to = view)]
@@ -458,6 +478,12 @@ impl PlayerView {
             other.set_active(false);
             imp.updating.set(false);
         }
+        if !imp.pane_auto.get() {
+            let player = GatefoldApplication::get().player();
+            let settings = player.settings();
+            let _ = settings.set_boolean("lyrics-pane-open", imp.lyrics_button.is_active());
+            let _ = settings.set_boolean("queue-pane-open", imp.queue_button.is_active());
+        }
         self.update_panes();
     }
 
@@ -512,8 +538,9 @@ impl PlayerView {
         ));
     }
 
-    /// "Artist — Album" under the title; both open their page when the
-    /// song is in the library (an album, an artist with a page).
+    /// "Artist — Album" under the title; both open their page: the
+    /// library's for library songs, else Spotify's (looked up when
+    /// clicked), or the library artist's page when the artist is there.
     fn set_subtitle(&self, track: &TrackObject) {
         let imp = self.imp();
         let album_id = track.track().album_id;
@@ -526,23 +553,38 @@ impl PlayerView {
         });
         imp.album_link.set(album_id);
         imp.artist_link.set(artist_id);
-        let link = |text: &str, uri: &str, id: Option<i64>, tooltip: &str| {
+        let spotify_uri = GatefoldApplication::get()
+            .spotify()
+            .stand_in_uri(track.id())
+            .filter(|uri| uri.starts_with("spotify:track:"));
+        let from_spotify = spotify_uri.is_some();
+        imp.spotify_uri.replace(spotify_uri);
+        let link = |text: &str, uri: &str, linked: bool, tooltip: &str| {
             let text = glib::markup_escape_text(text);
-            match id {
-                Some(_) => format!(
+            if linked {
+                format!(
                     "<a href=\"{uri}\" title=\"{}\">{text}</a>",
                     glib::markup_escape_text(tooltip)
-                ),
-                None => text.to_string(),
+                )
+            } else {
+                text.to_string()
             }
         };
         let artist = track.artist().map(|artist| {
+            let (uri, linked) = match artist_id {
+                Some(_) => ("artist", true),
+                None => ("spotify-artist", from_spotify),
+            };
             // Translators: tooltip of the artist link in the player.
-            link(&artist, "artist", artist_id, &gettext("Go to Artist"))
+            link(&artist, uri, linked, &gettext("Go to Artist"))
         });
         let album = track.track().album_title.as_deref().map(|album| {
+            let (uri, linked) = match album_id {
+                Some(_) => ("album", true),
+                None => ("spotify-album", from_spotify),
+            };
             // Translators: tooltip of the album link in the player.
-            link(album, "album", album_id, &gettext("Go to Album"))
+            link(album, uri, linked, &gettext("Go to Album"))
         });
         let subtitle = match (artist, album) {
             (Some(artist), Some(album)) => format!("{artist} — {album}"),
@@ -550,6 +592,14 @@ impl PlayerView {
             (None, None) => String::new(),
         };
         imp.subtitle.set_markup(&subtitle);
+    }
+
+    /// The artist or album of a Spotify song was clicked: its page in the
+    /// library if the library has it, else on Spotify.
+    fn open_spotify_link(&self, artist: bool) {
+        if let Some(uri) = self.imp().spotify_uri.borrow().clone() {
+            super::open_song_page(uri, artist);
+        }
     }
 
     fn update_track(&self, player: &Player) {
@@ -585,12 +635,14 @@ impl PlayerView {
         } else {
             gettext("Lyrics (Ctrl+L)")
         }));
+        imp.pane_auto.set(true);
         if stand_in && imp.lyrics_button.is_active() {
             imp.lyrics_suspended.set(true);
             imp.lyrics_button.set_active(false);
         } else if !stand_in && imp.lyrics_suspended.replace(false) {
             imp.lyrics_button.set_active(true);
         }
+        imp.pane_auto.set(false);
         self.update_theme(track);
         self.update_position(player);
     }

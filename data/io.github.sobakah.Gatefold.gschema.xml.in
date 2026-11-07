@@ -22,6 +22,45 @@
       <default>"albums"</default>
       <summary>Last library view</summary>
     </key>
+    <key name="start-view" type="s">
+      <choices>
+        <choice value="last"/>
+        <choice value="albums"/>
+        <choice value="artists"/>
+        <choice value="playlists"/>
+      </choices>
+      <default>"last"</default>
+      <summary>View at start</summary>
+      <description>The library view Gatefold opens with; “last” is the one used last.</description>
+    </key>
+    <key name="lyrics-pane" type="s">
+      <choices>
+        <choice value="remember"/>
+        <choice value="open"/>
+        <choice value="closed"/>
+      </choices>
+      <default>"remember"</default>
+      <summary>Lyrics pane at start</summary>
+      <description>Whether the player opens with the lyrics showing; “remember” keeps it as it was left.</description>
+    </key>
+    <key name="queue-pane" type="s">
+      <choices>
+        <choice value="remember"/>
+        <choice value="open"/>
+        <choice value="closed"/>
+      </choices>
+      <default>"remember"</default>
+      <summary>Queue pane at start</summary>
+      <description>Whether the player opens with the queue showing; “remember” keeps it as it was left.</description>
+    </key>
+    <key name="lyrics-pane-open" type="b">
+      <default>false</default>
+      <summary>Lyrics pane was open</summary>
+    </key>
+    <key name="queue-pane-open" type="b">
+      <default>false</default>
+      <summary>Queue pane was open</summary>
+    </key>
     <key name="library-folders" type="as">
       <default>[]</default>
       <summary>Music folders</summary>

@@ -43,6 +43,8 @@ pub struct RemoteEntry {
     pub image_url: Option<String>,
     /// `None` for anything that isn't a track (episodes).
     pub track: Option<RemoteTrack>,
+    /// When it was added on Spotify (Unix seconds).
+    pub added: Option<i64>,
 }
 
 /// What is known about a library song on Spotify.
@@ -415,8 +417,8 @@ impl Database {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO playlist_item (playlist_id, position, local_track_id, spotify_uri,
                    isrc, title, artist, album, duration_ms, match_state, suggested_track_id,
-                   image_url, declined_track_id)
-                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                   image_url, declined_track_id, added)
+                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             )?;
             let exists = |track: i64| -> rusqlite::Result<bool> {
                 tx.query_row(
@@ -461,6 +463,7 @@ impl Database {
                     suggested,
                     entry.image_url,
                     no,
+                    entry.added,
                 ])?;
                 order.push(tx.last_insert_rowid());
                 let count = seen.entry(uri).or_default();
@@ -900,6 +903,7 @@ mod tests {
                 duration_ms: duration_s * 1000,
                 isrc: None,
             }),
+            added: None,
         }
     }
 
@@ -951,6 +955,7 @@ mod tests {
                 uri: Some("spotify:episode:e".into()),
                 image_url: None,
                 track: None,
+                added: None,
             },
         ];
         db.set_spotify_items(id, &entries, &index, "snap1", 7)
