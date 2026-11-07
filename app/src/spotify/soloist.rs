@@ -79,6 +79,9 @@ pub struct SoloistState {
     /// Muted for the last moment of a song followed by a local one, so
     /// Soloist's own next song isn't heard before it's paused.
     ducked: bool,
+    /// When Gatefold last paused Soloist: a pause it didn't ask for at the
+    /// very end is the song ending.
+    pause_asked: Option<std::time::Instant>,
     /// Counts reschedules of the end timers; an older timer does nothing
     /// (removing one that already ran would panic).
     end_generation: u64,
@@ -90,6 +93,11 @@ pub struct SoloistState {
 const HAND_OVER_BEFORE_MS: u64 = 10_000;
 /// … or, with a local song next, Soloist is muted.
 const DUCK_BEFORE_MS: u64 = 400;
+/// Soloist pausing this close to the end (Spotify with autoplay off stops
+/// on the song) is the song ending.
+const PAUSED_AT_END_MS: u64 = 2_500;
+/// A pause Gatefold asked for is reported within this.
+const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl SoloistState {
     /// Soloist's reported shuffle and repeat; while a chosen repeat mode
@@ -491,10 +499,37 @@ impl Spotify {
         let player = GatefoldApplication::get().player();
         match status {
             Status::Playing => player.stream_note(StreamNote::Playing),
+            Status::Paused if self.soloist_paused_at_end() => {
+                tracing::debug!("Soloist paused at the end of the song: next one");
+                self.soloist_ended();
+            }
             Status::Paused => player.stream_note(StreamNote::Paused),
             Status::Idle if started => self.soloist_ended(),
             _ => {}
         }
+    }
+
+    /// Soloist paused by itself at the end of Gatefold's song (nothing in
+    /// its queue and no autoplay): not a pause, the song is over.
+    fn soloist_paused_at_end(&self) -> bool {
+        let state = &self.imp().stream.borrow().soloist;
+        if state
+            .pause_asked
+            .is_some_and(|at| at.elapsed() < PAUSE_ANSWER)
+        {
+            return false;
+        }
+        if state.ducked {
+            return true;
+        }
+        let duration = state
+            .current
+            .as_ref()
+            .filter(|c| state.wanted.as_deref() == Some(c.uri.as_str()))
+            .and_then(|c| c.duration_ms)
+            .unwrap_or_else(|| GatefoldApplication::get().player().duration());
+        let position = state.position.map_or(0, |p| p.now());
+        duration > 0 && position + PAUSED_AT_END_MS >= duration
     }
 
     /// Gatefold's song is over: Soloist is paused before it plays anything
@@ -710,6 +745,7 @@ impl Spotify {
     }
 
     pub(super) fn soloist_pause(&self) {
+        self.imp().stream.borrow_mut().soloist.pause_asked = Some(std::time::Instant::now());
         if let Some(soloist) = self.soloist() {
             soloist.pause();
         }
