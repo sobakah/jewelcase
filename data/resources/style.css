@@ -297,20 +297,31 @@ button.smart-shuffle {
   text-decoration-line: underline;
 }
 
-/* The tall arrow on an artist page's left edge closes it (§4.2). */
+/* The grip on an artist page's left edge closes it (§4.2); it looks like
+   the bottom sheet's drag handle on top of the player, turned upright. */
 .artist-close-handle {
-  min-width: 22px;
-  min-height: 112px;
+  min-width: 20px;
+  min-height: 96px;
   padding: 0;
-  margin-left: 4px;
+  margin-left: 2px;
   border-radius: 999px;
-  background-color: color-mix(in srgb, currentColor 7%, transparent);
+  background: none;
+  box-shadow: none;
 }
 
-.artist-close-handle:hover {
-  background-color: color-mix(in srgb, currentColor 14%, transparent);
+.artist-close-handle .grip {
+  min-width: 4px;
+  min-height: 36px;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+  transition: background-color 150ms ease-out, min-height 150ms ease-out;
 }
 
-.artist-close-handle:active {
-  background-color: color-mix(in srgb, currentColor 22%, transparent);
+.artist-close-handle:hover .grip {
+  min-height: 48px;
+  background-color: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.artist-close-handle:active .grip {
+  background-color: color-mix(in srgb, currentColor 50%, transparent);
 }

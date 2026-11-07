@@ -11,7 +11,7 @@ use gtk::glib;
 use gtk::glib::subclass::Signal;
 
 use super::album_tile::artist_or_unknown;
-use super::{CoverImage, TrackRow};
+use super::{CoverBackdrop, CoverImage, TrackRow};
 use crate::application::GatefoldApplication;
 use crate::format;
 use crate::objects::{AlbumObject, TrackObject};
@@ -24,6 +24,8 @@ mod imp {
     pub struct AlbumPanel {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
+        #[template_child]
+        pub backdrop: TemplateChild<CoverBackdrop>,
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
@@ -59,6 +61,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             CoverImage::ensure_type();
+            CoverBackdrop::ensure_type();
             klass.bind_template();
             klass.install_action("panel.close", None, |panel, _, _| {
                 panel.emit_by_name::<()>("close", &[]);
@@ -117,6 +120,7 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
+            self.backdrop.follow(&self.cover);
             let obj = self.obj();
             let player = GatefoldApplication::get().player();
             let id = player.connect_current_track_notify(glib::clone!(

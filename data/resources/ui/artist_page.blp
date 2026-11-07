@@ -8,234 +8,242 @@ template $GatefoldArtistPage: Adw.Bin {
     "artist-panel",
   ]
 
-  // A tall arrow on the left edge closes the page, sliding it back to
-  // the right (CONCEPT.md §4.2).
+  // A grip on the left edge, like the one on top of the player, closes
+  // the page: it slides back to the right (CONCEPT.md §4.2).
   child: Gtk.Overlay {
-    child: Adw.ToolbarView {
-      [top]
-      Adw.HeaderBar {
-        show-title: false;
-        show-start-title-buttons: false;
-        show-end-title-buttons: false;
+    // The cover, blurred, behind the top of the panel (like the player).
+    child: $GatefoldCoverBackdrop backdrop {
+      child: Adw.ToolbarView {
+        [top]
+        Adw.HeaderBar {
+          show-title: false;
+          show-start-title-buttons: false;
+          show-end-title-buttons: false;
 
-        [end]
-        Gtk.Button {
-          icon-name: "window-close-symbolic";
-          tooltip-text: _("Close");
-          action-name: "artist.close";
+          styles [
+            "flat",
+          ]
         }
 
-        styles [
-          "flat",
-        ]
-      }
+        [top]
+        Adw.Banner identify_banner {
+          button-label: _("_Identify…");
+          action-name: "artist.identify";
+        }
 
-      [top]
-      Adw.Banner identify_banner {
-        button-label: _("_Identify…");
-        action-name: "artist.identify";
-      }
+        content: Adw.OverlaySplitView split_view {
+          sidebar-position: end;
+          show-sidebar: false;
+          min-sidebar-width: 320;
+          max-sidebar-width: 440;
+          sidebar-width-fraction: 0.38;
 
-      content: Adw.OverlaySplitView split_view {
-        sidebar-position: end;
-        show-sidebar: false;
-        min-sidebar-width: 320;
-        max-sidebar-width: 440;
-        sidebar-width-fraction: 0.38;
+          content: Gtk.ScrolledWindow {
+            hscrollbar-policy: never;
 
-        content: Gtk.ScrolledWindow {
-          hscrollbar-policy: never;
+            child: Adw.Clamp {
+              styles [
+                "bottom-room",
+              ]
 
-          child: Adw.Clamp {
-            styles [
-              "bottom-room",
-            ]
+              maximum-size: 1100;
+              margin-start: 24;
+              margin-end: 24;
+              margin-bottom: 24;
 
-            maximum-size: 1100;
-            margin-start: 24;
-            margin-end: 24;
-            margin-bottom: 24;
-
-            child: Gtk.Box {
-              orientation: vertical;
-              spacing: 24;
-
-              Gtk.Box {
+              child: Gtk.Box {
+                orientation: vertical;
                 spacing: 24;
-                // Clicking the portrait offers the image choices.
-                Gtk.MenuButton portrait_button {
-                  menu-model: image_menu;
-                  halign: start;
-                  valign: start;
-
-                  child: $GatefoldCoverImage portrait {
-                    min-size: 160;
-                    natural-size: 180;
-                    kind: "panel";
-                  };
-
-                  styles [
-                    "flat",
-                    "portrait-button",
-                  ]
-                }
 
                 Gtk.Box {
+                  spacing: 24;
+                  // Clicking the portrait offers the image choices.
+                  Gtk.MenuButton portrait_button {
+                    menu-model: image_menu;
+                    halign: start;
+                    valign: start;
+
+                    child: $GatefoldCoverImage portrait {
+                      min-size: 160;
+                      natural-size: 180;
+                      kind: "panel";
+                    };
+
+                    styles [
+                      "flat",
+                      "portrait-button",
+                    ]
+                  }
+
+                  Gtk.Box {
+                    orientation: vertical;
+                    valign: center;
+                    spacing: 6;
+                    hexpand: true;
+
+                    Gtk.Label name {
+                      wrap: true;
+                      wrap-mode: word_char;
+                      xalign: 0;
+
+                      styles [
+                        "title-1",
+                      ]
+                    }
+
+                    // A Latin spelling under a native-script name (lyrembed aliases).
+                    Gtk.Label latin_name {
+                      wrap: true;
+                      xalign: 0;
+                      visible: false;
+
+                      styles [
+                        "title-4",
+                        "dim-label",
+                      ]
+                    }
+
+                    Gtk.Label counts {
+                      xalign: 0;
+
+                      styles [
+                        "dim-label",
+                      ]
+                    }
+
+                    Adw.WrapBox actions {
+                      child-spacing: 6;
+                      line-spacing: 6;
+                      margin-top: 6;
+
+                      Gtk.Button {
+                        action-name: "artist.play";
+
+                        child: Adw.ButtonContent {
+                          icon-name: "media-playback-start-symbolic";
+                          label: _("_Play All");
+                          use-underline: true;
+                        };
+
+                        styles [
+                          "pill",
+                          "suggested-action",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        icon-name: "media-playlist-shuffle-symbolic";
+                        tooltip-text: _("Shuffle");
+                        action-name: "artist.shuffle";
+                        valign: center;
+
+                        styles [
+                          "circular",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        icon-name: "edit-find-symbolic";
+                        tooltip-text: _("Identify Artist…");
+                        action-name: "artist.identify";
+                        valign: center;
+
+                        styles [
+                          "circular",
+                          "flat",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        icon-name: "view-refresh-symbolic";
+                        tooltip-text: _("Look Up Again");
+                        action-name: "artist.lookup";
+                        valign: center;
+
+                        styles [
+                          "circular",
+                          "flat",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        icon-name: "document-edit-symbolic";
+                        tooltip-text: _("Edit Album Artist Tags…");
+                        action-name: "artist.edit-tags";
+                        valign: center;
+
+                        styles [
+                          "circular",
+                          "flat",
+                        ]
+                      }
+                    }
+
+                    Adw.WrapBox links {
+                      child-spacing: 6;
+                      line-spacing: 6;
+                      margin-top: 6;
+                      visible: false;
+                    }
+                  }
+                }
+
+                Gtk.Box bio_box {
                   orientation: vertical;
-                  valign: center;
-                  spacing: 6;
-                  hexpand: true;
+                  spacing: 3;
+                  visible: false;
 
-                  Gtk.Label name {
-                    wrap: true;
-                    wrap-mode: word_char;
-                    xalign: 0;
-
-                    styles [
-                      "title-1",
-                    ]
-                  }
-
-                  // A Latin spelling under a native-script name (lyrembed aliases).
-                  Gtk.Label latin_name {
+                  Gtk.Label bio {
                     wrap: true;
                     xalign: 0;
-                    visible: false;
+                    lines: 2;
+                    ellipsize: end;
+                    selectable: true;
+                  }
+
+                  Gtk.Button bio_toggle {
+                    label: _("More");
+                    halign: start;
 
                     styles [
-                      "title-4",
-                      "dim-label",
+                      "flat",
+                      "small",
                     ]
                   }
-
-                  Gtk.Label counts {
-                    xalign: 0;
-
-                    styles [
-                      "dim-label",
-                    ]
-                  }
-
-                  Adw.WrapBox actions {
-                    child-spacing: 6;
-                    line-spacing: 6;
-                    margin-top: 6;
-
-                    Gtk.Button {
-                      action-name: "artist.play";
-
-                      child: Adw.ButtonContent {
-                        icon-name: "media-playback-start-symbolic";
-                        label: _("_Play All");
-                        use-underline: true;
-                      };
-
-                      styles [
-                        "pill",
-                        "suggested-action",
-                      ]
-                    }
-
-                    Gtk.Button {
-                      icon-name: "media-playlist-shuffle-symbolic";
-                      tooltip-text: _("Shuffle");
-                      action-name: "artist.shuffle";
-                      valign: center;
-
-                      styles [
-                        "circular",
-                      ]
-                    }
-
-                    Gtk.Button {
-                      icon-name: "edit-find-symbolic";
-                      tooltip-text: _("Identify Artist…");
-                      action-name: "artist.identify";
-                      valign: center;
-
-                      styles [
-                        "circular",
-                        "flat",
-                      ]
-                    }
-
-                    Gtk.Button {
-                      icon-name: "view-refresh-symbolic";
-                      tooltip-text: _("Look Up Again");
-                      action-name: "artist.lookup";
-                      valign: center;
-
-                      styles [
-                        "circular",
-                        "flat",
-                      ]
-                    }
-
-                    Gtk.Button {
-                      icon-name: "document-edit-symbolic";
-                      tooltip-text: _("Edit Album Artist Tags…");
-                      action-name: "artist.edit-tags";
-                      valign: center;
-
-                      styles [
-                        "circular",
-                        "flat",
-                      ]
-                    }
-                  }
-
-                  Adw.WrapBox links {
-                    child-spacing: 6;
-                    line-spacing: 6;
-                    margin-top: 6;
-                    visible: false;
-                  }
-                }
-              }
-
-              Gtk.Box bio_box {
-                orientation: vertical;
-                spacing: 3;
-                visible: false;
-
-                Gtk.Label bio {
-                  wrap: true;
-                  xalign: 0;
-                  lines: 2;
-                  ellipsize: end;
-                  selectable: true;
                 }
 
-                Gtk.Button bio_toggle {
-                  label: _("More");
-                  halign: start;
-
-                  styles [
-                    "flat",
-                    "small",
-                  ]
+                Gtk.Box sections {
+                  orientation: vertical;
+                  spacing: 24;
                 }
-              }
-
-              Gtk.Box sections {
-                orientation: vertical;
-                spacing: 24;
-              }
+              };
             };
           };
-        };
 
-        sidebar: $GatefoldAlbumPanel album_panel {};
+          sidebar: $GatefoldAlbumPanel album_panel {};
+        };
       };
     };
 
     [overlay]
     Gtk.Button {
-      icon-name: "go-next-symbolic";
       tooltip-text: _("Close");
       action-name: "artist.close";
       halign: start;
       valign: center;
+
+      accessibility {
+        label: _("Close");
+      }
+
+      child: Gtk.Box {
+        halign: center;
+        valign: center;
+
+        styles [
+          "grip",
+        ]
+      };
 
       styles [
         "artist-close-handle",

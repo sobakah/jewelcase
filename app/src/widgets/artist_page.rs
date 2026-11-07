@@ -13,7 +13,7 @@ use gatefold_core::library::titles::ReleaseType;
 use gettextrs::{gettext, ngettext};
 use gtk::{gio, glib};
 
-use super::{AlbumPanel, AlbumTile, CoverImage};
+use super::{AlbumPanel, AlbumTile, CoverBackdrop, CoverImage};
 use crate::application::GatefoldApplication;
 use crate::objects::{AlbumObject, ArtistObject, TrackObject};
 use crate::{covers, format};
@@ -35,6 +35,8 @@ mod imp {
         pub portrait_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub portrait: TemplateChild<CoverImage>,
+        #[template_child]
+        pub backdrop: TemplateChild<CoverBackdrop>,
         #[template_child]
         pub name: TemplateChild<gtk::Label>,
         #[template_child]
@@ -79,6 +81,7 @@ mod imp {
         fn class_init(klass: &mut Self::Class) {
             AlbumPanel::ensure_type();
             CoverImage::ensure_type();
+            CoverBackdrop::ensure_type();
             klass.bind_template();
             klass.install_action("artist.close", None, |page, _, _| {
                 page.emit_by_name::<()>("close", &[]);
@@ -135,6 +138,7 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
+            self.backdrop.follow(&self.portrait);
             let obj = self.obj();
             self.portrait
                 .set_placeholder_icon("avatar-default-symbolic");

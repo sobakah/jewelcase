@@ -171,6 +171,7 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 ```
 
 - **Albums**: `GtkGridView` of covers. Each tile shows **only cover, album title and album artist** (one line each, ellipsized). There's no size slider: the cover size adapts to the window width, so the columns always fill the row. Sortable by artist, title, year or date added, with filters (release type, genre, soundtracks, compilations). Clicking a cover opens the **detail side panel** (`AdwOverlaySplitView`, sidebar on the end side). Nothing is pushed as a new page.
+- **Side panels** (album, playlist, artist page) borrow the player's look: the cover (the portrait on artist pages), blurred and tinted with its dominant color, behind the top of the panel, fading into the normal background before the songs.
 - **Album detail panel**: large cover, title, edition subtitle (§3.4, plus the list of owned versions when editions were merged), album artist(s) as links (→ artist page), year, length, actions (Play, Shuffle, Add to queue, Play next, Add to playlist). Below that is the tracklist, grouped by disc.
 - **Songs expand in place**: clicking a track row's chevron opens a `GtkRevealer` under the row with track artists/featuring, composer, genre, BPM, format/bitrate/sample rate, a lyrics-available indicator with a short excerpt, and actions (Play next, Add to queue, Add to playlist, Go to artist). Double-click or Enter plays the track.
 - **Narrow windows** (`AdwBreakpoint` < ~700 px): the side panel turns into an overlay sheet that covers the grid, and the mini bar stays visible.
@@ -204,7 +205,7 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 ```
 
 - Album tiles show **only cover and album title** (the artist is the page itself). Albums are grouped by release type (§3.4: `RELEASETYPE`, iTunes suffix, track count/length rule, soundtrack genre) and sorted by year.
-- The page covers three quarters of the window (all of it below 600 px), with the grid visible beside it. A tall arrow button on its left edge, halfway down, closes it; it slides back out to the right.
+- The page covers three quarters of the window (all of it below 600 px), with the grid visible beside it. A grip on its left edge, halfway down (the player's drag handle, upright), closes it; it slides back out to the right. It has no close button of its own.
 - Clicking an album opens the same side panel as in the library.
 - **"Appears on"** (decided: yes) is a collapsed `AdwExpanderRow`-style section listing tracks where the artist is only a track/featured artist on *other* album artists' albums. It only exists on pages of artists that have their own album-artist entry, and track artists never get a page of their own. Examples from the library:
   - YEONJUN's page lists his solo tracks from TOMORROW X TOGETHER albums.

@@ -31,6 +31,8 @@ mod imp {
         pub shrinkable: Cell<bool>,
         pub picture: gtk::Picture,
         pub placeholder: gtk::Image,
+        /// The cache key shown by `set_cover`.
+        pub key: RefCell<Option<String>>,
     }
 
     impl Default for CoverImage {
@@ -52,6 +54,7 @@ mod imp {
                     .css_classes(["cover", "cover-placeholder"])
                     .overflow(gtk::Overflow::Hidden)
                     .build(),
+                key: RefCell::default(),
             }
         }
     }
@@ -160,7 +163,20 @@ impl CoverImage {
             _ => CoverSize::Grid,
         };
         let texture = key.and_then(|key| covers::texture(key, size));
+        // Before the picture changes: the backdrop asks for it then.
+        imp.key
+            .replace(texture.as_ref().and(key).map(str::to_owned));
         self.set_texture(texture.as_ref());
+    }
+
+    /// The cache key of the cover shown (`None` for other images).
+    pub fn key(&self) -> Option<String> {
+        self.imp().key.borrow().clone()
+    }
+
+    /// The picture showing the cover (empty while the placeholder shows).
+    pub fn picture(&self) -> gtk::Picture {
+        self.imp().picture.clone()
     }
 
     /// Shows an image (e.g. an artist portrait), or the placeholder.

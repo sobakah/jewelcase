@@ -10,8 +10,8 @@ use gettextrs::{gettext, ngettext};
 use gtk::glib::subclass::Signal;
 use gtk::{gio, glib};
 
-use super::CoverImage;
 use super::playlist_picker::ask_name;
+use super::{CoverBackdrop, CoverImage};
 use crate::application::GatefoldApplication;
 use crate::format;
 use crate::objects::{PlaylistObject, TrackObject};
@@ -24,6 +24,8 @@ mod imp {
     pub struct PlaylistPanel {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
+        #[template_child]
+        pub backdrop: TemplateChild<CoverBackdrop>,
         #[template_child]
         pub name: TemplateChild<gtk::Label>,
         #[template_child]
@@ -71,6 +73,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             CoverImage::ensure_type();
+            CoverBackdrop::ensure_type();
             klass.bind_template();
             klass.install_action("playlist.close", None, |panel, _, _| {
                 panel.emit_by_name::<()>("close", &[]);
@@ -162,6 +165,7 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
+            self.backdrop.follow(&self.cover);
             let obj = self.obj();
             self.items.connect_row_activated(glib::clone!(
                 #[weak]
