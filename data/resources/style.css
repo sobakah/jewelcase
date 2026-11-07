@@ -19,10 +19,30 @@
   padding: 12px;
 }
 
-.album-grid > child,
 .playlist-flow > flowboxchild {
   padding: 9px;
   border-radius: 15px;
+}
+
+/* The album and artist grids are rows of tile buttons (sectioned_grid.rs),
+   with Spotify's section at the end (§9.8). */
+.sectioned-grid > row {
+  padding: 0;
+  background: none;
+}
+
+.grid-tile {
+  padding: 9px;
+  border-radius: 15px;
+  font-weight: normal;
+}
+
+.artist-grid .grid-tile {
+  padding: 12px;
+}
+
+.grid-section-header {
+  margin: 18px 0 6px 0;
 }
 
 .album-tile .album-title {
@@ -90,11 +110,6 @@
 /* Artist grid and pages (CONCEPT.md §4.1, §4.2). */
 .artist-grid {
   padding: 12px;
-}
-
-.artist-grid > child {
-  padding: 12px;
-  border-radius: 15px;
 }
 
 .artist-tile .artist-name {
@@ -280,22 +295,4 @@ button.smart-shuffle {
 
 .player-subtitle > link:hover {
   text-decoration-line: underline;
-}
-
-/* Spotify's albums and artists, above the library grids (§9.8). */
-.spotify-shelf {
-  margin: 6px 9px 0 9px;
-}
-
-.spotify-shelf .shelf-row {
-  padding: 0 9px 12px 9px;
-}
-
-.shelf-tile {
-  padding: 0;
-  border-radius: 12px;
-}
-
-.shelf-tile {
-  font-weight: normal;
 }

@@ -69,9 +69,9 @@ The account needs Spotify Premium. The login is stored in the keyring. Then:
 - **Spotify playlists** appear next to local ones; entries that are in your library play from
   your files (ISRC, then title, artist and length). Your own playlists can be edited here
   and the changes are sent to Spotify; *Create on Spotify* publishes a local playlist.
-- **Saved albums and followed artists** that aren't in your library show on shelves above the
-  album and artist grids (collapsed by default); artist pages list their releases on Spotify
-  you don't have. Their songs play from your library when you have them, else they stream.
+- **Saved albums and followed artists** that aren't in your library show in their own section
+  at the end of the album and artist grids (collapsed by default); artist pages list their
+  releases on Spotify you don't have. Their songs play from your library when you have them, else they stream.
 
 **Streaming** (optional): Preferences → Spotify → Streaming plays songs that aren't in your
 library, in Gatefold's queue. Your own files always play from the library.

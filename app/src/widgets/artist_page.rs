@@ -512,8 +512,10 @@ impl ArtistPage {
         while let Some(child) = imp.links.first_child() {
             imp.links.remove(&child);
         }
+        // Like a library artist's links.
         let button = gtk::Button::builder()
-            .label(gettext("Open in Spotify"))
+            .label(gettext("Spotify"))
+            .tooltip_text(gettext("Open in Spotify"))
             .css_classes(["pill", "small"])
             .build();
         button.connect_clicked(move |_| crate::spotify::open_on_spotify("artist", &id));

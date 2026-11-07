@@ -185,12 +185,12 @@
     <key name="show-spotify-albums" type="b">
       <default>false</default>
       <summary>Show saved Spotify albums</summary>
-      <description>Albums saved on Spotify that aren’t in the library; a shelf above the album grid.</description>
+      <description>Albums saved on Spotify that aren’t in the library; a section at the end of the album grid.</description>
     </key>
     <key name="show-spotify-artists" type="b">
       <default>false</default>
       <summary>Show followed Spotify artists</summary>
-      <description>Artists followed on Spotify that aren’t in the library; a shelf above the artist grid.</description>
+      <description>Artists followed on Spotify that aren’t in the library; a section at the end of the artist grid.</description>
     </key>
     <key name="show-followed-playlists" type="b">
       <default>false</default>

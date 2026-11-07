@@ -50,7 +50,7 @@ mod imp {
         #[template_child]
         pub split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
-        pub album_grid: TemplateChild<gtk::GridView>,
+        pub album_grid: TemplateChild<crate::widgets::SectionedGrid>,
         #[template_child]
         pub album_panel: TemplateChild<AlbumPanel>,
         #[template_child]
@@ -68,7 +68,7 @@ mod imp {
         #[template_child]
         pub artists_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub artist_grid: TemplateChild<gtk::GridView>,
+        pub artist_grid: TemplateChild<crate::widgets::SectionedGrid>,
         #[template_child]
         pub library_overlay: TemplateChild<gtk::Overlay>,
         #[template_child]
@@ -77,10 +77,6 @@ mod imp {
         pub search_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub search_view: TemplateChild<SearchView>,
-        #[template_child]
-        pub album_shelf: TemplateChild<crate::widgets::SpotifyShelf>,
-        #[template_child]
-        pub artist_shelf: TemplateChild<crate::widgets::SpotifyShelf>,
         #[template_child]
         pub playlist_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
@@ -119,7 +115,7 @@ mod imp {
             AlbumPanel::ensure_type();
             PlaylistPanel::ensure_type();
             SearchView::ensure_type();
-            crate::widgets::SpotifyShelf::ensure_type();
+            crate::widgets::SectionedGrid::ensure_type();
             klass.bind_template();
 
             klass.install_action("win.open-player", None, |win, _, _| {
@@ -399,38 +395,31 @@ impl GatefoldWindow {
         ));
         let filtered = gtk::FilterListModel::new(Some(sorted), Some(filter.clone()));
         let _ = imp.genre_filter_model.set(filter);
-        imp.album_grid
-            .set_model(Some(&gtk::NoSelection::new(Some(filtered))));
         self.setup_genre_menu();
-
-        let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            item.set_child(Some(&AlbumTile::new()));
-        });
-        factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            if let (Some(tile), Some(album)) = (
-                item.child().and_downcast::<AlbumTile>(),
-                item.item().and_downcast::<AlbumObject>(),
-            ) {
-                tile.bind(&album);
-                item.set_accessible_label(&album.album().title);
-            }
-        });
-        imp.album_grid.set_factory(Some(&factory));
-        imp.album_grid.connect_activate(|grid, position| {
-            let Some(album) = grid
-                .model()
-                .and_then(|m| m.item(position))
-                .and_downcast::<AlbumObject>()
-            else {
-                return;
-            };
-            if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
-                window.show_album(&album);
-            }
-        });
+        imp.album_grid.setup(
+            &filtered,
+            // A tile's smallest width (120) and its padding.
+            138,
+            "album-grid",
+            || AlbumTile::new().upcast(),
+            |tile, item| {
+                if let (Some(tile), Some(album)) = (
+                    tile.downcast_ref::<AlbumTile>(),
+                    item.downcast_ref::<AlbumObject>(),
+                ) {
+                    tile.bind(album);
+                }
+            },
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |item| {
+                    if let Some(album) = item.downcast_ref::<AlbumObject>() {
+                        window.show_album(album);
+                    }
+                }
+            ),
+        );
 
         imp.album_panel.connect_local(
             "close",
@@ -507,40 +496,32 @@ impl GatefoldWindow {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
 
-        imp.artist_grid.set_model(Some(&gtk::NoSelection::new(Some(
-            library.artists().clone(),
-        ))));
-
-        let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            item.set_child(Some(&ArtistTile::new()));
-        });
-        factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            if let (Some(tile), Some(artist)) = (
-                item.child().and_downcast::<ArtistTile>(),
-                item.item().and_downcast::<ArtistObject>(),
-            ) {
-                tile.bind(&artist);
-                item.set_accessible_label(&artist.artist().name);
-                // Lookups run lazily, for artists that are shown (§8).
-                GatefoldApplication::get().library().request_lookup(&artist);
-            }
-        });
-        imp.artist_grid.set_factory(Some(&factory));
-        imp.artist_grid.connect_activate(|grid, position| {
-            let Some(artist) = grid
-                .model()
-                .and_then(|m| m.item(position))
-                .and_downcast::<ArtistObject>()
-            else {
-                return;
-            };
-            if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
-                window.show_artist(artist.id());
-            }
-        });
+        imp.artist_grid.setup(
+            library.artists(),
+            // A tile's smallest width (120) and its padding.
+            144,
+            "artist-grid",
+            || ArtistTile::new().upcast(),
+            |tile, item| {
+                if let (Some(tile), Some(artist)) = (
+                    tile.downcast_ref::<ArtistTile>(),
+                    item.downcast_ref::<ArtistObject>(),
+                ) {
+                    tile.bind(artist);
+                    // Lookups run lazily, for artists that are shown (§8).
+                    GatefoldApplication::get().library().request_lookup(artist);
+                }
+            },
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |item| {
+                    if let Some(artist) = item.downcast_ref::<ArtistObject>() {
+                        window.show_artist(artist.id());
+                    }
+                }
+            ),
+        );
 
         library.artists().connect_items_changed(glib::clone!(
             #[weak(rename_to = window)]
@@ -740,11 +721,11 @@ impl GatefoldWindow {
     fn setup_spotify_shelves(&self) {
         let imp = self.imp();
         // Translators: {} is a number of albums.
-        imp.album_shelf
-            .setup(&gettext("Saved on Spotify ({})"), "show-spotify-albums");
+        imp.album_grid
+            .setup_spotify(&gettext("Saved on Spotify ({})"), "show-spotify-albums");
         // Translators: {} is a number of artists.
-        imp.artist_shelf
-            .setup(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
+        imp.artist_grid
+            .setup_spotify(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
         let app = GatefoldApplication::get();
         let spotify = app.spotify();
         spotify.connect_local(
@@ -790,10 +771,8 @@ impl GatefoldWindow {
         let spotify = app.spotify();
         let library = app.library();
         if !spotify.is_connected() {
-            imp.album_shelf.set_items(Vec::new(), |_| {});
-            imp.album_shelf.set_needs_permission(false);
-            imp.artist_shelf.set_items(Vec::new(), |_| {});
-            imp.artist_shelf.set_needs_permission(false);
+            imp.album_grid.set_spotify(Vec::new(), false, |_| {});
+            imp.artist_grid.set_spotify(Vec::new(), false, |_| {});
             return;
         }
         let needs = spotify.needs_library_permission();
@@ -811,8 +790,9 @@ impl GatefoldWindow {
                 artist: false,
             })
             .collect();
-        imp.album_shelf.set_items(
+        imp.album_grid.set_spotify(
             items,
+            needs,
             glib::clone!(
                 #[weak(rename_to = window)]
                 self,
@@ -823,7 +803,6 @@ impl GatefoldWindow {
                 }
             ),
         );
-        imp.album_shelf.set_needs_permission(needs);
         // Followed artists the library doesn't have (by Spotify ID from the
         // online lookup, or by name).
         let local = library.artists();
@@ -853,8 +832,9 @@ impl GatefoldWindow {
                 artist: true,
             })
             .collect();
-        imp.artist_shelf.set_items(
+        imp.artist_grid.set_spotify(
             items,
+            needs,
             glib::clone!(
                 #[weak(rename_to = window)]
                 self,
@@ -865,7 +845,6 @@ impl GatefoldWindow {
                 }
             ),
         );
-        imp.artist_shelf.set_needs_permission(needs);
     }
 
     /// A Spotify album in the album panel (§9.8).
@@ -1540,7 +1519,7 @@ impl GatefoldWindow {
             let album = std::env::var("GATEFOLD_SCREENSHOT_ALBUM")
                 .ok()
                 .and_then(|wanted| {
-                    let model = window.imp().album_grid.model()?;
+                    let model = window.imp().album_grid.local_model()?;
                     (0..model.n_items())
                         .filter_map(|i| model.item(i).and_downcast::<AlbumObject>())
                         .enumerate()
@@ -1720,6 +1699,30 @@ impl GatefoldWindow {
                     {
                         let spotify = spotify.clone();
                         glib::spawn_future_local(async move { spotify.publish(id, &panel).await });
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_CLICK_TILE=1`: the first tile of the grids
+            // clicked 9 s in.
+            if std::env::var_os("GATEFOLD_SCREENSHOT_CLICK_TILE").is_some() {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(9, move || {
+                    if let Some(window) = window.upgrade() {
+                        match window.imp().stack.visible_child_name().as_deref() {
+                            Some("artists") => window.imp().artist_grid.click_first_tile(),
+                            _ => window.imp().album_grid.click_first_tile(),
+                        }
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_SCROLL_END=1`: the grids scrolled to their
+            // end 9 s in (Spotify's section).
+            if std::env::var_os("GATEFOLD_SCREENSHOT_SCROLL_END").is_some() {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(9, move || {
+                    if let Some(window) = window.upgrade() {
+                        window.imp().album_grid.scroll_to_end();
+                        window.imp().artist_grid.scroll_to_end();
                     }
                 });
             }
