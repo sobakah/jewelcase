@@ -687,8 +687,12 @@ impl Database {
         Ok(self
             .conn
             .query_row(
-                "SELECT uri, title, artist, album, duration_ms, isrc, image_url
-                 FROM stream_track WHERE id = ?1",
+                // The image may only be known from a playlist entry read
+                // later.
+                "SELECT st.uri, st.title, st.artist, st.album, st.duration_ms, st.isrc,
+                   COALESCE(st.image_url, (SELECT i.image_url FROM playlist_item i
+                   WHERE i.spotify_uri = st.uri AND i.image_url IS NOT NULL LIMIT 1))
+                 FROM stream_track st WHERE st.id = ?1",
                 [-id],
                 |row| {
                     let artist: Option<String> = row.get(2)?;
@@ -738,11 +742,13 @@ impl Database {
     /// key: `cover_key('s', url)`).
     pub fn stream_covers(&self, ids: &[i64]) -> Result<Vec<(i64, String)>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT image_url FROM stream_track WHERE id = ?1 AND image_url IS NOT NULL",
+            "SELECT COALESCE(st.image_url, (SELECT i.image_url FROM playlist_item i
+                   WHERE i.spotify_uri = st.uri AND i.image_url IS NOT NULL LIMIT 1)) FROM stream_track st WHERE st.id = ?1",
         )?;
         let mut missing = Vec::new();
         for id in ids.iter().filter(|id| **id < 0) {
-            if let Some(url) = stmt.query_row([-id], |row| row.get(0)).optional()? {
+            let url: Option<Option<String>> = stmt.query_row([-id], |row| row.get(0)).optional()?;
+            if let Some(Some(url)) = url {
                 missing.push((*id, url));
             }
         }
@@ -1066,6 +1072,24 @@ mod tests {
         assert_eq!(
             track.record.cover_key,
             Some(crate::library::covers::cover_key('s', b"https://i/x"))
+        );
+        // An image known only from a playlist entry counts too.
+        let mut late = info.clone();
+        late.uri = "spotify:track:late".into();
+        late.image_url = None;
+        let late_id = db.stream_track_id(&late).unwrap();
+        assert!(db.stream_covers(&[late_id]).unwrap().is_empty());
+        let playlist = db.create_playlist("P", 1).unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO playlist_item (playlist_id, position, spotify_uri, match_state, image_url)
+                 VALUES (?1, 0, 'spotify:track:late', 'spotify_only', 'https://i/late')",
+                [playlist],
+            )
+            .unwrap();
+        assert_eq!(
+            db.stream_covers(&[late_id]).unwrap(),
+            [(late_id, "https://i/late".into())]
         );
         // Not kept in the history.
         db.add_history(id, 1).unwrap();

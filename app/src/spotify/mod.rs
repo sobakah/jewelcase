@@ -29,7 +29,7 @@ use crate::application::GatefoldApplication;
 use crate::config::APP_ID;
 
 pub use remote::RemoteCommand;
-pub use stream::StreamNote;
+pub use stream::{StreamNote, fetch_covers, image_cover_key};
 pub use sync::{Op, parse_suggestion};
 
 /// How long the browser has to come back.

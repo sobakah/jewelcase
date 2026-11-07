@@ -45,39 +45,57 @@ impl Spotify {
     /// background (their cache keys are known in advance).
     pub fn fetch_stream_covers(&self, ids: Vec<i64>) {
         let library = GatefoldApplication::get().library();
-        let wanted = library
+        let wanted: Vec<String> = library
             .db()
             .and_then(|db| db.stream_covers(&ids).ok())
-            .unwrap_or_default();
-        if wanted.is_empty() {
-            return;
-        }
-        gtk::glib::spawn_future_local(async move {
-            let made = gtk::gio::spawn_blocking(move || {
-                let covers =
-                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
-                let mut made = 0;
-                for (_, url) in wanted {
-                    let key = gatefold_core::library::covers::cover_key('s', url.as_bytes());
-                    if covers.has(&key) {
-                        continue;
-                    }
-                    match gatefold_spotify::download_image(&url) {
-                        Ok(data) => made += usize::from(covers.generate(&key, data).is_ok()),
-                        Err(err) => tracing::info!("Cannot load a cover: {err}"),
-                    }
-                }
-                made
-            })
-            .await
-            .unwrap_or(0);
-            // Shown before they arrived: show them now.
-            if made > 0 {
-                GatefoldApplication::get().player().covers_arrived();
-            }
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, url)| url)
+            .collect();
+        fetch_covers(wanted, || {
+            GatefoldApplication::get().player().covers_arrived()
         });
     }
+}
 
+/// The cache key of a Spotify image's cover.
+pub fn image_cover_key(url: &str) -> String {
+    gatefold_core::library::covers::cover_key('s', url.as_bytes())
+}
+
+/// Downloads Spotify images into the cover cache (skipping cached ones);
+/// `done` runs on the main thread when any arrived.
+pub fn fetch_covers(urls: Vec<String>, done: impl FnOnce() + 'static) {
+    if urls.is_empty() {
+        return;
+    }
+    gtk::glib::spawn_future_local(async move {
+        let made = gtk::gio::spawn_blocking(move || {
+            let covers =
+                gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+            let mut made = 0;
+            for url in urls {
+                let key = image_cover_key(&url);
+                if covers.has(&key) {
+                    continue;
+                }
+                match gatefold_spotify::download_image(&url) {
+                    Ok(data) => made += usize::from(covers.generate(&key, data).is_ok()),
+                    Err(err) => tracing::info!("Cannot load a cover: {err}"),
+                }
+            }
+            made
+        })
+        .await
+        .unwrap_or(0);
+        // Shown before they arrived: show them now.
+        if made > 0 {
+            done();
+        }
+    });
+}
+
+impl Spotify {
     fn set_stream_status(&self, status: &str) {
         if *self.imp().stream_status.borrow() != status {
             self.imp().stream_status.replace(status.to_owned());

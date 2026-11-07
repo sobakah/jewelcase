@@ -195,11 +195,33 @@ impl PlaylistPanel {
             GatefoldApplication::get()
                 .spotify()
                 .refresh_playlist(playlist.id());
+            self.fetch_spotify_covers();
         }
         // A new, empty playlist: go straight to finding songs.
         if changed && playlist.playlist().item_count == 0 && playlist.playlist().editable {
             imp.add_search.grab_focus();
         }
+    }
+
+    /// Covers of the Spotify-only songs, in the background; the rows show
+    /// them once they're here.
+    fn fetch_spotify_covers(&self) {
+        let urls: Vec<String> = self
+            .imp()
+            .entries
+            .borrow()
+            .iter()
+            .filter(|e| e.track.is_none())
+            .filter_map(|e| e.image_url.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let panel = self.downgrade();
+        crate::spotify::fetch_covers(urls, move || {
+            if let Some(panel) = panel.upgrade() {
+                panel.refresh();
+            }
+        });
     }
 
     fn spotify_id(&self) -> Option<String> {
@@ -366,7 +388,18 @@ impl PlaylistPanel {
             .property("min-size", 40)
             .property("natural-size", 40)
             .build();
-        cover.set_cover(track.as_ref().and_then(|t| t.cover_key()));
+        // Spotify-only songs: Spotify's cover, once downloaded.
+        let spotify_cover = entry
+            .image_url
+            .as_deref()
+            .map(crate::spotify::image_cover_key);
+        cover.set_cover(
+            track
+                .as_ref()
+                .and_then(|t| t.cover_key().map(str::to_owned))
+                .or(spotify_cover)
+                .as_deref(),
+        );
         let title = track
             .as_ref()
             .map(TrackObject::title)

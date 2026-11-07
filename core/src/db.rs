@@ -165,6 +165,8 @@ pub struct PlaylistItem {
     pub suggested_track: Option<Track>,
     /// The Spotify track (JSON) that is probably this library song.
     pub suggested_spotify: Option<String>,
+    /// The Spotify album image, for entries not in the library.
+    pub image_url: Option<String>,
 }
 
 /// What a search found, best first per kind.
@@ -672,7 +674,7 @@ impl Database {
     pub fn playlist_items(&self, id: i64) -> Result<Vec<PlaylistItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, position, local_track_id, title, artist, album, duration_ms, match_state,
-                    spotify_uri, suggested_track_id, suggested_spotify
+                    spotify_uri, suggested_track_id, suggested_spotify, image_url
              FROM playlist_item WHERE playlist_id = ?1 ORDER BY position",
         )?;
         let rows: Vec<(PlaylistItem, Option<i64>, Option<i64>)> = stmt
@@ -690,6 +692,7 @@ impl Database {
                         spotify_uri: row.get(8)?,
                         suggested_track: None,
                         suggested_spotify: row.get(10)?,
+                        image_url: row.get(11)?,
                     },
                     row.get(2)?,
                     row.get(9)?,
