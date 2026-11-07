@@ -84,7 +84,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
       Adw.ComboRow replaygain_row {
         title: _("_ReplayGain");
-        subtitle: _("Evens out loudness using the volume tags in your files");
+        subtitle: _("Evens out loudness using the volume tags in your files; Off plays them as they are");
         use-underline: true;
 
         model: Gtk.StringList {
@@ -94,6 +94,20 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
             _("Track"),
             _("Album"),
           ]
+        };
+      }
+
+      Adw.SpinRow preamp_row {
+        title: _("_Pre-Amp");
+        subtitle: _("In dB on top of ReplayGain’s standard level; +4 is about as loud as Spotify and most players");
+        use-underline: true;
+        digits: 1;
+
+        adjustment: Gtk.Adjustment {
+          lower: -15;
+          upper: 15;
+          step-increment: 0.5;
+          page-increment: 3;
         };
       }
     }

@@ -30,6 +30,8 @@ mod imp {
         #[template_child]
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub preamp_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
@@ -158,6 +160,15 @@ mod imp {
                     let index = value.get::<u32>().ok()? as usize;
                     REPLAYGAIN_MODES.get(index).map(|m| m.to_variant())
                 })
+                .build();
+            settings
+                .bind("replaygain-preamp", &*self.preamp_row, "value")
+                .build();
+            // No pre-amp without ReplayGain.
+            self.replaygain_row
+                .bind_property("selected", &*self.preamp_row, "sensitive")
+                .transform_to(|_, selected: u32| Some(selected != 0))
+                .sync_create()
                 .build();
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();

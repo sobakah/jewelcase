@@ -155,14 +155,16 @@ impl Player {
         imp.library.set(library.clone()).expect("set once");
 
         let settings = gio::Settings::new(APP_ID);
-        settings.connect_changed(
-            Some("replaygain"),
-            glib::clone!(
-                #[weak]
-                player,
-                move |_, _| player.apply_replaygain()
-            ),
-        );
+        for key in ["replaygain", "replaygain-preamp"] {
+            settings.connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak]
+                    player,
+                    move |_, _| player.apply_replaygain()
+                ),
+            );
+        }
         // Songs ↔ albums while shuffled: shuffle again the new way.
         settings.connect_changed(
             Some("shuffle-albums"),
@@ -1270,6 +1272,7 @@ impl Player {
         let Some(engine) = self.engine() else { return };
         let mode = self.settings().string("replaygain");
         engine.set_replaygain(mode != "off");
+        engine.set_preamp(self.settings().double("replaygain-preamp"));
         let album = match mode.as_str() {
             "album" => true,
             "track" => false,
