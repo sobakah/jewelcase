@@ -100,6 +100,8 @@ mod imp {
         /// The album genre shown, or all (None).
         pub genre_filter: RefCell<Option<String>>,
         pub genre_filter_model: OnceCell<gtk::CustomFilter>,
+        /// "Stop and Quit" was chosen while a tool ran: close once it ended.
+        pub closing_after_tool: std::cell::Cell<bool>,
         pub genre_menu: gio::Menu,
     }
 
@@ -1194,6 +1196,61 @@ impl GatefoldWindow {
             ),
         );
         self.update_tool_banners(&tools);
+        // A CD import or lyrembed page needs Gatefold while it runs (its
+        // output comes through Gatefold): closing asks first, then stops it
+        // cleanly and closes when it's done.
+        self.connect_close_request(|window| {
+            let tools = GatefoldApplication::get().tools();
+            if !tools.page_running() || window.imp().closing_after_tool.get() {
+                return glib::Propagation::Proceed;
+            }
+            window.ask_stop_tool();
+            glib::Propagation::Stop
+        });
+    }
+
+    fn ask_stop_tool(&self) {
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("A Tool Is Still Running")),
+            Some(&gettext(
+                "Closing Gatefold stops it. A CD import stops cleanly and can be continued later.",
+            )),
+        );
+        dialog.add_responses(&[
+            ("keep", &gettext("_Keep Running")),
+            ("stop", &gettext("_Stop and Quit")),
+        ]);
+        dialog.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("keep"));
+        dialog.set_close_response("keep");
+        dialog.connect_response(
+            Some("stop"),
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |_, _| window.close_after_tool()
+            ),
+        );
+        dialog.present(Some(self));
+    }
+
+    fn close_after_tool(&self) {
+        self.imp().closing_after_tool.set(true);
+        let tools = GatefoldApplication::get().tools();
+        tools.stop_page();
+        let close = glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move || window.close()
+        );
+        let when_done = close.clone();
+        tools.connect_page_status_notify(move |tools| {
+            if !tools.page_running() {
+                when_done();
+            }
+        });
+        // Should it hang, Gatefold still closes.
+        glib::timeout_add_seconds_local_once(30, close);
     }
 
     fn update_tool_banners(&self, tools: &crate::tools::Tools) {

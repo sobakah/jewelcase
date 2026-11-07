@@ -339,14 +339,15 @@ impl Tools {
         });
     }
 
-    /// Stops the tool with a page (SIGINT; forced if it doesn't stop).
+    /// Stops the tool with a page: SIGINT, never SIGKILL (§10.0), so
+    /// cdimport can finish cyanrip's log and remember where it was.
     pub fn stop_page(&self) {
         let Some(process) = self.imp().page_process.borrow().clone() else {
             return;
         };
         process.send_signal(SIGINT);
         glib::timeout_add_seconds_local_once(
-            3,
+            10,
             glib::clone!(
                 #[weak(rename_to = tools)]
                 self,
@@ -358,12 +359,17 @@ impl Tools {
                         .as_ref()
                         .is_some_and(|p| p == &process);
                     if still_running {
-                        tracing::info!("The tool page didn't stop; ending it");
-                        process.force_exit();
+                        tracing::info!("The tool page is still finishing");
+                        tools.message(&gettext("The tool is still finishing; it stops by itself"));
                     }
                 }
             ),
         );
+    }
+
+    /// A tool with a page runs (a CD import, lyrembed's page).
+    pub fn page_running(&self) -> bool {
+        self.imp().page_process.borrow().is_some()
     }
 
     // lyrembed (§10.1) -------------------------------------------------------
