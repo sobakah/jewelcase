@@ -35,8 +35,21 @@ pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;
 pub use sectioned_grid::SectionedGrid;
-pub use spotify_tile::{ShelfItem, sized_tile, tile_content};
+pub use spotify_tile::{ShelfItem, tile_content};
 pub use track_row::TrackRow;
+
+/// Disconnects a handler `owner` put on a long-lived `source` (the
+/// library, player, settings) once `owner` is gone, so pages and dialogs
+/// opened again and again don't leave handlers running for nothing.
+pub fn disconnect_with(
+    owner: &impl gtk::glib::object::IsA<gtk::glib::Object>,
+    source: &impl gtk::glib::object::IsA<gtk::glib::Object>,
+    id: gtk::glib::SignalHandlerId,
+) {
+    use gtk::glib::prelude::*;
+    let source = source.clone().upcast::<gtk::glib::Object>();
+    let _ = owner.add_weak_ref_notify_local(move || source.disconnect(id));
+}
 
 /// A song title, with the Spotify icon before it for songs that play from
 /// Spotify (§9.4).

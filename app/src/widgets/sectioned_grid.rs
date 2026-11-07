@@ -25,11 +25,12 @@ const MIN_COLUMNS: i32 = 2;
 const MAX_COLUMNS: i32 = 12;
 
 /// One line of the list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Row {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Row {
     /// Library items `start..start + len`.
     Local { start: u32, len: u32 },
     /// "Saved on Spotify (N)", which opens and closes the section.
+    #[default]
     Header,
     /// Spotify items `start..start + len`.
     Spotify { start: u32, len: u32 },
@@ -64,6 +65,14 @@ mod imp {
         pub key: OnceCell<String>,
         /// "Saved on Spotify ({})".
         pub title: OnceCell<String>,
+        /// The rows in the list now, so a rebuild only replaces what
+        /// changed (rows that stay keep their widgets, and focus).
+        pub shown: RefCell<Vec<Row>>,
+        /// The items changed: their rows show other items now.
+        pub local_dirty: Cell<bool>,
+        pub spotify_dirty: Cell<bool>,
+        /// The row showing the Spotify header, to update it in place.
+        pub header_row: glib::WeakRef<GridRow>,
     }
 
     #[glib::object_subclass]
@@ -167,7 +176,10 @@ impl SectionedGrid {
         model.connect_items_changed(glib::clone!(
             #[weak(rename_to = grid)]
             self,
-            move |_, _, _, _| grid.rebuild_soon()
+            move |_, _, _, _| {
+                grid.imp().local_dirty.set(true);
+                grid.rebuild_soon();
+            }
         ));
         imp.local.replace(Some(model));
         self.rebuild_soon();
@@ -231,6 +243,7 @@ impl SectionedGrid {
     ) {
         let imp = self.imp();
         imp.spotify.replace(Rc::new(items));
+        imp.spotify_dirty.set(true);
         imp.needs_permission.set(needs_permission);
         imp.spotify_activate.replace(Some(Rc::new(activate)));
         self.rebuild_soon();
@@ -282,10 +295,33 @@ impl SectionedGrid {
                 rows.extend(chunks(spotify, &|start, len| Row::Spotify { start, len }));
             }
         }
-        let objects: Vec<glib::BoxedAnyObject> =
-            rows.into_iter().map(glib::BoxedAnyObject::new).collect();
+        // Only what changed: rows that stay keep their widgets (no new
+        // textures, focus kept); changed items change every row after them.
+        let old = imp.shown.replace(rows.clone());
+        let (local_dirty, spotify_dirty) = (
+            imp.local_dirty.replace(false),
+            imp.spotify_dirty.replace(false),
+        );
+        let keep = old
+            .iter()
+            .zip(&rows)
+            .take_while(|(a, b)| {
+                a == b
+                    && !(local_dirty && matches!(a, Row::Local { .. }))
+                    && !(spotify_dirty && matches!(a, Row::Spotify { .. }))
+            })
+            .count();
+        let objects: Vec<glib::BoxedAnyObject> = rows[keep..]
+            .iter()
+            .copied()
+            .map(glib::BoxedAnyObject::new)
+            .collect();
         if let Some(store) = imp.rows.get() {
-            store.splice(0, store.n_items(), &objects);
+            store.splice(keep as u32, store.n_items() - keep as u32, &objects);
+        }
+        // A header that stayed shows the new count and state.
+        if let Some(row) = imp.header_row.upgrade() {
+            self.update_header(&row);
         }
     }
 
@@ -293,7 +329,11 @@ impl SectionedGrid {
         let imp = self.imp();
         let columns = imp.columns.get() as usize;
         match row {
-            Row::Header => widget.show_header(self.header()),
+            Row::Header => {
+                widget.ensure_header(self);
+                imp.header_row.set(Some(widget));
+                self.update_header(widget);
+            }
             Row::Local { start, len } => {
                 let Some(model) = imp.local.borrow().clone() else {
                     return;
@@ -317,73 +357,39 @@ impl SectionedGrid {
         }
     }
 
-    /// The Spotify section's header: the open/close toggle, and when the
-    /// login lacks the permission, a way to connect again.
-    fn header(&self) -> gtk::Widget {
+    fn toggle_spotify(&self) {
+        let imp = self.imp();
+        if let (Some(settings), Some(key)) = (imp.settings.get(), imp.key.get()) {
+            let _ = settings.set_boolean(key, !settings.boolean(key));
+        }
+    }
+
+    /// The header's count, open/closed state (shown and told to screen
+    /// readers) and the "connect again" note.
+    fn update_header(&self, row: &GridRow) {
         let imp = self.imp();
         let open = self.spotify_open();
         let count = imp.spotify.borrow().len();
-        let header = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(6)
-            .css_classes(["grid-section-header"])
-            .build();
-        let content = adw::ButtonContent::builder()
-            .label(
-                imp.title
+        let row_imp = row.imp();
+        if let Some(content) = row_imp.header_content.borrow().as_ref() {
+            content.set_label(
+                &imp.title
                     .get()
                     .map(|t| t.replace("{}", &count.to_string()))
                     .unwrap_or_default(),
-            )
-            .icon_name(if open {
+            );
+            content.set_icon_name(if open {
                 "pan-down-symbolic"
             } else {
                 "pan-end-symbolic"
-            })
-            .build();
-        let toggle = gtk::Button::builder()
-            .child(&content)
-            .halign(gtk::Align::Start)
-            .css_classes(["flat", "heading"])
-            .build();
-        toggle.connect_clicked(glib::clone!(
-            #[weak(rename_to = grid)]
-            self,
-            move |_| {
-                let imp = grid.imp();
-                if let (Some(settings), Some(key)) = (imp.settings.get(), imp.key.get()) {
-                    let _ = settings.set_boolean(key, !settings.boolean(key));
-                }
-            }
-        ));
-        header.append(&toggle);
-        if imp.needs_permission.get() && open {
-            let permission = gtk::Box::builder().spacing(12).margin_start(12).build();
-            permission.append(
-                &gtk::Label::builder()
-                    .label(gettext(
-                        "Connect to Spotify again to allow Gatefold to read your saved albums and followed artists.",
-                    ))
-                    .wrap(true)
-                    .xalign(0.0)
-                    .hexpand(true)
-                    .css_classes(["dim-label"])
-                    .build(),
-            );
-            let button = gtk::Button::builder()
-                .label(gettext("_Connect Again"))
-                .use_underline(true)
-                .valign(gtk::Align::Center)
-                .css_classes(["pill"])
-                .build();
-            button.connect_clicked(|_| {
-                let spotify = GatefoldApplication::get().spotify();
-                glib::spawn_future_local(async move { spotify.connect().await });
             });
-            permission.append(&button);
-            header.append(&permission);
         }
-        header.upcast()
+        if let Some(toggle) = row_imp.header_toggle.borrow().as_ref() {
+            toggle.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
+        }
+        if let Some(permission) = row_imp.header_permission.borrow().as_ref() {
+            permission.set_visible(imp.needs_permission.get() && open);
+        }
     }
 }
 
@@ -413,8 +419,11 @@ mod row_imp {
         pub kind: Cell<RowKind>,
         /// Each tile is a button around the tile widget.
         pub slots: RefCell<Vec<gtk::Button>>,
-        /// The header, in a header row.
+        /// The header, in a header row, and its parts that change.
         pub header: RefCell<Option<gtk::Widget>>,
+        pub header_toggle: RefCell<Option<gtk::Button>>,
+        pub header_content: RefCell<Option<adw::ButtonContent>>,
+        pub header_permission: RefCell<Option<gtk::Box>>,
         /// What each library tile shows, for its click.
         pub items: RefCell<Vec<Option<glib::Object>>>,
         pub activate: RefCell<Option<Activate>>,
@@ -520,6 +529,9 @@ impl GridRow {
         if let Some(header) = imp.header.take() {
             header.unparent();
         }
+        imp.header_toggle.replace(None);
+        imp.header_content.replace(None);
+        imp.header_permission.replace(None);
     }
 
     /// `columns` tile buttons of `kind` (reused when they already are).
@@ -572,9 +584,9 @@ impl GridRow {
     fn fill_local(&self, items: Vec<Option<glib::Object>>, bind: &Bind) {
         let imp = self.imp();
         for (button, item) in imp.slots.borrow().iter().zip(&items) {
-            // Empty places at the end keep the tiles their width.
-            button.set_child_visible(item.is_some());
-            button.set_can_focus(item.is_some());
+            // Empty places at the end: hidden (not announced), the row's
+            // layout keeps the tiles their width.
+            button.set_visible(item.is_some());
             if let (Some(item), Some(child)) = (item, button.child()) {
                 bind(&child, item);
             }
@@ -596,8 +608,7 @@ impl GridRow {
         imp.spotify_activate.replace(activate);
         for (index, button) in imp.slots.borrow().iter().enumerate() {
             let item = (index < len).then(|| items.get(start + index)).flatten();
-            button.set_child_visible(item.is_some());
-            button.set_can_focus(item.is_some());
+            button.set_visible(item.is_some());
             match item {
                 Some(item) => {
                     button.set_child(Some(&tile_content(item, 180).0));
@@ -608,11 +619,62 @@ impl GridRow {
         }
     }
 
-    fn show_header(&self, header: gtk::Widget) {
+    /// The Spotify section's header (built once per row widget, then only
+    /// updated, so the toggle keeps the focus): the open/close toggle and,
+    /// when the login lacks the permission, a way to connect again.
+    fn ensure_header(&self, grid: &SectionedGrid) {
+        let imp = self.imp();
+        if imp.kind.get() == RowKind::Header && imp.header.borrow().is_some() {
+            return;
+        }
         self.clear();
-        self.imp().kind.set(RowKind::Header);
+        imp.kind.set(RowKind::Header);
+        let header = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(6)
+            .css_classes(["grid-section-header"])
+            .build();
+        let content = adw::ButtonContent::new();
+        let toggle = gtk::Button::builder()
+            .child(&content)
+            .halign(gtk::Align::Start)
+            .css_classes(["flat", "heading"])
+            .build();
+        toggle.connect_clicked(glib::clone!(
+            #[weak]
+            grid,
+            move |_| grid.toggle_spotify()
+        ));
+        header.append(&toggle);
+        let permission = gtk::Box::builder().spacing(12).margin_start(12).build();
+        permission.append(
+            &gtk::Label::builder()
+                .label(gettext(
+                    "Connect to Spotify again to allow Gatefold to read your saved albums and followed artists.",
+                ))
+                .wrap(true)
+                .xalign(0.0)
+                .hexpand(true)
+                .css_classes(["dim-label"])
+                .build(),
+        );
+        let button = gtk::Button::builder()
+            .label(gettext("_Connect Again"))
+            .use_underline(true)
+            .valign(gtk::Align::Center)
+            .css_classes(["pill"])
+            .build();
+        button.connect_clicked(|_| {
+            let spotify = GatefoldApplication::get().spotify();
+            glib::spawn_future_local(async move { spotify.connect().await });
+        });
+        permission.append(&button);
+        header.append(&permission);
         header.set_parent(self);
-        self.imp().header.replace(Some(header));
+        imp.header.replace(Some(header.upcast()));
+        imp.header_toggle.replace(Some(toggle));
+        imp.header_content.replace(Some(content));
+        imp.header_permission.replace(Some(permission));
         self.queue_resize();
     }
 }

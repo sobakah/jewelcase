@@ -856,7 +856,7 @@ impl GatefoldWindow {
         imp.search_bar.set_search_mode(false);
         imp.stack.set_visible_child_name("albums");
         imp.album_panel.set_spotify_album(album);
-        imp.split_view.set_show_sidebar(true);
+        reveal_sidebar(&imp.split_view);
     }
 
     /// A Spotify artist's page (§9.8): their albums and singles there.
@@ -1362,7 +1362,7 @@ impl GatefoldWindow {
         imp.search_bar.set_search_mode(false);
         imp.stack.set_visible_child_name("albums");
         imp.album_panel.set_album(album);
-        imp.split_view.set_show_sidebar(true);
+        reveal_sidebar(&imp.split_view);
     }
 
     fn compare_albums(&self, a: &AlbumObject, b: &AlbumObject) -> Ordering {

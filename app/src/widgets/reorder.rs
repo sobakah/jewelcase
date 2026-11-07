@@ -7,7 +7,11 @@ use gtk::{gdk, glib};
 
 /// Makes `row` (at `index`) draggable and a drop target. `on_move(from, to)`
 /// gets the final index of the moved row, as for "remove, then insert".
+/// Alt+Up and Alt+Down move it too, for the keyboard; the focus follows.
 pub fn attach(row: &gtk::ListBoxRow, index: u32, on_move: impl Fn(u32, u32) + 'static) {
+    let on_move = std::rc::Rc::new(on_move);
+    keyboard(row, index, on_move.clone());
+    let on_move = move |from, to| on_move(from, to);
     let drag = gtk::DragSource::builder()
         .actions(gdk::DragAction::MOVE)
         .content(&gdk::ContentProvider::for_value(&index.to_value()))
@@ -127,4 +131,56 @@ pub fn guard_sheet(list: &gtk::ListBox) {
         glib::Propagation::Proceed
     });
     list.add_controller(legacy);
+}
+
+/// Alt+Up/Down: the row one place up or down, then focused again (the
+/// list is rebuilt).
+fn keyboard(row: &gtk::ListBoxRow, index: u32, on_move: std::rc::Rc<dyn Fn(u32, u32)>) {
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(glib::clone!(
+        #[weak]
+        row,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |_, key, _, modifiers| {
+            if !modifiers.contains(gdk::ModifierType::ALT_MASK) {
+                return glib::Propagation::Proceed;
+            }
+            let last = row
+                .parent()
+                .and_downcast::<gtk::ListBox>()
+                .map_or(0, |list| {
+                    let mut count = 0;
+                    while list.row_at_index(count).is_some() {
+                        count += 1;
+                    }
+                    count.max(1) - 1
+                });
+            let to = match key {
+                gdk::Key::Up if index > 0 => index - 1,
+                gdk::Key::Down if (index as i32) < last => index + 1,
+                gdk::Key::Up | gdk::Key::Down => return glib::Propagation::Stop,
+                _ => return glib::Propagation::Proceed,
+            };
+            let list = row.parent().and_downcast::<gtk::ListBox>();
+            // Not past the queue's current song.
+            let fixed = list
+                .as_ref()
+                .and_then(|l| l.row_at_index(to as i32))
+                .is_some_and(|r| r.has_css_class("now-playing"));
+            if fixed {
+                return glib::Propagation::Stop;
+            }
+            on_move(index, to);
+            if let Some(list) = list {
+                glib::idle_add_local_once(move || {
+                    if let Some(moved) = list.row_at_index(to as i32) {
+                        moved.grab_focus();
+                    }
+                });
+            }
+            glib::Propagation::Stop
+        }
+    ));
+    row.add_controller(keys);
 }

@@ -119,11 +119,12 @@ mod imp {
             self.parent_constructed();
             let obj = self.obj();
             let player = GatefoldApplication::get().player();
-            player.connect_current_track_notify(glib::clone!(
+            let id = player.connect_current_track_notify(glib::clone!(
                 #[weak]
                 obj,
                 move |_| obj.update_playing()
             ));
+            crate::widgets::disconnect_with(&*obj, &player, id);
         }
     }
 
@@ -157,8 +158,22 @@ impl AlbumPanel {
         imp.album.replace(Some(album.clone()));
         imp.spotify.replace(None);
         self.set_spotify_mode(false);
+        self.set_songs_actions(true);
         self.setup_versions(album, version);
         self.show_version(version);
+    }
+
+    /// Playing and queueing need the songs (a Spotify album's load first).
+    fn set_songs_actions(&self, enabled: bool) {
+        for action in [
+            "panel.play",
+            "panel.shuffle",
+            "panel.play-next",
+            "panel.add-to-queue",
+            "panel.add-to-playlist",
+        ] {
+            self.action_set_enabled(action, enabled);
+        }
     }
 
     /// Menu entries for files (tags, lyrics) or for Spotify.
@@ -180,6 +195,7 @@ impl AlbumPanel {
         imp.album.replace(None);
         imp.spotify.replace(Some(album.clone()));
         self.set_spotify_mode(true);
+        self.set_songs_actions(false);
         imp.versions_box.set_visible(false);
         imp.cover.set_cover(album.cover_key().as_deref());
         imp.cover
@@ -225,6 +241,7 @@ impl AlbumPanel {
                 }
                 match tracks {
                     Some(tracks) => {
+                        panel.set_songs_actions(!tracks.is_empty());
                         panel.fill_tracks(&tracks, &artist);
                         panel.imp().track_objects.replace(tracks);
                         panel.update_playing();

@@ -434,6 +434,7 @@ impl PlaylistPanel {
         self.action_set_enabled("playlist.duplicate", mirror && info.readable);
         self.action_set_enabled("playlist.unlink", linked && !mirror);
         self.action_set_enabled("playlist.delete", !mirror);
+        let same_playlist = imp.playlist.borrow().as_ref().map(|p| p.id()) == Some(id);
         imp.playlist.replace(Some(playlist.clone()));
 
         let entries = library.playlist_items(id);
@@ -446,29 +447,51 @@ impl PlaylistPanel {
         if same {
             return;
         }
+        // The same playlist changed (a song removed or moved): it stays
+        // where it was scrolled to, instead of jumping to the top.
+        let scroller = imp
+            .items
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .and_downcast::<gtk::ScrolledWindow>();
+        let keep_at = scroller
+            .as_ref()
+            .filter(|_| same_playlist)
+            .map(|s| s.vadjustment())
+            .map(|a| (a.value(), a.page_size()))
+            .filter(|(value, _)| *value > 0.0);
         imp.items.remove_all();
         imp.spotify_covers.borrow_mut().clear();
         imp.entries.replace(entries.clone());
         let generation = imp.fill_generation.get() + 1;
         imp.fill_generation.set(generation);
-        self.fill_rows(playlist, entries, 0, generation);
+        // Enough rows at once to reach the old place (rows are about 50 px).
+        let first = keep_at.map_or(0, |(value, page)| ((value + page) / 40.0) as usize + 20);
+        self.fill_rows(playlist, entries, 0, generation, first);
+        if let (Some((value, _)), Some(scroller)) = (keep_at, scroller) {
+            glib::idle_add_local_once(move || {
+                let adjustment = scroller.vadjustment();
+                adjustment.set_value(value.min(adjustment.upper() - adjustment.page_size()));
+            });
+        }
     }
 
     /// Appends rows from `from`, a batch now and the rest in later idle
     /// moments, so a big playlist doesn't freeze the window.
+    /// `at_least`: rows to add in the first batch (to reach a place).
     fn fill_rows(
         &self,
         playlist: PlaylistObject,
         entries: Vec<PlaylistItem>,
         from: usize,
         generation: u64,
+        at_least: usize,
     ) {
         const BATCH: usize = 60;
         let imp = self.imp();
         if imp.fill_generation.get() != generation {
             return;
         }
-        let end = (from + BATCH).min(entries.len());
+        let end = (from + BATCH.max(at_least)).min(entries.len());
         for entry in &entries[from..end] {
             imp.items.append(&self.row(&playlist, entry));
         }
@@ -476,7 +499,7 @@ impl PlaylistPanel {
             glib::idle_add_local_once(glib::clone!(
                 #[weak(rename_to = panel)]
                 self,
-                move || panel.fill_rows(playlist, entries, end, generation)
+                move || panel.fill_rows(playlist, entries, end, generation, 0)
             ));
         }
     }

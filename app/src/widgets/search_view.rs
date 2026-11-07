@@ -73,7 +73,8 @@ mod imp {
                     obj,
                     move |spotify| {
                         let query = obj.imp().last_query.borrow().clone();
-                        if spotify.is_connected() && !query.trim().is_empty() {
+                        // Only results on screen (not a search closed long ago).
+                        if spotify.is_connected() && !query.trim().is_empty() && obj.is_mapped() {
                             obj.search(&query);
                         }
                     }

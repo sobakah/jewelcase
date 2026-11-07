@@ -140,7 +140,7 @@ mod imp {
                 .set_placeholder_icon("avatar-default-symbolic");
             obj.set_layout_manager(None::<gtk::LayoutManager>);
             let library = GatefoldApplication::get().library();
-            library.connect_local(
+            let changed = library.connect_local(
                 "artist-changed",
                 false,
                 glib::clone!(
@@ -157,7 +157,7 @@ mod imp {
                     }
                 ),
             );
-            library.connect_local(
+            let reloaded = library.connect_local(
                 "reloaded",
                 false,
                 glib::clone!(
@@ -171,18 +171,20 @@ mod imp {
                     }
                 ),
             );
+            crate::widgets::disconnect_with(&*obj, &library, changed);
+            crate::widgets::disconnect_with(&*obj, &library, reloaded);
             // Connected or not: the "On Spotify" part comes or goes.
-            GatefoldApplication::get()
-                .spotify()
-                .connect_status_notify(glib::clone!(
-                    #[weak]
-                    obj,
-                    move |_| {
-                        if obj.spotify_artist_id().is_none() {
-                            obj.fill_sections();
-                        }
+            let spotify = GatefoldApplication::get().spotify();
+            let status = spotify.connect_status_notify(glib::clone!(
+                #[weak]
+                obj,
+                move |_| {
+                    if obj.spotify_artist_id().is_none() {
+                        obj.fill_sections();
                     }
-                ));
+                }
+            ));
+            crate::widgets::disconnect_with(&*obj, &spotify, status);
             self.album_panel.connect_local(
                 "close",
                 false,
@@ -656,28 +658,36 @@ impl ArtistPage {
             .max_children_per_line(columns)
             .column_spacing(18)
             .row_spacing(18)
+            .activate_on_single_click(true)
             .build();
         let mut covers = Vec::new();
         let mut urls = Vec::new();
-        for album in albums {
+        // Plain tiles, opened by the flow box (click, Enter), like the
+        // library's sections: one stop each for the keyboard.
+        for album in &albums {
             let item = super::ShelfItem {
                 cover_key: album.cover_key(),
                 title: album.name.clone(),
                 subtitle: album.year.map(|y| y.to_string()).unwrap_or_default(),
                 artist: false,
             };
-            let (tile, cover) = super::sized_tile(&item, 180);
+            let (tile, cover) = super::tile_content(&item, 180);
+            tile.set_tooltip_text(Some(&album.name));
             if let Some(url) = album.image_url.clone() {
                 covers.push((url.clone(), cover, album.cover_key()));
                 urls.push(url);
             }
-            tile.connect_clicked(glib::clone!(
-                #[weak(rename_to = page)]
-                self,
-                move |_| page.show_spotify_album(&album)
-            ));
             flow.append(&tile);
         }
+        flow.connect_child_activated(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            move |_, child| {
+                if let Some(album) = albums.get(child.index() as usize) {
+                    page.show_spotify_album(album);
+                }
+            }
+        ));
         crate::spotify::fetch_covers_in_batches(urls, move |ready| {
             for (url, cover, key) in &covers {
                 if ready.contains(url) {

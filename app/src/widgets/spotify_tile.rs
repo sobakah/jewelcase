@@ -58,14 +58,3 @@ pub fn tile_content(item: &ShelfItem, natural: i32) -> (gtk::Box, CoverImage) {
     }
     (content, cover)
 }
-
-/// A clickable tile, for grids built by hand (artist pages).
-pub fn sized_tile(item: &ShelfItem, natural: i32) -> (gtk::Button, CoverImage) {
-    let (content, cover) = tile_content(item, natural);
-    let button = gtk::Button::builder()
-        .child(&content)
-        .tooltip_text(&item.title)
-        .css_classes(["flat", "grid-tile"])
-        .build();
-    (button, cover)
-}

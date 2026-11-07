@@ -270,15 +270,21 @@ mod imp {
                 }
             );
             update(&analyzer);
+            // Disconnected when the dialog goes (the setting's handler holds
+            // the settings themselves, which would stay forever).
+            let obj = self.obj();
             for property in ["analyzed", "total", "busy", "paused", "on-battery"] {
                 let update = update.clone();
-                analyzer.connect_notify_local(Some(property), move |analyzer, _| update(analyzer));
+                let id = analyzer
+                    .connect_notify_local(Some(property), move |analyzer, _| update(analyzer));
+                crate::widgets::disconnect_with(&*obj, &analyzer, id);
             }
             let on_setting = update.clone();
             let analyzer_for_setting = analyzer.clone();
-            settings.connect_changed(Some("analysis-mode"), move |_, _| {
+            let id = settings.connect_changed(Some("analysis-mode"), move |_, _| {
                 on_setting(&analyzer_for_setting)
             });
+            crate::widgets::disconnect_with(&*obj, settings, id);
             pause.connect_clicked(move |_| {
                 analyzer.set_paused(!analyzer.paused());
                 update(&analyzer);
@@ -322,7 +328,7 @@ mod imp {
 
             let obj = self.obj();
             let tools = crate::application::GatefoldApplication::get().tools();
-            tools.connect_local(
+            let detected = tools.connect_local(
                 "detected",
                 false,
                 glib::clone!(
@@ -336,6 +342,7 @@ mod imp {
                     }
                 ),
             );
+            crate::widgets::disconnect_with(&*obj, &tools, detected);
             obj.show_tools();
         }
     }

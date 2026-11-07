@@ -42,6 +42,14 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
         split,
         move |width: i32| {
             if width > 0 {
+                // Never more than there's room for (an artist page's own
+                // panel is narrower than the window's; windows shrink).
+                let room = split.width();
+                let width = if room > 0 {
+                    width.min((room - MIN_CONTENT).max(MIN_WIDTH))
+                } else {
+                    width
+                };
                 split.set_min_sidebar_width(f64::from(width));
                 split.set_max_sidebar_width(f64::from(width));
             } else {
@@ -53,7 +61,31 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
     );
     apply(settings.int(KEY));
     let on_change = apply.clone();
-    settings.connect_changed(Some(KEY), move |settings, key| on_change(settings.int(key)));
+    let id = settings.connect_changed(Some(KEY), move |settings, key| on_change(settings.int(key)));
+    crate::widgets::disconnect_with(split, settings, id);
+    // Again once the room is known, and when the window's width changes.
+    let on_map = apply.clone();
+    let on_map_settings = settings.clone();
+    split.connect_map(move |_| {
+        let apply = on_map.clone();
+        let settings = on_map_settings.clone();
+        glib::idle_add_local_once(move || apply(settings.int(KEY)));
+    });
+    let on_resize = apply.clone();
+    let resize_settings = settings.clone();
+    split.connect_realize(move |split| {
+        let Some(surface) = split.native().and_then(|n| n.surface()) else {
+            return;
+        };
+        let apply = on_resize.clone();
+        let settings = resize_settings.clone();
+        let id = surface.connect_width_notify(move |_| {
+            let apply = apply.clone();
+            let settings = settings.clone();
+            glib::idle_add_local_once(move || apply(settings.int(KEY)));
+        });
+        crate::widgets::disconnect_with(split, &surface, id);
+    });
 
     let drag = gtk::GestureDrag::new();
     let start = std::rc::Rc::new(std::cell::Cell::new(0));
