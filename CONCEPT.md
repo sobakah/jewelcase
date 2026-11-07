@@ -606,7 +606,7 @@ For now the app is built as an **RPM for Fedora 45 and installed locally**. Ther
   | Command / binary / RPM package | `gatefold` (spec file `gatefold.spec`) |
   | Data (DB, portraits, analysis) | `~/.local/share/io.github.sobakah.Gatefold/` |
   | Cache (cover thumbnails) | `~/.cache/io.github.sobakah.Gatefold/` |
-  | Keyring entries (Spotify tokens) | attribute `application = io.github.sobakah.Gatefold` |
+  | Keyring entries (Spotify tokens) | attribute `application = <app ID>` (the development build has its own; it copied the shared entries once when it got them) |
   | Rust crates | `gatefold` (app), `gatefold-core`, `gatefold-metadata`, `gatefold-lyrics`, `gatefold-similarity`, `gatefold-tools`, `gatefold-spotify` |
   | User-Agent for MusicBrainz/Wikidata/fanart.tv | `Gatefold/<version> ( https://github.com/sobakah/gatefold )` |
 

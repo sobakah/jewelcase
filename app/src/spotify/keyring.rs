@@ -5,13 +5,31 @@
 use gatefold_spotify::Tokens;
 use gtk::gio;
 
-/// Keyring attributes; `application` as in CONCEPT.md §12, `kind` tells
-/// the Web API login from the streaming login.
+/// Keyring attributes; `application` is the app ID (CONCEPT.md §12), so
+/// the development build and the installed app keep their own logins;
+/// `kind` tells the logins and keys apart.
 fn attributes(kind: &'static str) -> [(&'static str, &'static str); 2] {
-    [
-        ("application", "io.github.sobakah.Gatefold"),
-        ("kind", kind),
-    ]
+    [("application", crate::config::APP_ID), ("kind", kind)]
+}
+
+/// Where both builds kept their logins before: read once by the
+/// development build when it has none of its own.
+const SHARED_APPLICATION: &str = "io.github.sobakah.Gatefold";
+
+/// Once the build has keyring entries of its own (or chose to have none,
+/// by disconnecting), the shared ones aren't looked at again.
+fn own_entry_marker(kind: &str) -> std::path::PathBuf {
+    gtk::glib::user_data_dir()
+        .join(crate::config::APP_ID)
+        .join(format!("keyring-own-{kind}"))
+}
+
+fn mark_own_entry(kind: &str) {
+    let marker = own_entry_marker(kind);
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(marker, b"");
 }
 
 const LOGIN: &str = "spotify-login";
@@ -49,18 +67,36 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
         let items = keyring.search_items(&attributes(kind)).await?;
-        let Some(item) = items.first() else {
+        if let Some(item) = items.first() {
+            let secret = item.secret().await?;
+            return Ok(Some(
+                String::from_utf8_lossy(secret.as_bytes()).into_owned(),
+            ));
+        }
+        if crate::config::APP_ID == SHARED_APPLICATION || own_entry_marker(kind).exists() {
+            return Ok(None);
+        }
+        // The development build's login from before it had its own: copied,
+        // the installed app's stays as it is.
+        let shared = keyring
+            .search_items(&[("application", SHARED_APPLICATION), ("kind", kind)])
+            .await?;
+        let Some(item) = shared.first() else {
             return Ok(None);
         };
-        let secret = item.secret().await?;
-        Ok(Some(
-            String::from_utf8_lossy(secret.as_bytes()).into_owned(),
-        ))
+        let text = String::from_utf8_lossy(item.secret().await?.as_bytes()).into_owned();
+        let label = item.label().await?;
+        keyring
+            .create_item(&label, &attributes(kind), text.clone(), true)
+            .await?;
+        mark_own_entry(kind);
+        Ok(Some(text))
     })
     .await
 }
 
 async fn save_text(kind: &'static str, label: &'static str, text: String) -> Result<(), String> {
+    mark_own_entry(kind);
     run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
@@ -72,6 +108,7 @@ async fn save_text(kind: &'static str, label: &'static str, text: String) -> Res
 }
 
 async fn delete_kind(kind: &'static str) -> Result<(), String> {
+    mark_own_entry(kind);
     run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.delete(&attributes(kind)).await

@@ -16,7 +16,13 @@ pub fn start(app: &GatefoldApplication, player: &Player) {
     let app = app.downgrade();
     let player = player.downgrade();
     glib::spawn_future_local(async move {
-        let server = match mpris_server::Player::builder("Gatefold")
+        // The development build has its own name, so both can run.
+        let name = if APP_ID.ends_with(".Devel") {
+            "Gatefold.Devel"
+        } else {
+            "Gatefold"
+        };
+        let server = match mpris_server::Player::builder(name)
             .identity("Gatefold")
             .desktop_entry(APP_ID)
             .can_raise(true)
