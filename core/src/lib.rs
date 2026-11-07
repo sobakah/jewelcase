@@ -4,6 +4,7 @@
 pub mod analysis;
 pub mod db;
 pub mod library;
+pub mod matching;
 pub mod playback;
 pub mod playlist_files;
 pub mod queue;

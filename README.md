@@ -61,12 +61,14 @@ core/       library model, scanner, queue, playback; no GTK (crate `gatefold-cor
 tools/      lyrembed, cdimport, tag editor: detection, commands, configs (crate `gatefold-tools`)
 lyrics/     LRC parsing, embedded and sidecar lyrics, dual-line pairing (crate `gatefold-lyrics`)
 metadata/   MusicBrainz, Wikidata, Commons, fanart.tv lookups (crate `gatefold-metadata`)
+spotify/    Spotify login (OAuth PKCE) and Web API: player, playlists, search (crate `gatefold-spotify`)
 data/       desktop file, metainfo, GSettings schema, icons, Blueprint UI + CSS (data/resources)
 po/         translations
 build-aux/  build helper scripts
 ```
 
-The `similarity` and `spotify` crates from CONCEPT.md §2 are added in the phases that need them.
+Similarity (CONCEPT.md §7) lives in `core` (`similar.rs`, `analysis.rs`), as does matching
+streaming tracks to the library (`matching.rs`).
 
 ## License
 

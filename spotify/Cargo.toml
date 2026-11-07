@@ -1,0 +1,17 @@
+[package]
+name = "gatefold-spotify"
+description = "Gatefold's Spotify account: OAuth PKCE login and the Web API (player, playlists, search)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true

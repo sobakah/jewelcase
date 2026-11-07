@@ -17,6 +17,9 @@ use crate::library::titles::ReleaseType;
 use crate::playlist_files::Entry as PlaylistFileEntry;
 use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 
+mod spotify;
+pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion};
+
 const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/001_library.sql")),
     M::up(include_str!("db/002_barcode_and_album_order.sql")),
@@ -24,6 +27,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/004_playlists_search.sql")),
     M::up(include_str!("db/005_play_history.sql")),
     M::up(include_str!("db/006_analysis.sql")),
+    M::up(include_str!("db/007_spotify.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -112,11 +116,23 @@ pub struct ArtistMeta {
     pub custom_portrait_key: Option<String>,
 }
 
-/// A local playlist.
+/// A playlist: local, a Spotify mirror, or local and published to Spotify.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Playlist {
     pub id: i64,
     pub name: String,
+    /// 'local' or 'spotify' (came from Spotify).
+    pub source: String,
+    /// Set when the playlist is linked to a Spotify playlist (§9.6).
+    pub spotify_id: Option<String>,
+    pub spotify_owner: Option<String>,
+    /// Owned or collaborative on Spotify; always true for local ones.
+    pub editable: bool,
+    /// False when Spotify doesn't show the entries (§9.5).
+    pub readable: bool,
+    pub spotify_cover_key: Option<String>,
+    /// Changes not sent to Spotify yet.
+    pub pending_changes: u32,
     pub custom_cover_key: Option<String>,
     pub created: i64,
     pub modified: i64,
@@ -138,8 +154,15 @@ pub struct PlaylistItem {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub duration_ms: Option<u64>,
-    /// 'local' or 'unavailable'.
+    /// 'local' | 'unavailable' for library entries; 'matched' |
+    /// 'user_matched' | 'spotify_only' | 'user_pinned_spotify' for Spotify
+    /// entries (§9.5).
     pub match_state: String,
+    pub spotify_uri: Option<String>,
+    /// A library song that is probably this Spotify entry.
+    pub suggested_track: Option<Track>,
+    /// The Spotify track (JSON) that is probably this library song.
+    pub suggested_spotify: Option<String>,
 }
 
 /// What a search found, best first per kind.
@@ -639,10 +662,11 @@ impl Database {
 
     pub fn playlist_items(&self, id: i64) -> Result<Vec<PlaylistItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, position, local_track_id, title, artist, album, duration_ms, match_state
+            "SELECT id, position, local_track_id, title, artist, album, duration_ms, match_state,
+                    spotify_uri, suggested_track_id, suggested_spotify
              FROM playlist_item WHERE playlist_id = ?1 ORDER BY position",
         )?;
-        let rows: Vec<(PlaylistItem, Option<i64>)> = stmt
+        let rows: Vec<(PlaylistItem, Option<i64>, Option<i64>)> = stmt
             .query_map([id], |row| {
                 Ok((
                     PlaylistItem {
@@ -654,17 +678,26 @@ impl Database {
                         album: row.get(5)?,
                         duration_ms: row.get::<_, Option<i64>>(6)?.map(|d| d.max(0) as u64),
                         match_state: row.get(7)?,
+                        spotify_uri: row.get(8)?,
+                        suggested_track: None,
+                        suggested_spotify: row.get(10)?,
                     },
                     row.get(2)?,
+                    row.get(9)?,
                 ))
             })?
             .collect::<rusqlite::Result<_>>()?;
-        let ids: Vec<i64> = rows.iter().filter_map(|(_, t)| *t).collect();
+        let ids: Vec<i64> = rows
+            .iter()
+            .flat_map(|(_, t, s)| [*t, *s])
+            .flatten()
+            .collect();
         let tracks = self.tracks(&ids)?;
         Ok(rows
             .into_iter()
-            .map(|(mut item, track_id)| {
+            .map(|(mut item, track_id, suggested)| {
                 item.track = track_id.and_then(|id| tracks.get(&id).cloned());
+                item.suggested_track = suggested.and_then(|id| tracks.get(&id).cloned());
                 item
             })
             .collect())
@@ -865,7 +898,7 @@ impl Database {
                path = (SELECT t.path FROM track t WHERE t.id = local_track_id),
                mb_track_id = COALESCE((SELECT t.mb_track_id FROM track t WHERE t.id = local_track_id), mb_track_id),
                isrc = COALESCE((SELECT t.isrc FROM track t WHERE t.id = local_track_id), isrc),
-               match_state = 'local'
+               match_state = CASE WHEN spotify_uri IS NULL THEN 'local' ELSE match_state END
              WHERE local_track_id IS NOT NULL",
             [],
         )?;
@@ -1378,7 +1411,9 @@ const PLAYLIST_COLUMNS: &str = "p.id, p.name, p.custom_cover_key, p.created, p.m
     (SELECT COUNT(*) FROM playlist_item i WHERE i.playlist_id = p.id),
     (SELECT COUNT(*) FROM playlist_item i WHERE i.playlist_id = p.id AND i.local_track_id IS NOT NULL),
     (SELECT COALESCE(SUM(COALESCE(t.duration_ms, i.duration_ms, 0)), 0) FROM playlist_item i
-       LEFT JOIN track t ON t.id = i.local_track_id WHERE i.playlist_id = p.id)";
+       LEFT JOIN track t ON t.id = i.local_track_id WHERE i.playlist_id = p.id),
+    p.source, p.spotify_id, p.spotify_owner, p.editable, p.readable, p.spotify_cover_key,
+    (SELECT COUNT(*) FROM spotify_outbox o WHERE o.playlist_id = p.id)";
 
 const INSERT_ITEM: &str = "INSERT INTO playlist_item (playlist_id, position, local_track_id,
     isrc, title, artist, album, duration_ms, path, mb_track_id, match_state)
@@ -1395,6 +1430,13 @@ fn playlist(row: &Row) -> rusqlite::Result<Playlist> {
         local_count: row.get(6)?,
         duration_ms: row.get::<_, i64>(7)?.max(0) as u64,
         cover_keys: Vec::new(),
+        source: row.get(8)?,
+        spotify_id: row.get(9)?,
+        spotify_owner: row.get(10)?,
+        editable: row.get(11)?,
+        readable: row.get(12)?,
+        spotify_cover_key: row.get(13)?,
+        pending_changes: row.get(14)?,
     })
 }
 
@@ -1613,7 +1655,7 @@ mod tests {
     use crate::library::grouping::group_albums;
     use crate::queue::SnapshotItem;
 
-    fn file(path: &str, album: &str, title: &str, number: u32) -> ScannedFile {
+    pub(super) fn file(path: &str, album: &str, title: &str, number: u32) -> ScannedFile {
         ScannedFile {
             path: PathBuf::from(path),
             mtime: 1,
@@ -1636,7 +1678,7 @@ mod tests {
         }
     }
 
-    fn rebuild(db: &mut Database) {
+    pub(super) fn rebuild(db: &mut Database) {
         let tracks = db.all_tracks().unwrap();
         let albums = group_albums(&tracks);
         let artists = crate::library::artists::build_artists(&albums, &tracks, &Default::default());
