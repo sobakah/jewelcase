@@ -308,6 +308,8 @@ impl Options {
 pub struct Soloist {
     commands: mpsc::Sender<Value>,
     child: Arc<Mutex<Option<Child>>>,
+    /// The WebSocket thread, to wait for it to send what's queued.
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Soloist {
@@ -395,8 +397,15 @@ impl Soloist {
 
         // Talks to it, once it has written its port.
         let data_dir = config.data_dir.clone();
-        let commands = talk(events, move || wait_for_port(&data_dir));
-        Ok((Self { commands, child }, receiver))
+        let (commands, thread) = talk(events, move || wait_for_port(&data_dir));
+        Ok((
+            Self {
+                commands,
+                child,
+                thread: Mutex::new(Some(thread)),
+            },
+            receiver,
+        ))
     }
 
     /// Uses a Soloist that already runs (e.g. kept running by soloistd),
@@ -404,11 +413,12 @@ impl Soloist {
     pub fn attach(addr: &str, port: u16) -> (Self, async_channel::Receiver<Event>) {
         let (events, receiver) = async_channel::unbounded();
         let addr = local_only(addr);
-        let commands = talk(events, move || Some((addr.clone(), port)));
+        let (commands, thread) = talk(events, move || Some((addr.clone(), port)));
         (
             Self {
                 commands,
                 child: Arc::new(Mutex::new(None)),
+                thread: Mutex::new(Some(thread)),
             },
             receiver,
         )
@@ -486,6 +496,20 @@ impl Soloist {
     }
 
     /// A Soloist that was already running (not started here).
+    /// Done with Soloist: what's queued is sent (a last pause), a Soloist
+    /// Gatefold started stops; waits at most `max` for the sending.
+    pub fn close(self, max: Duration) {
+        let thread = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take();
+        // Dropping the command sender ends the thread after it sent the rest.
+        drop(self);
+        if let Some(thread) = thread {
+            let start = Instant::now();
+            while !thread.is_finished() && start.elapsed() < max {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+
     pub fn is_attached(&self) -> bool {
         self.child.lock().map(|c| c.is_none()).unwrap_or(true)
     }
@@ -521,13 +545,14 @@ impl Drop for Soloist {
 }
 
 /// The WebSocket thread: connects (`target` may wait for the address),
-/// then forwards events and sends commands. Returns the command sender.
+/// then forwards events and sends commands. Returns the command sender
+/// and the thread.
 fn talk(
     events: async_channel::Sender<Event>,
     target: impl FnOnce() -> Option<(String, u16)> + Send + 'static,
-) -> mpsc::Sender<Value> {
+) -> (mpsc::Sender<Value>, std::thread::JoinHandle<()>) {
     let (commands, command_receiver) = mpsc::channel::<Value>();
-    std::thread::spawn(move || {
+    let thread = std::thread::spawn(move || {
         let Some(mut socket) = target().and_then(|(addr, port)| connect_to(&addr, port)) else {
             tracing::warn!("Soloist's WebSocket API isn't reachable");
             let _ = events.send_blocking(Event::Disconnected);
@@ -572,7 +597,7 @@ fn talk(
         }
         let _ = events.send_blocking(Event::Disconnected);
     });
-    commands
+    (commands, thread)
 }
 
 /// The API has no authentication: never talk to it over the network.

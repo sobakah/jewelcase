@@ -1702,6 +1702,25 @@ impl GatefoldWindow {
                     }
                 });
             }
+            // `GATEFOLD_SCREENSHOT_TIMED_ACTIONS="8:player.play-pause 30:…"`:
+            // window actions at those seconds.
+            if let Ok(list) = std::env::var("GATEFOLD_SCREENSHOT_TIMED_ACTIONS") {
+                for entry in list.split_whitespace() {
+                    let Some((at, action)) = entry.split_once(':') else {
+                        continue;
+                    };
+                    let Ok(at) = at.parse::<u32>() else { continue };
+                    let action = action.to_owned();
+                    let window = window.downgrade();
+                    glib::timeout_add_seconds_local_once(at, move || {
+                        if let Some(window) = window.upgrade()
+                            && let Err(err) = WidgetExt::activate_action(&window, &action, None)
+                        {
+                            tracing::warn!("Screenshot action {action}: {err}");
+                        }
+                    });
+                }
+            }
             // `GATEFOLD_SCREENSHOT_CLICK_TILE=1`: the first tile of the grids
             // clicked 9 s in.
             if std::env::var_os("GATEFOLD_SCREENSHOT_CLICK_TILE").is_some() {
