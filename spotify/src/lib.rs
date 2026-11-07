@@ -90,6 +90,20 @@ impl Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// What a request asks for, as far as Spotify's rate limits go: the
+/// first part of its path ("search", "artists", "playlists"), two for the
+/// account's ("me/player", "me/albums").
+fn request_kind(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let path = path.split_once("/v1/").map_or(path, |(_, rest)| rest);
+    let mut parts = path.trim_start_matches('/').split('/');
+    match (parts.next(), parts.next()) {
+        (Some("me"), Some(second)) => format!("me/{second}"),
+        (Some(first), _) => first.to_owned(),
+        _ => String::new(),
+    }
+}
+
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -181,6 +195,10 @@ pub struct Client {
     agent: ureq::Agent,
     tokens: Mutex<Tokens>,
     on_refresh: Box<dyn Fn(&Tokens) + Send + Sync>,
+    /// Kinds of requests Spotify said to stop for a long time (a rate
+    /// limit of hours), and until when. Asking anyway during that time
+    /// can make the wait longer, so those fail here without asking.
+    blocked: Mutex<std::collections::HashMap<String, std::time::Instant>>,
 }
 
 impl Client {
@@ -194,6 +212,7 @@ impl Client {
             agent: agent(),
             tokens: Mutex::new(tokens),
             on_refresh: Box::new(on_refresh),
+            blocked: Mutex::default(),
         }
     }
 
@@ -226,6 +245,13 @@ impl Client {
         } else {
             format!("{}{path}", api_base())
         };
+        let kind = request_kind(&url);
+        if let Some(until) = self.blocked.lock().ok().and_then(|b| b.get(&kind).copied()) {
+            let now = std::time::Instant::now();
+            if until > now {
+                return Err(Error::RateLimited(until - now));
+            }
+        }
         let mut refreshed = false;
         let mut waited = false;
         loop {
@@ -293,6 +319,12 @@ impl Client {
                     waited = true;
                     std::thread::sleep(wait);
                     continue;
+                }
+                if wait > MAX_RETRY_WAIT {
+                    tracing::warn!("Spotify asks to wait {wait:?} before asking for {kind} again");
+                    if let Ok(mut blocked) = self.blocked.lock() {
+                        blocked.insert(kind, std::time::Instant::now() + wait);
+                    }
                 }
                 return Err(Error::RateLimited(wait));
             }
@@ -822,6 +854,20 @@ fn status_error(status: u16, text: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limits_are_kept_per_kind_of_request() {
+        assert_eq!(request_kind("https://api.spotify.com/v1/search"), "search");
+        assert_eq!(
+            request_kind("https://api.spotify.com/v1/artists/abc/albums?offset=10"),
+            "artists"
+        );
+        assert_eq!(request_kind("/me/player/devices"), "me/player");
+        assert_eq!(
+            request_kind("http://127.0.0.1:8975/v1/me/albums"),
+            "me/albums"
+        );
+    }
 
     #[test]
     fn errors_carry_spotifys_reason() {

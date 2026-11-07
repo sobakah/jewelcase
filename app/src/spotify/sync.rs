@@ -910,14 +910,14 @@ impl Spotify {
         for (item, track) in entries {
             let version = match self.find_version(track).await {
                 Ok(version) => version,
+                // A song that isn't there is an empty result, not an
+                // error: an error (offline, too many requests, Spotify
+                // refusing searches) holds for the other songs too, and
+                // asking for each of them anyway can get Gatefold blocked
+                // for hours.
                 Err(err) => {
-                    // Offline or too many requests: the rest waits too.
-                    let stop = err.is_temporary();
                     failed = Some(err);
-                    if stop {
-                        break;
-                    }
-                    continue;
+                    break;
                 }
             };
             let Some(mut db) = library.db() else { break };
@@ -1005,13 +1005,9 @@ impl Spotify {
                 Ok(_) => missing.push(*track),
                 Err(err) => {
                     unchecked.push(*track);
-                    // Offline or too many requests: the rest waits; other
-                    // errors are about this song.
-                    let stop = err.is_temporary();
+                    // Offline, too many requests, Spotify refusing
+                    // searches: the rest waits (see resolve_entries).
                     failure = Some(err);
-                    if !stop {
-                        continue;
-                    }
                     for (_, rest) in entries.iter().skip_while(|(i, _)| i != item).skip(1) {
                         unchecked.push(*rest);
                     }

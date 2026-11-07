@@ -1082,10 +1082,19 @@ impl Spotify {
                     async move {
                         let mut added = 0u32;
                         for id in ids {
-                            if let Ok(gatefold_core::db::SpotifyVersion { uri: Some(uri), .. }) =
-                                spotify.find_version(id).await
-                                && let Some(soloist) = spotify.soloist()
-                            {
+                            let uri = match spotify.find_version(id).await {
+                                Ok(gatefold_core::db::SpotifyVersion {
+                                    uri: Some(uri), ..
+                                }) => uri,
+                                Ok(_) => continue,
+                                // Holds for the other songs too (see
+                                // resolve_entries).
+                                Err(err) => {
+                                    spotify.message(&super::search_error(&err));
+                                    break;
+                                }
+                            };
+                            if let Some(soloist) = spotify.soloist() {
                                 soloist.add_to_queue(&uri);
                                 added += 1;
                             }
