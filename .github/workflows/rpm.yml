@@ -2,7 +2,8 @@
 #
 # - Pushing a tag like v0.1.0 builds it and puts the packages on a draft
 #   release (a pre-release for 0.x versions and tags with "-"); check it,
-#   then publish it on GitHub.
+#   then publish it on GitHub. Its notes are the version's section of
+#   CHANGELOG.md.
 # - "Run workflow" in the Actions tab builds it as a test; tick "release"
 #   to also make a draft release for the version in meson.build.
 name: RPM
@@ -71,6 +72,11 @@ jobs:
     if: github.ref_type == 'tag' || inputs.release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v4
         with:
           name: gatefold-${{ needs.rpm.outputs.version }}-rpms
@@ -88,9 +94,16 @@ jobs:
           # The program and the source package; debuginfo stays in the
           # workflow's artifact.
           files=$(find dist -name '*.rpm' ! -name '*-debuginfo-*' ! -name '*-debugsource-*')
+          # The version's section of CHANGELOG.md, or GitHub's own notes.
+          awk -v v="$VERSION" '
+            index($0, "## " v) == 1 && (length($0) == length(v) + 3 || substr($0, length(v) + 4, 1) == " ") { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
           gh release create "$tag" $files \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Gatefold $VERSION" \
             --draft $prerelease \
-            --generate-notes
+            "${notes[@]}"

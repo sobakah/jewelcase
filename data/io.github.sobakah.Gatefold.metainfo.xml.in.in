@@ -16,6 +16,8 @@
       <li>Albums, artists and playlists from your local music files</li>
       <li>A clean artist list with album artists only</li>
       <li>Synced lyrics with romanization</li>
+      <li>Gapless playback, crossfade and smart shuffle</li>
+      <li>Optional Spotify integration</li>
     </ul>
   </description>
 
@@ -46,9 +48,18 @@
   </branding>
 
   <releases>
-    <release version="0.1.0" date="2026-11-05">
+    <release version="0.1.0" date="2026-11-07" type="development">
       <description>
-        <p>First version: albums, artists with online details, playlists, a player with lyrics and queue, smart shuffle, crossfade and loudness levelling, companion tools, and an optional Spotify integration.</p>
+        <p>The first pre-release of Gatefold.</p>
+        <ul>
+          <li>Albums grouped from your music files, with editions merged and covers as the main way around</li>
+          <li>Artist pages with portraits, a short bio and links, from optional online lookups</li>
+          <li>A player with synced lyrics and romanization, gapless playback, loudness levelling and smart crossfade</li>
+          <li>Playlists with M3U8 and XSPF import and export, and one search for everything</li>
+          <li>Smart shuffle that mixes in similar songs by genre, tempo, artist or sound</li>
+          <li>Lyrics, CD import and tag editing through lyrembed, cdimport and Ear Tag</li>
+          <li>Optional Spotify integration: Connect devices, playlists, saved albums, followed artists and streaming through Spotify Soloist</li>
+        </ul>
       </description>
     </release>
   </releases>

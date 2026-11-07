@@ -1,8 +1,45 @@
 # Gatefold
 
-A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. The design and roadmap are in [CONCEPT.md](CONCEPT.md).
+A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. Cover art is the main way around your library; lyrics, the queue and details open when you want them. Spotify is optional and stays in its own sections.
 
-**Status:** the roadmap's phases 0–8 are done: library scanning and album grouping, artists with online details, the player with lyrics and queue, companion tools, playlists, smart shuffle and crossfade, and the optional Spotify integration (playlists, Connect devices, streaming through Spotify Soloist, saved albums and followed artists). Not released yet.
+**Status:** 0.1.0 is the first pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
+
+## Features
+
+**Albums.** Gatefold scans your music folders and groups the songs into albums. Editions of the same album (deluxe, remastered, a Japanese version) are merged into one, with the edition as a subtitle. The album grid shows only covers, titles and artists, and fills the window at any width; sort it by artist, title, year or date added. Clicking an album opens its songs in a side panel, where each song unfolds to show its details. Changes to your files show up live, and folders that are temporarily missing (an unmounted drive, a NAS that's off) keep their songs.
+
+**Artists.** The artist list holds album artists only, so featured guests don't clutter it. An artist page groups the albums into albums, EPs & singles, soundtracks and collaborations, and lists under "Appears on" the artist's songs on other artists' albums. With online lookups turned on (you're asked at first start), Gatefold fetches portraits from fanart.tv and Wikimedia Commons, a short Wikipedia bio, and links to Wikipedia, MusicBrainz and Spotify. Portraits can be replaced with your own image or another online one.
+
+**Player.** The mini player at the bottom slides up into a full player with the cover as large as possible, coloured by the cover. Lyrics and the queue open next to it on wide windows. Synced lyrics come from the files or `.lrc` files and follow the song; for Korean, Japanese and Chinese songs an original line and its romanization are shown together, and missing romanization is added automatically through lyrembed. Playback is gapless, with ReplayGain and loudness levelling for songs without ReplayGain tags. Crossfade (up to 12 s) follows where songs actually fade out and start, and albums played in order stay gapless. Media keys and GNOME's media controls work through MPRIS.
+
+**Queue and shuffle.** "Play next" and "Add to queue" go before the rest of the album or playlist. The queue can be reordered (also with Alt+↑/↓), cleared and saved as a playlist, and it's restored when Gatefold starts. Shuffle songs or whole albums, or use **smart shuffle**: mix in similar songs by genre, tempo, artist or sound, and keep playing similar music when the queue ends. The song analysis behind it runs in the background once turned on in Preferences.
+
+**Playlists and search.** Playlists get mosaic covers from their albums, can be reordered by drag and drop, and can be imported and exported as M3U8 or XSPF. One search (Ctrl+F) finds artists, albums, songs and playlists, in a card over the current view.
+
+**Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes:
+
+- **lyrembed** finds lyrics automatically, or opens its page to check and edit them.
+- **cdimport** imports CDs; a banner offers it when you insert one.
+- [Ear Tag](https://flathub.org/apps/app.drey.EarTag) (or Kid3, Picard, or a command of your own) edits tags and covers.
+
+**Spotify (optional).** With Spotify Premium and a developer app of your own (see [Spotify](#spotify-optional) below):
+
+- Play on your Spotify Connect devices, with the player showing what they play.
+- Your Spotify playlists appear next to the local ones. Songs you have play from your files, your own playlists can be edited from Gatefold, and local playlists can be published to Spotify.
+- Saved albums and followed artists that aren't in your library get their own section at the end of the album and artist grids. Artist pages list the artist's releases on Spotify that you don't have.
+- Songs you don't have stream through Spotify Soloist, Spotify's official headless player, in Gatefold's queue.
+
+## Install
+
+Fedora 45: download the RPM from the [releases page](https://github.com/sobakah/gatefold/releases) and install it with
+
+```sh
+sudo dnf install ./gatefold-0.1.0-1.fc45.x86_64.rpm
+```
+
+To build the RPM yourself, install the build dependencies (`sudo dnf builddep gatefold.spec`) and run `make rpm`; the packages end up in `rpmbuild/RPMS/`.
+
+Your library lives in `~/.local/share/io.github.sobakah.Gatefold/`, cover thumbnails in `~/.cache/io.github.sobakah.Gatefold/`.
 
 ## Development setup (Fedora 45)
 
@@ -62,16 +99,7 @@ like this a shared one). Preferences → Spotify walks through it:
 2. Add the redirect URI `http://127.0.0.1:8974/callback` exactly.
 3. Paste the client ID into Preferences and press Connect.
 
-The account needs Spotify Premium. The login is stored in the keyring. Then:
-
-- **Play On…** in the player lists your Spotify Connect devices; the player then controls the
-  device and shows what it plays (with lyrics and cover from your library when it has the song).
-- **Spotify playlists** appear next to local ones; entries that are in your library play from
-  your files (ISRC, then title, artist and length). Your own playlists can be edited here
-  and the changes are sent to Spotify; *Create on Spotify* publishes a local playlist.
-- **Saved albums and followed artists** that aren't in your library show in their own section
-  at the end of the album and artist grids (collapsed by default); artist pages list their
-  releases on Spotify you don't have. Their songs play from your library when you have them, else they stream.
+The account needs Spotify Premium. The login is stored in the keyring. What Gatefold then does with Spotify is listed under [Features](#features).
 
 **Streaming** (optional): Preferences → Spotify → Streaming plays songs that aren't in your
 library, in Gatefold's queue. Your own files always play from the library.
