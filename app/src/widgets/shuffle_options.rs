@@ -100,25 +100,51 @@ pub fn shuffle_popover() -> gtk::Popover {
         .css_classes(["dim-label", "caption"])
         .build();
     options.append(&analysis_note);
+    let start_analysis = gtk::Button::builder()
+        .label(gettext("Analyze Songs in the Background"))
+        .halign(gtk::Align::Start)
+        .css_classes(["pill", "small"])
+        .build();
+    start_analysis.connect_clicked(glib::clone!(
+        #[strong]
+        settings,
+        move |_| {
+            let _ = settings.set_string("analysis-mode", "background");
+            let _ = settings.set_boolean("analysis-asked", true);
+        }
+    ));
+    options.append(&start_analysis);
     let analyzer = GatefoldApplication::get().analyzer();
     let update_note = glib::clone!(
         #[weak]
         analysis_note,
+        #[weak]
+        start_analysis,
+        #[strong]
+        settings,
         move |analyzer: &crate::analyzer::Analyzer| {
             let (done, total) = (analyzer.analyzed(), analyzer.total());
+            let off = settings.string("analysis-mode") == "off";
             analysis_note.set_visible(done < total);
-            // Translators: smart shuffle; {done} and {total} are song counts.
-            analysis_note.set_label(
-                &gettext("Tempo and sound: {done} of {total} songs analyzed so far")
+            start_analysis.set_visible(off && done < total);
+            let text = if off {
+                gettext("Tempo and sound need the song analysis, which is off.")
+            } else {
+                // Translators: smart shuffle; {done} and {total} are song counts.
+                gettext("Tempo and sound: {done} of {total} songs analyzed so far")
                     .replace("{done}", &done.to_string())
-                    .replace("{total}", &total.to_string()),
-            );
+                    .replace("{total}", &total.to_string())
+            };
+            analysis_note.set_label(&text);
         }
     );
     update_note(&analyzer);
     let on_progress = update_note.clone();
     analyzer.connect_analyzed_notify(move |analyzer| on_progress(analyzer));
-    analyzer.connect_total_notify(move |analyzer| update_note(analyzer));
+    let on_total = update_note.clone();
+    analyzer.connect_total_notify(move |analyzer| on_total(analyzer));
+    let on_mode = analyzer.clone();
+    settings.connect_changed(Some("analysis-mode"), move |_, _| update_note(&on_mode));
 
     // How often.
     let every = gtk::SpinButton::with_range(1.0, 5.0, 1.0);

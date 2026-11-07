@@ -34,12 +34,20 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     Adw.PreferencesGroup {
       title: _("Song Analysis");
       description: _(
-        "Tempo and sound of each song, for “Mix In Similar Songs” and “Keep Playing”. Runs in the background at low priority and waits while on battery."
+        "Tempo and sound of each song, for “Mix In Similar Songs” and “Keep Playing”. In the background it runs at low priority and waits while on battery; as fast as possible uses several cores, then continues in the background for new songs."
       );
 
-      Adw.SwitchRow analysis_row {
+      Adw.ComboRow analysis_row {
         title: _("_Analyze Songs");
         use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Off"),
+            _("In the Background"),
+            _("Now, as Fast as Possible"),
+          ]
+        };
       }
 
       Adw.ActionRow analysis_progress_row {

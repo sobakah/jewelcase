@@ -15,6 +15,8 @@ const REPLAYGAIN_MODES: [&str; 4] = ["off", "auto", "track", "album"];
 /// The `tag-editor` setting values, in the order of the combo row.
 const TAG_EDITORS: [&str; 5] = ["auto", "eartag", "kid3", "picard", "custom"];
 /// The `lyrics-layout` setting values, in the order of the combo row.
+/// "analysis-mode" values, in the order of the Analyze Songs row.
+const ANALYSIS_MODES: [&str; 3] = ["off", "background", "full"];
 const LYRICS_LAYOUTS: [&str; 3] = ["original-top", "romanization-top", "original-only"];
 
 mod imp {
@@ -62,7 +64,7 @@ mod imp {
         #[template_child]
         pub spotify_app_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub analysis_row: TemplateChild<adw::SwitchRow>,
+        pub analysis_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub analysis_progress_row: TemplateChild<adw::ActionRow>,
         #[template_child]
@@ -166,7 +168,18 @@ mod imp {
         /// Song analysis: on/off, progress, pause (§7).
         fn setup_analysis(&self, settings: &gio::Settings) {
             settings
-                .bind("analysis-enabled", &*self.analysis_row, "active")
+                .bind("analysis-mode", &*self.analysis_row, "selected")
+                .mapping(|value, _| {
+                    let index = ANALYSIS_MODES
+                        .iter()
+                        .position(|m| Some(*m) == value.str())
+                        .unwrap_or(0);
+                    Some((index as u32).to_value())
+                })
+                .set_mapping(|value, _| {
+                    let index = value.get::<u32>().ok()? as usize;
+                    ANALYSIS_MODES.get(index).map(|m| m.to_variant())
+                })
                 .build();
             let analyzer = crate::application::GatefoldApplication::get().analyzer();
             let row = self.analysis_progress_row.get();
@@ -196,7 +209,7 @@ mod imp {
                     );
                     let status = if total > 0 && done >= total {
                         gettext("Done")
-                    } else if !settings.boolean("analysis-enabled") {
+                    } else if settings.string("analysis-mode") == "off" {
                         gettext("Off")
                     } else if analyzer.paused() {
                         gettext("Paused")
@@ -219,7 +232,7 @@ mod imp {
                     } else {
                         gettext("Pause")
                     }));
-                    pause.set_visible(done < total && settings.boolean("analysis-enabled"));
+                    pause.set_visible(done < total && settings.string("analysis-mode") != "off");
                 }
             );
             update(&analyzer);
@@ -229,7 +242,7 @@ mod imp {
             }
             let on_setting = update.clone();
             let analyzer_for_setting = analyzer.clone();
-            settings.connect_changed(Some("analysis-enabled"), move |_, _| {
+            settings.connect_changed(Some("analysis-mode"), move |_, _| {
                 on_setting(&analyzer_for_setting)
             });
             pause.connect_clicked(move |_| {

@@ -215,6 +215,63 @@ impl Queue {
         );
     }
 
+    /// Takes out the upcoming suggested songs (mixing off, or redone).
+    pub fn remove_upcoming_suggestions(&mut self) {
+        let first_upcoming = self.current.map_or(0, |c| c + 1);
+        let removed: Vec<u64> = self.items[first_upcoming.min(self.items.len())..]
+            .iter()
+            .filter(|i| i.origin == Origin::Suggested)
+            .map(|i| i.uid)
+            .collect();
+        self.items.retain(|i| !removed.contains(&i.uid));
+        if let Some(order) = self.unshuffled.as_mut() {
+            order.retain(|uid| !removed.contains(uid));
+        }
+    }
+
+    /// Mixes suggestions into the whole upcoming queue: one after every
+    /// `every` album songs (the current one counts), from `pick(seed)` for
+    /// the song before it. Returns how many were added.
+    pub fn mix_throughout(
+        &mut self,
+        every: usize,
+        mut pick: impl FnMut(i64) -> Option<i64>,
+    ) -> usize {
+        let every = every.max(1);
+        let Some(current) = self.current else {
+            return 0;
+        };
+        let mut count = usize::from(self.items[current].origin == Origin::Context);
+        let mut added = 0;
+        let mut index = current + 1;
+        while index < self.items.len() {
+            let item = self.items[index];
+            match item.origin {
+                Origin::Suggested => count = 0,
+                Origin::Context => count += 1,
+                Origin::User => {}
+            }
+            if count >= every {
+                count = 0;
+                if let Some(track_id) = pick(item.track_id) {
+                    let new = self.new_item(track_id, Origin::Suggested);
+                    self.items.insert(index + 1, new);
+                    if let Some(order) = self.unshuffled.as_mut() {
+                        let at = order
+                            .iter()
+                            .position(|&uid| uid == item.uid)
+                            .map_or(order.len(), |p| p + 1);
+                        order.insert(at, new.uid);
+                    }
+                    added += 1;
+                    index += 1;
+                }
+            }
+            index += 1;
+        }
+        added
+    }
+
     /// Adds a suggested song at the end ("keep playing similar music").
     pub fn append_suggestion(&mut self, track_id: i64) {
         let unshuffled_position = self.unshuffled.as_ref().map(Vec::len);
@@ -682,6 +739,31 @@ mod tests {
         // Suggestions move like album songs, never into "Next up".
         assert!(!queue.move_item(2, 1));
         assert_eq!(ids(&queue)[1..3], [10, 99]);
+    }
+
+    #[test]
+    fn mixing_throughout_fills_the_queue_and_can_be_undone() {
+        let mut queue = Queue::new();
+        let tracks: Vec<i64> = (1..=10).collect();
+        queue.play_context(&tracks, Some(0), None, false, &mut rng());
+        let mut next = 100;
+        let added = queue.mix_throughout(3, |_seed| {
+            next += 1;
+            Some(next)
+        });
+        // The current song counts: after 3, 6 and 9.
+        assert_eq!(added, 3);
+        assert_eq!(ids(&queue), [1, 2, 3, 101, 4, 5, 6, 102, 7, 8, 9, 103, 10]);
+        // Redone, the same positions; nothing doubles up.
+        queue.remove_upcoming_suggestions();
+        assert_eq!(ids(&queue), tracks);
+        assert_eq!(queue.mix_throughout(3, |_| Some(200)), 3);
+        queue.remove_upcoming_suggestions();
+        queue.set_shuffle(true, &mut rng());
+        queue.mix_throughout(2, |_| Some(300));
+        queue.remove_upcoming_suggestions();
+        queue.set_shuffle(false, &mut rng());
+        assert_eq!(ids(&queue), tracks);
     }
 
     #[test]

@@ -144,6 +144,64 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           revealed: false;
         }
 
+        // Smart shuffle's song analysis, asked once (CONCEPT.md §7).
+
+        [top]
+        Gtk.Revealer analysis_revealer {
+          transition-type: slide_down;
+
+          child: Adw.WrapBox {
+            child-spacing: 6;
+            line-spacing: 6;
+            justify: fill;
+
+            styles [
+              "tool-bar",
+            ]
+
+            Gtk.Label analysis_label {
+              hexpand: true;
+              wrap: true;
+              max-width-chars: 60;
+              xalign: 0;
+              valign: center;
+            }
+
+            Gtk.Box {
+              spacing: 6;
+              halign: end;
+
+              Gtk.Button {
+                label: _("_Not Now");
+                use-underline: true;
+                valign: center;
+                action-name: "win.analysis-choice";
+                action-target: "'off'";
+              }
+
+              Gtk.Button {
+                label: _("In _Background");
+                use-underline: true;
+                valign: center;
+                action-name: "win.analysis-choice";
+                action-target: "'background'";
+              }
+
+              Gtk.Button {
+                label: _("_Analyze Now");
+                use-underline: true;
+                valign: center;
+                action-name: "win.analysis-choice";
+                action-target: "'full'";
+
+                styles [
+                  "suggested-action",
+                ]
+              }
+            }
+          };
+        }
+
         // The library views, or search results while searching.
         content: Gtk.Stack main_stack {
           transition-type: crossfade;

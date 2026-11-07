@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gatefold_core::playback::{self, PlayerEvent};
-use gatefold_core::queue::{Origin, Queue, RepeatMode};
+use gatefold_core::queue::{Queue, RepeatMode};
 use gatefold_core::similar::{self, Criteria, SongFeatures};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
@@ -67,8 +67,6 @@ mod imp {
         /// Queue entries from the current one on, for the queue view.
         pub queue_model: OnceCell<gio::ListStore>,
         pub tracks: RefCell<HashMap<i64, TrackObject>>,
-        /// Album songs started since the last mixed-in suggestion (§7).
-        pub mix_count: Cell<u32>,
         /// The library's similarity data, loaded when first needed.
         pub similarity: RefCell<Option<std::rc::Rc<Vec<SongFeatures>>>>,
         pub state: Cell<State>,
@@ -150,6 +148,25 @@ impl Player {
                 }
             ),
         );
+        // Mixing switched or changed: redo the queue's suggestions.
+        for key in [
+            "mix-similar",
+            "mix-every",
+            "mix-genre",
+            "mix-bpm",
+            "mix-artist",
+            "mix-sound",
+            "mix-bpm-tolerance",
+        ] {
+            settings.connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak]
+                    player,
+                    move |_, _| player.remix()
+                ),
+            );
+        }
         imp.settings.set(settings).expect("set once");
 
         match playback::Player::new() {
@@ -304,6 +321,7 @@ impl Player {
             &mut rand::rng(),
         );
         self.load_current(true, 0);
+        self.mix_upcoming();
         self.queue_changed();
     }
 
@@ -329,6 +347,7 @@ impl Player {
             .borrow_mut()
             .play_context(&ids, start, None, shuffle, &mut rand::rng());
         self.load_current(true, 0);
+        self.mix_upcoming();
         self.queue_changed();
     }
 
@@ -557,6 +576,8 @@ impl Player {
             albums.then_some(album_of),
             &mut rand::rng(),
         );
+        // Suggestions go where the new order puts album songs.
+        self.mix_upcoming();
         self.queue_changed();
         self.apply_replaygain();
     }
@@ -605,9 +626,6 @@ impl Player {
         self.set_position(start_ms);
         self.set_state(if play { State::Playing } else { State::Paused });
         self.emit_by_name::<()>("seeked", &[]);
-        if play {
-            self.track_started();
-        }
         self.update_next();
     }
 
@@ -632,13 +650,10 @@ impl Player {
         data
     }
 
-    /// A song like `seed_id` that isn't queued or recently played.
-    fn suggest_after(&self, seed_id: i64) -> Option<i64> {
-        let settings = self.settings();
-        let pool = self.similarity();
-        let seed = pool.iter().find(|f| f.track_id == seed_id)?;
+    /// Songs not to suggest: queued ones and those played lately.
+    fn mix_exclusions(&self) -> HashSet<i64> {
         let mut exclude: HashSet<i64> = self.queued_track_ids().into_iter().collect();
-        let hours = i64::from(settings.int("mix-skip-recent-hours"));
+        let hours = i64::from(self.settings().int("mix-skip-recent-hours"));
         if hours > 0
             && let Some(played) = self
                 .library()
@@ -647,6 +662,14 @@ impl Player {
         {
             exclude.extend(played);
         }
+        exclude
+    }
+
+    /// A song like `seed_id`, not in `exclude`.
+    fn suggest_with(&self, seed_id: i64, exclude: &HashSet<i64>) -> Option<i64> {
+        let settings = self.settings();
+        let pool = self.similarity();
+        let seed = pool.iter().find(|f| f.track_id == seed_id)?;
         let criteria = Criteria {
             genre: settings.boolean("mix-genre"),
             bpm: settings.boolean("mix-bpm"),
@@ -654,36 +677,38 @@ impl Player {
             sound: settings.boolean("mix-sound"),
             bpm_tolerance: f64::from(settings.int("mix-bpm-tolerance")) / 100.0,
         };
-        similar::suggest(seed, &pool, &exclude, &criteria, &mut rand::rng())
+        similar::suggest(seed, &pool, exclude, &criteria, &mut rand::rng())
     }
 
-    /// A song started: after every few album songs, mix one in.
-    fn track_started(&self) {
+    /// A song like `seed_id` that isn't queued or recently played.
+    fn suggest_after(&self, seed_id: i64) -> Option<i64> {
+        self.suggest_with(seed_id, &self.mix_exclusions())
+    }
+
+    /// Mixes suggestions into the upcoming queue, one after every few
+    /// album songs (or takes them out when mixing is off). The caller
+    /// updates the queue (queue_changed).
+    fn mix_upcoming(&self) {
         let imp = self.imp();
-        let (current, next_suggested) = {
-            let queue = imp.queue.borrow();
-            let next = queue
-                .current_index()
-                .and_then(|i| queue.items().get(i + 1))
-                .map(|i| i.origin);
-            (queue.current().copied(), next == Some(Origin::Suggested))
-        };
-        let Some(current) = current else { return };
-        if current.origin != Origin::Context {
-            return;
-        }
-        imp.mix_count.set(imp.mix_count.get() + 1);
+        imp.queue.borrow_mut().remove_upcoming_suggestions();
         let settings = self.settings();
-        let every = settings.int("mix-every").max(1) as u32;
-        if !settings.boolean("mix-similar") || imp.mix_count.get() < every || next_suggested {
+        if !settings.boolean("mix-similar") {
             return;
         }
-        if let Some(id) = self.suggest_after(current.track_id) {
-            tracing::debug!("Mixing in track {id} after {}", current.track_id);
-            imp.mix_count.set(0);
-            imp.queue.borrow_mut().mix_in(id);
-            self.queue_changed();
-        }
+        let every = settings.int("mix-every").max(1) as usize;
+        let mut exclude = self.mix_exclusions();
+        let added = imp.queue.borrow_mut().mix_throughout(every, |seed| {
+            let id = self.suggest_with(seed, &exclude)?;
+            exclude.insert(id);
+            Some(id)
+        });
+        tracing::debug!("Mixed {added} suggestions into the queue");
+    }
+
+    /// Mix settings changed: redo the suggestions in the queue.
+    fn remix(&self) {
+        self.mix_upcoming();
+        self.queue_changed();
     }
 
     /// "Keep playing similar music when the queue ends": nothing after the
@@ -744,7 +769,6 @@ impl Player {
                         self.set_current_track(current.and_then(|i| self.track(i.track_id)));
                         self.set_position(0);
                         self.emit_by_name::<()>("seeked", &[]);
-                        self.track_started();
                         self.update_next();
                         self.queue_changed();
                     }

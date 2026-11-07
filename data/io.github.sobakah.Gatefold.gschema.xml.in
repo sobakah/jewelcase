@@ -129,10 +129,19 @@
       <default>false</default>
       <summary>Show the remaining time instead of the song’s length</summary>
     </key>
-    <key name="analysis-enabled" type="b">
-      <default>true</default>
-      <summary>Analyze songs for smart shuffle</summary>
-      <description>Tempo and sound of each song, in the background; paused on battery.</description>
+    <key name="analysis-mode" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="background"/>
+        <choice value="full"/>
+      </choices>
+      <default>"off"</default>
+      <summary>Song analysis for smart shuffle</summary>
+      <description>“background”: one song at a time at low priority, waiting on battery; “full”: as fast as possible on several cores, then background for new songs.</description>
+    </key>
+    <key name="analysis-asked" type="b">
+      <default>false</default>
+      <summary>Whether the user was asked about song analysis</summary>
     </key>
     <key name="shuffle-albums" type="b">
       <default>false</default>

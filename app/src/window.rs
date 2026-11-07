@@ -58,6 +58,10 @@ mod imp {
         #[template_child]
         pub library_toolbar: TemplateChild<adw::ToolbarView>,
         #[template_child]
+        pub analysis_revealer: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub analysis_label: TemplateChild<gtk::Label>,
+        #[template_child]
         pub artist_split: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub artist_holder: TemplateChild<adw::Bin>,
@@ -104,6 +108,19 @@ mod imp {
             klass.install_action("win.open-player", None, |win, _, _| {
                 win.imp().bottom_sheet.set_open(true);
             });
+            klass.install_action(
+                "win.analysis-choice",
+                Some(glib::VariantTy::STRING),
+                |win, _, param| {
+                    let Some(mode) = param.and_then(|p| p.get::<String>()) else {
+                        return;
+                    };
+                    let settings = win.settings();
+                    let _ = settings.set_string("analysis-mode", &mode);
+                    let _ = settings.set_boolean("analysis-asked", true);
+                    win.imp().analysis_revealer.set_reveal_child(false);
+                },
+            );
             klass.install_action("win.queue-card", None, |win, _, _| {
                 win.imp().mini_player.show_queue();
             });
@@ -236,6 +253,7 @@ mod imp {
             obj.setup_artist_overlay();
             obj.setup_panel_resizers();
             obj.setup_floating_player();
+            obj.setup_analysis_prompt();
             obj.setup_messages();
             obj.setup_tools();
 
@@ -738,6 +756,68 @@ impl GatefoldWindow {
             .bottom_sheet
             .connect_bottom_bar_height_notify(move |_| on_height());
         update();
+    }
+
+    /// Asks once whether to analyze songs for smart shuffle, and again when
+    /// a feature that needs it is turned on while it's off.
+    fn setup_analysis_prompt(&self) {
+        let settings = self.settings();
+        let update_label = glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move || {
+                let total = GatefoldApplication::get().analyzer().total();
+                // About 1.3 s per song in the background.
+                let minutes = (u64::from(total) * 13 / 10 / 60).max(1);
+                // Translators: {} is a number of minutes.
+                window.imp().analysis_label.set_label(
+                    &gettext(
+                        "Analyze your songs for smart shuffle? It finds songs with a similar tempo and sound; in the background it takes about {} min.",
+                    )
+                    .replace("{}", &minutes.to_string()),
+                );
+            }
+        );
+        update_label();
+        let on_total = update_label.clone();
+        GatefoldApplication::get()
+            .analyzer()
+            .connect_total_notify(move |_| on_total());
+        let off = settings.string("analysis-mode") == "off";
+        if off && !settings.boolean("analysis-asked") {
+            self.imp().analysis_revealer.set_reveal_child(true);
+        }
+        for key in [
+            "mix-similar",
+            "keep-playing-similar",
+            "mix-bpm",
+            "mix-sound",
+        ] {
+            settings.connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak(rename_to = window)]
+                    self,
+                    move |settings, key| {
+                        if settings.boolean(key) && settings.string("analysis-mode") == "off" {
+                            window.imp().analysis_revealer.set_reveal_child(true);
+                        }
+                    }
+                ),
+            );
+        }
+        settings.connect_changed(
+            Some("analysis-mode"),
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |settings, _| {
+                    if settings.string("analysis-mode") != "off" {
+                        window.imp().analysis_revealer.set_reveal_child(false);
+                    }
+                }
+            ),
+        );
     }
 
     fn setup_panel_resizers(&self) {
