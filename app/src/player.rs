@@ -1109,7 +1109,12 @@ impl Player {
     fn crossfade_plan(&self, track_id: i64, duration: u64) -> (u64, u64) {
         let longest = self.crossfade_ms();
         let smart = self.settings().boolean("crossfade-smart");
-        if smart && let Some(edges) = self.song_edges(track_id) {
+        // An end at the analysis' 20-minute cut (stored before such songs
+        // lost their edges) isn't the song's end.
+        if smart
+            && let Some(edges) = self.song_edges(track_id)
+            && edges.end_ms < 20 * 60 * 1000 - 1000
+        {
             let end = edges.end_ms.min(duration);
             let length = end
                 .saturating_sub(edges.outro_ms)

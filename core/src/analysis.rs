@@ -113,12 +113,14 @@ pub fn content_key(path: &Path) -> std::io::Result<String> {
 /// thread. Decodes with GStreamer like playback, so whatever plays can be
 /// analyzed; `bpmdetect` listens to the same samples bliss gets.
 pub fn analyze(path: &Path) -> Result<SongAnalysis, String> {
-    let (samples, bpm) = decode(path)?;
+    let (samples, bpm, whole) = decode(path)?;
     if samples.len() < SAMPLE_RATE as usize {
         return Err("less than a second of audio".into());
     }
     let duration = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE));
-    let edges = edges(&samples);
+    // A cut song's end isn't known: smart crossfade would end it at the
+    // cut (a 30-minute piece at 20:00).
+    let edges = edges(&samples).filter(|_| whole);
     let loudness = loudness(&samples, SAMPLE_RATE);
     let song = Song::try_from(PreAnalyzedSong {
         path: path.to_path_buf(),
@@ -242,8 +244,9 @@ const SAMPLE_RATE: u32 = 22_050;
 /// Up to 20 minutes are analyzed; longer pieces are cut there.
 const MAX_SAMPLES: usize = SAMPLE_RATE as usize * 60 * 20;
 
-/// The song as mono 22050 Hz samples, and the tempo `bpmdetect` found.
-fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>), String> {
+/// The song as mono 22050 Hz samples, the tempo `bpmdetect` found, and
+/// whether that's the whole song (not cut at 20 minutes or by an error).
+fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>, bool), String> {
     let uri = gst::glib::filename_to_uri(path, None).map_err(|e| e.to_string())?;
     let pipeline = gst::parse::launch(&format!(
         "uridecodebin3 uri=\"{uri}\" ! audioconvert ! audioresample \
@@ -308,9 +311,10 @@ fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>), String> {
         }
     }
     let _ = pipeline.set_state(gst::State::Null);
+    let whole = error.is_none() && samples.len() <= MAX_SAMPLES;
     match error {
         Some(error) if samples.len() < SAMPLE_RATE as usize * 10 => Err(error),
-        _ => Ok((samples, bpm)),
+        _ => Ok((samples, bpm, whole)),
     }
 }
 
