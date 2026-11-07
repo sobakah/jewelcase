@@ -180,7 +180,7 @@ impl GatefoldApplication {
             .activate(|app: &Self, _, _| app.show_about())
             .build();
         let rescan = gio::ActionEntry::builder("rescan")
-            .activate(|app: &Self, _, _| app.library().rescan())
+            .activate(|app: &Self, _, _| app.library().rescan_all())
             .build();
         let import_cd = gio::ActionEntry::builder("import-cd")
             .activate(|app: &Self, _, _| app.tools().import_cd())

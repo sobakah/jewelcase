@@ -142,6 +142,16 @@ impl Aliases {
         self.canonical.len()
     }
 
+    /// Changes when the aliases do (artists are identified by them).
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut pairs: Vec<(&String, &String)> = self.canonical.iter().collect();
+        pairs.sort();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        pairs.hash(&mut hasher);
+        hasher.finish()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.canonical.is_empty()
     }

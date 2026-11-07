@@ -59,6 +59,8 @@ mod imp {
         pub lookups: RefCell<HashSet<i64>>,
         /// Each album's genres, most common first (filter, album panel).
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
+        /// The next scan regroups even if nothing changed ("Rescan Library").
+        pub force_rescan: Cell<bool>,
         /// See `match_index()`; dropped when the library is read again.
         pub match_index: RefCell<Option<std::rc::Rc<gatefold_core::matching::MatchIndex>>>,
         /// Barcodes by album, to recognize albums on Spotify (§9.8).
@@ -1019,6 +1021,12 @@ impl Library {
     }
 
     /// Starts an incremental scan, or queues one if a scan is running.
+    /// "Rescan Library": everything regrouped, also if no file changed.
+    pub fn rescan_all(&self) {
+        self.imp().force_rescan.set(true);
+        self.rescan();
+    }
+
     pub fn rescan(&self) {
         let imp = self.imp();
         if imp.scanning.get() {
@@ -1030,6 +1038,7 @@ impl Library {
         self.set_scan_status(&gettext("Looking for music…"));
 
         let folders = self.folders();
+        let force = imp.force_rescan.take();
         let lyrembed_override = self.settings().string("lyrembed-path").to_string();
         let (tx, rx) = async_channel::unbounded();
         std::thread::spawn(move || {
@@ -1049,7 +1058,7 @@ impl Library {
                     let progress = |p| {
                         let _ = tx.send_blocking(ScanMessage::Progress(p));
                     };
-                    scanner::scan(&mut db, &folders, &aliases, &covers, &progress)
+                    scanner::scan(&mut db, &folders, &aliases, &covers, force, &progress)
                         .map_err(|e| e.to_string())
                 });
             let _ = tx.send_blocking(ScanMessage::Done(result, aliases));
@@ -1059,13 +1068,17 @@ impl Library {
             #[weak(rename_to = library)]
             self,
             async move {
+                let mut reloaded = false;
                 while let Ok(message) = rx.recv().await {
                     match message {
-                        ScanMessage::Progress(ScanProgress::AlbumsReady) => library.reload(),
+                        ScanMessage::Progress(ScanProgress::AlbumsReady) => {
+                            library.reload();
+                            reloaded = true;
+                        }
                         ScanMessage::Progress(progress) => library.show_progress(progress),
                         ScanMessage::Done(result, aliases) => {
                             library.imp().aliases.replace(aliases);
-                            library.scan_done(result);
+                            library.scan_done(result, reloaded);
                             break;
                         }
                     }
@@ -1094,8 +1107,15 @@ impl Library {
         self.notify_scan_status();
     }
 
-    fn scan_done(&self, result: Result<ScanSummary, String>) {
+    /// `reloaded`: the regrouped albums are shown already.
+    fn scan_done(&self, result: Result<ScanSummary, String>, reloaded: bool) {
         let imp = self.imp();
+        // Read the library again only if the scan changed something (or
+        // failed): most scans find nothing new.
+        let changed = match &result {
+            Ok(summary) => (summary.regrouped && !reloaded) || summary.covers_made > 0,
+            Err(_) => true,
+        };
         match result {
             Ok(summary) => {
                 tracing::info!("Scan finished: {summary:?}");
@@ -1111,7 +1131,9 @@ impl Library {
                 self.emit_by_name::<()>("message", &[&gettext("The library couldn't be scanned")]);
             }
         }
-        self.reload();
+        if changed {
+            self.reload();
+        }
         imp.scanning.set(false);
         self.notify_scanning();
         if imp.rescan_pending.take() {

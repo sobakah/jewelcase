@@ -19,7 +19,7 @@ fn main() {
     let covers = CoverCache::new(cover_dir);
     let aliases = Aliases::from_lyrembed();
     let start = std::time::Instant::now();
-    let summary = scan(&mut db, &folders, &aliases, &covers, &|_| {}).expect("scan");
+    let summary = scan(&mut db, &folders, &aliases, &covers, true, &|_| {}).expect("scan");
     println!("{summary:?} in {:?}", start.elapsed());
 
     for album in db.albums().expect("albums") {

@@ -52,7 +52,16 @@ pub struct ScanSummary {
     pub symlinks_skipped: usize,
     pub albums: usize,
     pub artists: usize,
+    /// Albums, artists and search were rebuilt (something changed).
+    pub regrouped: bool,
+    /// Album cover thumbnails made.
+    pub covers_made: usize,
 }
+
+/// Raise when grouping albums or artists changes, so the next scan
+/// regroups even if no file changed.
+const GROUPING_VERSION: u32 = 2;
+const FINGERPRINT_KEY: &str = "library-grouped-with";
 
 struct FoundFile {
     path: PathBuf,
@@ -60,12 +69,14 @@ struct FoundFile {
     size: i64,
 }
 
-/// Brings the database up to date with `folders` and regroups the albums.
+/// Brings the database up to date with `folders` and regroups the albums
+/// when something changed (always with `force`: "Rescan Library").
 pub fn scan(
     db: &mut Database,
     folders: &[PathBuf],
     aliases: &Aliases,
     covers: &CoverCache,
+    force: bool,
     progress: &(dyn Fn(ScanProgress) + Sync),
 ) -> Result<ScanSummary, DbError> {
     let mut summary = ScanSummary::default();
@@ -106,19 +117,31 @@ pub fn scan(
     summary.read = read_files(db, &changed, progress, &mut summary.failed)?;
     summary.removed = removed.len();
     db.delete_tracks(&removed)?;
-    update_folder_covers(db, &seen)?;
+    let covers_changed = update_folder_covers(db, &seen)?;
 
-    let tracks = db.all_tracks()?;
-    let albums = group_albums(&tracks);
-    let artists = build_artists(&albums, &tracks, aliases);
-    summary.albums = albums.len();
-    summary.artists = artists.len();
-    db.replace_library(&albums, &artists)?;
-    db.relink_playlists()?;
-    db.rebuild_search(aliases)?;
-    progress(ScanProgress::AlbumsReady);
+    // Nothing changed (most scans: every start, a watcher event for a
+    // file that isn't music): albums, artists and search stay as they are.
+    let fingerprint = format!("{GROUPING_VERSION}:{}", aliases.fingerprint());
+    let regroup = force
+        || summary.read > 0
+        || summary.removed > 0
+        || covers_changed
+        || db.app_state(FINGERPRINT_KEY)?.as_deref() != Some(fingerprint.as_str());
+    if regroup {
+        let tracks = db.all_tracks()?;
+        let albums = group_albums(&tracks);
+        let artists = build_artists(&albums, &tracks, aliases);
+        summary.albums = albums.len();
+        summary.artists = artists.len();
+        db.replace_library(&albums, &artists)?;
+        db.relink_playlists()?;
+        db.rebuild_search(aliases)?;
+        db.set_app_state(FINGERPRINT_KEY, &fingerprint)?;
+        summary.regrouped = true;
+        progress(ScanProgress::AlbumsReady);
+    }
 
-    make_covers(db, covers, progress)?;
+    summary.covers_made = make_covers(db, covers, progress)?;
     Ok(summary)
 }
 
@@ -293,7 +316,8 @@ fn folder_cover_key(track: &Path, cache: &FolderCovers) -> Option<String> {
 /// A folder image (cover.jpg …) added, replaced or removed since the last
 /// scan: the songs there without an embedded picture get the new cover.
 /// (Only changed audio files are read, so this isn't noticed otherwise.)
-fn update_folder_covers(db: &mut Database, found: &HashSet<PathBuf>) -> Result<(), DbError> {
+/// Whether songs' covers changed.
+fn update_folder_covers(db: &mut Database, found: &HashSet<PathBuf>) -> Result<bool, DbError> {
     let stamp = |path: &Path| -> Option<(i64, i64)> {
         let meta = fs::metadata(path).ok()?;
         let mtime = meta
@@ -325,6 +349,7 @@ fn update_folder_covers(db: &mut Database, found: &HashSet<PathBuf>) -> Result<(
             now.insert(folder, current);
         }
     }
+    let mut updated = false;
     if !changed.is_empty() {
         let cache = FolderCovers::default();
         let updates: Vec<(i64, Option<String>)> = db
@@ -340,17 +365,20 @@ fn update_folder_covers(db: &mut Database, found: &HashSet<PathBuf>) -> Result<(
         if !updates.is_empty() {
             tracing::info!("{} songs take a changed folder cover", updates.len());
             db.set_track_cover_keys(&updates)?;
+            updated = true;
         }
     }
-    db.replace_folder_cover_stamps(&now)
+    db.replace_folder_cover_stamps(&now)?;
+    Ok(updated)
 }
 
 /// Creates thumbnails for album covers that aren't cached yet.
+/// Returns how many it made.
 fn make_covers(
     db: &Database,
     covers: &CoverCache,
     progress: &(dyn Fn(ScanProgress) + Sync),
-) -> Result<(), DbError> {
+) -> Result<usize, DbError> {
     let missing: Vec<(String, PathBuf)> = db
         .album_cover_sources()?
         .into_iter()
@@ -359,7 +387,7 @@ fn make_covers(
         .collect();
     let total = missing.len();
     if total == 0 {
-        return Ok(());
+        return Ok(0);
     }
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
@@ -380,7 +408,7 @@ fn make_covers(
             });
         }
     });
-    Ok(())
+    Ok(total)
 }
 
 fn make_cover(covers: &CoverCache, key: &str, track: &Path) -> Result<(), String> {
@@ -424,6 +452,44 @@ mod tests {
         let paths: Vec<_> = found.iter().map(|f| f.path.clone()).collect();
         assert_eq!(paths, [root.join("Adele/25/01 Hello.flac")]);
         assert_eq!(symlinks, 2);
+    }
+
+    #[test]
+    fn a_scan_without_changes_doesnt_regroup() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut db = Database::open_in_memory().unwrap();
+        let covers = CoverCache::new(dir.path().join("covers"));
+        let music = dir.path().join("Musik");
+        fs::create_dir_all(&music).unwrap();
+        fs::write(music.join("broken.flac"), b"nope").unwrap();
+        let scan_now = |db: &mut Database, force| {
+            scan(
+                db,
+                std::slice::from_ref(&music),
+                &Aliases::default(),
+                &covers,
+                force,
+                &|_| {},
+            )
+            .unwrap()
+        };
+        // The first time, the library is grouped.
+        assert!(scan_now(&mut db, false).regrouped);
+        assert!(!scan_now(&mut db, false).regrouped);
+        // "Rescan Library" always does.
+        assert!(scan_now(&mut db, true).regrouped);
+        // Other aliases (lyrembed's list changed): grouped again.
+        let aliases = Aliases::parse_lyrembed("  BTS = Bangtan Boys\n");
+        let summary = scan(
+            &mut db,
+            std::slice::from_ref(&music),
+            &aliases,
+            &covers,
+            false,
+            &|_| {},
+        )
+        .unwrap();
+        assert!(summary.regrouped);
     }
 
     #[test]
@@ -487,6 +553,7 @@ mod tests {
             std::slice::from_ref(&music),
             &Aliases::default(),
             &covers,
+            false,
             &|_| {},
         )
         .unwrap();
@@ -526,11 +593,13 @@ mod tests {
             &[music, unmounted.clone(), mount_point.clone()],
             &Aliases::default(),
             &covers,
+            false,
             &|_| {},
         )
         .unwrap();
         fs::set_permissions(&locked, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         assert_eq!(summary.removed, 1);
+        assert!(summary.regrouped);
         let mut left: Vec<_> = db
             .all_tracks()
             .unwrap()

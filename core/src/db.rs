@@ -39,6 +39,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/014_folder_covers.sql")),
     M::up(include_str!("db/015_declined_suggestions.sql")),
     M::up(include_str!("db/016_indexes.sql")),
+    M::up(include_str!("db/017_app_state.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -313,6 +314,24 @@ impl Database {
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn app_state(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM app_state WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn set_app_state(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
         Ok(())
     }
 
