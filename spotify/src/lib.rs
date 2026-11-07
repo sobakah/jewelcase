@@ -8,7 +8,7 @@ pub mod auth;
 pub mod model;
 
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
 
@@ -198,8 +198,13 @@ pub struct Client {
     /// Kinds of requests Spotify said to stop for a long time (a rate
     /// limit of hours), and until when. Asking anyway during that time
     /// can make the wait longer, so those fail here without asking.
-    blocked: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    blocked: Mutex<std::collections::HashMap<String, SystemTime>>,
+    /// Told about each new block, to keep it across restarts.
+    on_block: Box<OnBlock>,
 }
+
+/// Told a kind of request (see `request_kind`) and until when it's blocked.
+type OnBlock = dyn Fn(&str, SystemTime) + Send + Sync;
 
 impl Client {
     pub fn new(
@@ -213,7 +218,26 @@ impl Client {
             tokens: Mutex::new(tokens),
             on_refresh: Box::new(on_refresh),
             blocked: Mutex::default(),
+            on_block: Box::new(|_, _| {}),
         }
+    }
+
+    /// Blocks kept from before (kind, until; see `request_kind`), and
+    /// where to report new ones.
+    pub fn with_blocks(
+        mut self,
+        blocks: impl IntoIterator<Item = (String, SystemTime)>,
+        on_block: impl Fn(&str, SystemTime) + Send + Sync + 'static,
+    ) -> Self {
+        let now = SystemTime::now();
+        self.blocked = Mutex::new(
+            blocks
+                .into_iter()
+                .filter(|(_, until)| *until > now)
+                .collect(),
+        );
+        self.on_block = Box::new(on_block);
+        self
     }
 
     fn access_token(&self, force_refresh: bool) -> Result<String> {
@@ -246,11 +270,10 @@ impl Client {
             format!("{}{path}", api_base())
         };
         let kind = request_kind(&url);
-        if let Some(until) = self.blocked.lock().ok().and_then(|b| b.get(&kind).copied()) {
-            let now = std::time::Instant::now();
-            if until > now {
-                return Err(Error::RateLimited(until - now));
-            }
+        if let Some(until) = self.blocked.lock().ok().and_then(|b| b.get(&kind).copied())
+            && let Ok(left) = until.duration_since(SystemTime::now())
+        {
+            return Err(Error::RateLimited(left));
         }
         let mut refreshed = false;
         let mut waited = false;
@@ -322,9 +345,11 @@ impl Client {
                 }
                 if wait > MAX_RETRY_WAIT {
                     tracing::warn!("Spotify asks to wait {wait:?} before asking for {kind} again");
+                    let until = SystemTime::now() + wait;
                     if let Ok(mut blocked) = self.blocked.lock() {
-                        blocked.insert(kind, std::time::Instant::now() + wait);
+                        blocked.insert(kind.clone(), until);
                     }
+                    (self.on_block)(&kind, until);
                 }
                 return Err(Error::RateLimited(wait));
             }
@@ -854,6 +879,30 @@ fn status_error(status: u16, text: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kept_block_is_answered_without_asking_spotify() {
+        let tokens = Tokens {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: u64::MAX,
+        };
+        let hour = Duration::from_secs(3600);
+        let client = Client::new("id", tokens, |_| {}).with_blocks(
+            [
+                ("search".to_owned(), SystemTime::now() + hour),
+                // Over already: dropped.
+                ("artists".to_owned(), SystemTime::now() - hour),
+            ],
+            |_, _| {},
+        );
+        // No network needed: refused here.
+        match client.search_tracks("isrc:X", 5) {
+            Err(Error::RateLimited(left)) => assert!(left <= hour && left > hour / 2),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(client.blocked.lock().unwrap().len(), 1);
+    }
 
     #[test]
     fn rate_limits_are_kept_per_kind_of_request() {

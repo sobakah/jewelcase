@@ -9,7 +9,7 @@
 - Artist pages cover less of the artist grid. Side panels (albums, playlists, artists) close with a grip on their left edge, like the one on top of the player, instead of a close button.
 - Album, playlist and artist panels show their cover blurred behind the top, like the player.
 - Artist photos come from Spotify (while it's connected) and Deezer, then Wikimedia Commons; fanart.tv is gone, and its API key with it. Artists looked up before get their photos looked up once more.
-- Fixed: searching Spotify always failed with "403: Insufficient client scope". Matching a playlist's songs then asked Spotify once for every song, again at every sync, which could get Gatefold blocked for hours ("too many requests"). Searches now stop at the first error, and while Spotify asks to wait for a long time, Gatefold doesn't ask again.
+- Fixed: searching Spotify always failed with "403: Insufficient client scope". Matching a playlist's songs then asked Spotify once for every song, again at every sync, which could get Gatefold blocked for hours ("too many requests"). Searches now stop at the first error, and while Spotify asks to wait for a long time, Gatefold doesn't ask again, also after a restart.
 - When Spotify doesn't show an artist's releases, the page now says why.
 
 ## 0.1.0 (pre-release)

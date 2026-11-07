@@ -152,6 +152,19 @@ impl Spotify {
         self.imp().user_id.borrow().clone()
     }
 
+    /// The rate limits kept from earlier runs (see `use_tokens`).
+    fn saved_blocks(&self) -> Vec<(String, std::time::SystemTime)> {
+        self.settings()
+            .get::<std::collections::HashMap<String, i64>>("spotify-blocked")
+            .into_iter()
+            .filter_map(|(kind, until)| {
+                let until = std::time::UNIX_EPOCH
+                    + std::time::Duration::from_secs(u64::try_from(until).ok()?);
+                Some((kind, until))
+            })
+            .collect()
+    }
+
     fn client_id(&self) -> String {
         self.settings()
             .string("spotify-client-id")
@@ -273,9 +286,32 @@ impl Spotify {
     /// Starts the client, checks the account and reads the playlists.
     async fn use_tokens(&self, tokens: Tokens, fresh_login: bool) {
         let (sender, receiver) = async_channel::unbounded::<Tokens>();
-        let client = Arc::new(Client::new(&self.client_id(), tokens.clone(), move |t| {
-            let _ = sender.send_blocking(t.clone());
-        }));
+        let (block_sender, blocks) = async_channel::unbounded::<(String, i64)>();
+        let client = Arc::new(
+            Client::new(&self.client_id(), tokens.clone(), move |t| {
+                let _ = sender.send_blocking(t.clone());
+            })
+            .with_blocks(self.saved_blocks(), move |kind, until| {
+                let _ = block_sender.send_blocking((kind.to_owned(), unix_seconds(until)));
+            }),
+        );
+        // Rate limits Spotify announces are kept across restarts: asking
+        // again during one could make it longer.
+        let settings = self.settings().clone();
+        glib::spawn_future_local(async move {
+            while let Ok((kind, until)) = blocks.recv().await {
+                let now = unix_seconds(std::time::SystemTime::now());
+                let mut kept: std::collections::HashMap<String, i64> = settings
+                    .get::<std::collections::HashMap<String, i64>>("spotify-blocked")
+                    .into_iter()
+                    .filter(|(_, until)| *until > now)
+                    .collect();
+                kept.insert(kind, until);
+                if let Err(err) = settings.set("spotify-blocked", kept) {
+                    tracing::warn!("Cannot keep Spotify's rate limit: {err}");
+                }
+            }
+        });
         // Refreshed tokens go back into the keyring.
         glib::spawn_future_local(async move {
             while let Ok(tokens) = receiver.recv().await {
@@ -431,4 +467,10 @@ pub(crate) fn open_in_browser(url: &str) {
             tracing::warn!("Cannot open the browser: {err}");
         }
     });
+}
+
+/// Unix seconds of a time (0 before 1970).
+fn unix_seconds(time: std::time::SystemTime) -> i64 {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }

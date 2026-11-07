@@ -211,6 +211,11 @@
       <summary>How Spotify songs stream</summary>
       <description>soloist: Spotify’s official Soloist (a running one, e.g. from soloistd, or started by Gatefold). librespot: unofficial, only in builds with the spotify-stream feature.</description>
     </key>
+    <key name="spotify-blocked" type="a{sx}">
+      <default>{}</default>
+      <summary>Spotify rate limits</summary>
+      <description>Kinds of Spotify requests Spotify asked to stop for a long time, and until when (Unix seconds); not asked again before then, also after a restart.</description>
+    </key>
     <key name="spotify-volume-offset" type="i">
       <range min="-15" max="6"/>
       <default>0</default>
