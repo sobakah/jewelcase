@@ -40,6 +40,12 @@ impl TrackObject {
         self.track().record.id
     }
 
+    /// A Spotify song that isn't in the library (remote mode): no file, no
+    /// lyrics, no details.
+    pub fn is_stand_in(&self) -> bool {
+        self.id() < 0
+    }
+
     pub fn title(&self) -> String {
         let record = &self.track().record;
         record.tags.title.clone().unwrap_or_else(|| {

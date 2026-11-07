@@ -59,7 +59,10 @@ impl QueueView {
         let player = GatefoldApplication::get().player();
         self.add_css_class("queue-view");
 
-        let header = gtk::Box::builder().spacing(6).build();
+        let header = gtk::Box::builder()
+            .spacing(6)
+            .css_classes(["queue-header"])
+            .build();
         let title = gtk::Label::builder()
             .label(gettext("Queue"))
             .xalign(0.0)

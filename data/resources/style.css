@@ -57,6 +57,16 @@
   padding: 0;
 }
 
+/* The same height with or without Save and Clear (hidden in remote mode),
+   and off the card's rounded edge. */
+.queue-header {
+  min-height: 34px;
+}
+
+.queue-card .queue-header {
+  margin: 6px 12px 0 12px;
+}
+
 .track-row {
   transition: background-color 700ms ease-out;
 }

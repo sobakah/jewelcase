@@ -121,6 +121,9 @@ mod imp {
         pub available: Cell<i32>,
         /// Avoids re-entrant toggling while panes are updated.
         pub updating: Cell<bool>,
+        /// The lyrics pane was closed for a Spotify song without lyrics and
+        /// opens again with the next library song.
+        pub lyrics_suspended: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -393,6 +396,9 @@ impl PlayerView {
     /// Shows or hides the lyrics pane (Ctrl+L).
     pub fn toggle_lyrics(&self) {
         let button = &self.imp().lyrics_button;
+        if !button.is_sensitive() {
+            return;
+        }
         button.set_active(!button.is_active());
     }
 
@@ -502,6 +508,20 @@ impl PlayerView {
             }
         }
         imp.seek.set_sensitive(track.is_some());
+        // Spotify songs not in the library have no lyrics (remote mode).
+        let stand_in = track.as_ref().is_some_and(TrackObject::is_stand_in);
+        imp.lyrics_button.set_sensitive(!stand_in);
+        imp.lyrics_button.set_tooltip_text(Some(&if stand_in {
+            gettext("No lyrics for songs that aren't in your library")
+        } else {
+            gettext("Lyrics (Ctrl+L)")
+        }));
+        if stand_in && imp.lyrics_button.is_active() {
+            imp.lyrics_suspended.set(true);
+            imp.lyrics_button.set_active(false);
+        } else if !stand_in && imp.lyrics_suspended.replace(false) {
+            imp.lyrics_button.set_active(true);
+        }
         self.update_theme(track);
         self.update_position(player);
     }

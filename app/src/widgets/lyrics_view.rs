@@ -288,6 +288,16 @@ impl LyricsView {
             self.show_status("gatefold-lyrics-symbolic", &gettext("No Lyrics"), None);
             return;
         };
+        // Spotify gives apps no lyrics; songs from the library have theirs.
+        if track.is_stand_in() {
+            imp.status_actions.set_visible(false);
+            self.show_status(
+                "folder-remote-symbolic",
+                &gettext("No Lyrics for This Song"),
+                Some(&gettext("Lyrics show for songs that are in your library")),
+            );
+            return;
+        }
         let path = track.track().record.path.clone();
         let title = track.track().record.tags.title.clone();
         glib::spawn_future_local(glib::clone!(
