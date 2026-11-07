@@ -238,11 +238,16 @@ impl Player {
     }
 
     /// Extra gain on top of ReplayGain's −18 LUFS reference (+4 dB is about
-    /// Spotify's −14 LUFS). Songs without tags stay as they are.
+    /// Spotify's −14 LUFS). It applies to the fallback gain too.
     pub fn set_preamp(&self, db: f64) {
-        let db = db.clamp(-15.0, 15.0);
-        self.rgvolume.set_property("pre-amp", db);
-        self.rgvolume.set_property("fallback-gain", -db);
+        self.rgvolume.set_property("pre-amp", db.clamp(-15.0, 15.0));
+    }
+
+    /// The gain (dB, before the pre-amp) for a song without ReplayGain
+    /// tags: its measured one, or minus the pre-amp to play it as it is.
+    pub fn set_fallback_gain(&self, db: f64) {
+        self.rgvolume
+            .set_property("fallback-gain", db.clamp(-60.0, 60.0));
     }
 
     /// Album gain (album context) or track gain (shuffle).

@@ -1158,6 +1158,9 @@ impl Player {
         }
         imp.active.set(new);
         engine.set_volume(0.0);
+        engine.set_preamp(self.settings().double("replaygain-preamp"));
+        engine.set_album_gain(self.album_gain());
+        self.apply_measured_gain(engine, track.id());
         engine.load(&uri, lead_in, true);
         self.set_current_track(Some(track));
         self.set_position(lead_in);
@@ -1512,6 +1515,11 @@ impl Player {
                     let found = imp.queue.borrow_mut().jump_to_uid(uid);
                     if found {
                         let current = imp.queue.borrow().current().copied();
+                        // The gapless song's own measured gain (within an
+                        // album in order it's the album's: no change).
+                        if let (Some(engine), Some(item)) = (self.engine(), current) {
+                            self.apply_measured_gain(engine, item.track_id);
+                        }
                         self.set_current_track(current.and_then(|i| self.track(i.track_id)));
                         self.set_position(0);
                         self.emit_by_name::<()>("seeked", &[]);
@@ -1558,20 +1566,43 @@ impl Player {
         }
     }
 
-    fn apply_replaygain(&self) {
-        let mode = self.settings().string("replaygain");
-        let album = match mode.as_str() {
+    /// Album gain while an album plays in order, track gain in shuffle
+    /// (or as chosen).
+    fn album_gain(&self) -> bool {
+        match self.settings().string("replaygain").as_str() {
             "album" => true,
             "track" => false,
-            // Album gain while an album plays in order, track gain in shuffle.
             _ => !self.imp().queue.borrow().is_shuffled(),
-        };
+        }
+    }
+
+    fn apply_replaygain(&self) {
+        let mode = self.settings().string("replaygain");
+        let album = self.album_gain();
         let preamp = self.settings().double("replaygain-preamp");
         for engine in self.all_engines() {
             engine.set_replaygain(mode != "off");
             engine.set_preamp(preamp);
             engine.set_album_gain(album);
         }
+        if let (Some(engine), Some(track)) = (self.engine(), self.current_track()) {
+            self.apply_measured_gain(engine, track.id());
+        }
+    }
+
+    /// A song without ReplayGain tags gets the gain its measured loudness
+    /// calls for (the analysis, §7), so it's as loud as tagged songs and
+    /// Spotify; unmeasured ones play as they are.
+    fn apply_measured_gain(&self, engine: &playback::Player, track_id: i64) {
+        let preamp = self.settings().double("replaygain-preamp");
+        let measured = (track_id > 0)
+            .then(|| self.library().db())
+            .flatten()
+            .and_then(|db| db.measured_gain(track_id, self.album_gain()).ok().flatten());
+        if let Some(gain) = measured {
+            tracing::debug!("Measured gain for track {track_id}: {gain:.1} dB");
+        }
+        engine.set_fallback_gain(measured.unwrap_or(-preamp));
     }
 
     fn set_current_track(&self, track: Option<TrackObject>) {

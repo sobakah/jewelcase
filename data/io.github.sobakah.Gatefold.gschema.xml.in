@@ -57,7 +57,7 @@
       <range min="-15" max="15"/>
       <default>4</default>
       <summary>ReplayGain pre-amp (dB)</summary>
-      <description>On top of ReplayGain’s −18 LUFS reference; +4 dB is about as loud as Spotify and most players (−14 LUFS). Songs without ReplayGain tags stay as they are.</description>
+      <description>On top of ReplayGain’s −18 LUFS reference; +4 dB is about as loud as Spotify and most players (−14 LUFS). Songs without ReplayGain tags get the gain their measured loudness calls for once the song analysis has looked at them, else they stay as they are.</description>
     </key>
     <key name="replaygain" type="s">
       <choices>

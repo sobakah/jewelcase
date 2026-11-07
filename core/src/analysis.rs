@@ -21,6 +21,9 @@ pub struct SongAnalysis {
     pub bpm: Option<f64>,
     /// Where the music starts and ends, for smart crossfades.
     pub edges: Option<Edges>,
+    /// Integrated loudness (BS.1770, LUFS) of the mono analysis signal,
+    /// for songs without ReplayGain tags.
+    pub loudness: Option<f32>,
 }
 
 /// Where a song's music is, from its loudness over time.
@@ -80,7 +83,7 @@ pub fn edges(samples: &[f32]) -> Option<Edges> {
 
 /// The bliss feature version results are stored with; older ones are
 /// analyzed again.
-pub const FEATURES_VERSION: u8 = 3;
+pub const FEATURES_VERSION: u8 = 4;
 
 /// Identifies a file's audio independently of its path, so moved or
 /// renamed files (and identical files in merged editions) are analyzed
@@ -116,6 +119,7 @@ pub fn analyze(path: &Path) -> Result<SongAnalysis, String> {
     }
     let duration = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE));
     let edges = edges(&samples);
+    let loudness = loudness(&samples, SAMPLE_RATE);
     let song = Song::try_from(PreAnalyzedSong {
         path: path.to_path_buf(),
         duration,
@@ -125,12 +129,111 @@ pub fn analyze(path: &Path) -> Result<SongAnalysis, String> {
     .map_err(|e| e.to_string())?;
     Ok(SongAnalysis {
         edges,
+        loudness,
         features: song.analysis.as_vec(),
         features_version: FEATURES_VERSION,
         bpm: bpm
             .filter(|b| (30.0..=300.0).contains(b))
             .map(|b| (b * 10.0).round() / 10.0),
     })
+}
+
+/// Integrated loudness after ITU-R BS.1770 (as EBU R128 and ReplayGain 2
+/// measure it): K-weighted, 400 ms blocks every 100 ms, gated at −70 LUFS
+/// and 10 LU below the ungated level. `None` for silence.
+pub fn loudness(samples: &[f32], rate: u32) -> Option<f32> {
+    let fs = f64::from(rate);
+    // K-weighting for any sample rate: a high shelf (the head), then a
+    // high pass (as libebur128 derives them).
+    let shelf = {
+        let (gain, f0, q) = (
+            3.999_843_853_973_347,
+            1_681.974_450_955_533,
+            0.707_175_236_955_419_6,
+        );
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let vh = 10f64.powf(gain / 20.0);
+        let vb = vh.powf(0.499_666_774_154_541_6);
+        let a0 = 1.0 + k / q + k * k;
+        Biquad::new(
+            [
+                (vh + vb * k / q + k * k) / a0,
+                2.0 * (k * k - vh) / a0,
+                (vh - vb * k / q + k * k) / a0,
+            ],
+            [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
+        )
+    };
+    let high_pass = {
+        let (f0, q) = (38.135_470_876_024_44, 0.500_327_037_323_877_3);
+        let k = (std::f64::consts::PI * f0 / fs).tan();
+        let a0 = 1.0 + k / q + k * k;
+        Biquad::new(
+            [1.0, -2.0, 1.0],
+            [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
+        )
+    };
+    let (mut shelf, mut high_pass) = (shelf, high_pass);
+    let hop = (rate / 10) as usize;
+    // Squares summed per 100 ms; a block is four of them.
+    let mut quarters = Vec::with_capacity(samples.len() / hop + 1);
+    for chunk in samples.chunks(hop) {
+        if chunk.len() < hop {
+            break;
+        }
+        let sum: f64 = chunk
+            .iter()
+            .map(|s| {
+                let y = high_pass.run(shelf.run(f64::from(*s)));
+                y * y
+            })
+            .sum();
+        quarters.push(sum);
+    }
+    let blocks: Vec<f64> = quarters
+        .windows(4)
+        .map(|w| w.iter().sum::<f64>() / (4 * hop) as f64)
+        .collect();
+    let level = |power: f64| -0.691 + 10.0 * power.log10();
+    let gated_mean = |threshold: f64| {
+        let kept: Vec<f64> = blocks
+            .iter()
+            .copied()
+            .filter(|p| *p > 0.0 && level(*p) > threshold)
+            .collect();
+        (!kept.is_empty()).then(|| kept.iter().sum::<f64>() / kept.len() as f64)
+    };
+    let ungated = gated_mean(-70.0)?;
+    let integrated = gated_mean(level(ungated) - 10.0)?;
+    Some(level(integrated) as f32)
+}
+
+/// A second-order filter (direct form I).
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+    x: [f64; 2],
+    y: [f64; 2],
+}
+
+impl Biquad {
+    fn new(b: [f64; 3], a: [f64; 2]) -> Self {
+        Self {
+            b,
+            a,
+            x: [0.0; 2],
+            y: [0.0; 2],
+        }
+    }
+
+    fn run(&mut self, x: f64) -> f64 {
+        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1]
+            - self.a[0] * self.y[0]
+            - self.a[1] * self.y[1];
+        self.x = [x, self.x[0]];
+        self.y = [y, self.y[0]];
+        y
+    }
 }
 
 /// What bliss expects: mono f32 at 22050 Hz.
@@ -245,6 +348,43 @@ pub fn features_from_blob(blob: &[u8]) -> Vec<f32> {
         .iter()
         .map(|c| f32::from_le_bytes(*c))
         .collect()
+}
+
+#[cfg(test)]
+mod loudness_tests {
+    use super::loudness;
+
+    fn sine(amplitude: f32, seconds: f32, rate: u32) -> Vec<f32> {
+        (0..(seconds * rate as f32) as usize)
+            .map(|i| {
+                amplitude * (2.0 * std::f32::consts::PI * 997.0 * i as f32 / rate as f32).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_full_scale_sine_is_minus_three() {
+        // BS.1770's reference: a 997 Hz sine at 0 dBFS in one channel
+        // reads −3.01 LUFS, at any sample rate.
+        for rate in [22_050, 48_000] {
+            let full = loudness(&sine(1.0, 5.0, rate), rate).unwrap();
+            assert!((full + 3.01).abs() < 0.15, "{rate}: {full}");
+            let half = loudness(&sine(0.5, 5.0, rate), rate).unwrap();
+            assert!((half + 9.03).abs() < 0.15, "{rate}: {half}");
+        }
+    }
+
+    #[test]
+    fn quiet_parts_are_gated_out() {
+        // Silence between loud parts doesn't make the song quieter.
+        let rate = 22_050;
+        let mut samples = sine(0.5, 5.0, rate);
+        samples.extend(vec![0.0; rate as usize * 10]);
+        samples.extend(sine(0.5, 5.0, rate));
+        let level = loudness(&samples, rate).unwrap();
+        assert!((level + 9.03).abs() < 0.2, "{level}");
+        assert_eq!(loudness(&vec![0.0; rate as usize * 5], rate), None);
+    }
 }
 
 #[cfg(test)]

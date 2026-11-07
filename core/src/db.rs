@@ -32,6 +32,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/009_reread_spotify.sql")),
     M::up(include_str!("db/010_larger_spotify_images.sql")),
     M::up(include_str!("db/011_song_edges.sql")),
+    M::up(include_str!("db/012_loudness.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1173,14 +1174,16 @@ impl Database {
     // Analysis (§7) -----------------------------------------------------
 
     /// Songs still to analyze: no content key yet, or no (current) result
-    /// for it. In library order, `limit` at a time.
+    /// for it. Songs without ReplayGain tags first (their loudness sets
+    /// their volume), then in library order, `limit` at a time.
     pub fn tracks_to_analyze(&self, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT t.id, t.path FROM track t
              LEFT JOIN analysis a ON a.key = t.content_key
              WHERE t.content_key IS NULL OR a.key IS NULL
                 OR (a.failed = 0 AND a.features_version < ?1)
-             ORDER BY t.id LIMIT ?2",
+             ORDER BY (t.replaygain_track IS NULL AND t.replaygain_album IS NULL) DESC, t.id
+             LIMIT ?2",
         )?;
         stmt.query_map(
             params![i64::from(crate::analysis::FEATURES_VERSION), limit as i64],
@@ -1220,13 +1223,13 @@ impl Database {
     ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO analysis (key, features, features_version, bpm, failed, analyzed,
-               lead_in_ms, outro_ms, end_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+               lead_in_ms, outro_ms, end_ms, loudness)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(key) DO UPDATE SET features = excluded.features,
                features_version = excluded.features_version, bpm = excluded.bpm,
                failed = excluded.failed, analyzed = excluded.analyzed,
                lead_in_ms = excluded.lead_in_ms, outro_ms = excluded.outro_ms,
-               end_ms = excluded.end_ms",
+               end_ms = excluded.end_ms, loudness = excluded.loudness",
             params![
                 key,
                 result.map(|r| crate::analysis::features_to_blob(&r.features)),
@@ -1237,6 +1240,7 @@ impl Database {
                 result.and_then(|r| r.edges).map(|e| e.lead_in_ms as i64),
                 result.and_then(|r| r.edges).map(|e| e.outro_ms as i64),
                 result.and_then(|r| r.edges).map(|e| e.end_ms as i64),
+                result.and_then(|r| r.loudness).map(f64::from),
             ],
         )?;
         Ok(())
@@ -1261,6 +1265,36 @@ impl Database {
                 },
             )
             .optional()?)
+    }
+
+    /// The gain (dB, ReplayGain's −18 LUFS reference) a song without
+    /// ReplayGain tags gets from its measured loudness: its own, or with
+    /// `album`, its album's (all of it at one level, so gapless changes
+    /// stay seamless). `None` for tagged songs and ones not analyzed.
+    pub fn measured_gain(&self, track_id: i64, album: bool) -> Result<Option<f64>> {
+        // The analysis listens in mono, BS.1770 adds the channels up: a
+        // stereo song measures louder, 3.6 dB going by the ReplayGain tags
+        // of real libraries (3 dB for identical channels, a little more
+        // for wide stereo).
+        let sql = if album {
+            "SELECT -18.0 - 10.0 * log10(avg(power(10.0, (a.loudness
+                      + CASE WHEN o.channels >= 2 THEN 3.6 ELSE 0.0 END) / 10.0)))
+             FROM track t
+             JOIN track o ON o.album_id = t.album_id
+             JOIN analysis a ON a.key = o.content_key AND a.loudness IS NOT NULL
+             WHERE t.id = ?1 AND t.replaygain_track IS NULL AND t.replaygain_album IS NULL
+               AND o.replaygain_track IS NULL AND o.replaygain_album IS NULL"
+        } else {
+            "SELECT -18.0 - (a.loudness + CASE WHEN t.channels >= 2 THEN 3.6 ELSE 0.0 END)
+             FROM track t
+             JOIN analysis a ON a.key = t.content_key AND a.loudness IS NOT NULL
+             WHERE t.id = ?1 AND t.replaygain_track IS NULL AND t.replaygain_album IS NULL"
+        };
+        Ok(self
+            .conn
+            .query_row(sql, [track_id], |row| row.get::<_, Option<f64>>(0))
+            .optional()?
+            .flatten())
     }
 
     /// (analyzed, all) songs, for the progress in Preferences.
@@ -1960,6 +1994,7 @@ mod tests {
             features: vec![1.0, 2.0],
             features_version: crate::analysis::FEATURES_VERSION,
             bpm: Some(120.0),
+            loudness: Some(-10.0),
         };
         // Both files have the same audio: one analysis serves both.
         db.set_content_key(ids["One"], "k1").unwrap();
@@ -1972,6 +2007,10 @@ mod tests {
             Some(170_000)
         );
         assert_eq!(db.analysis_progress().unwrap(), (2, 2));
+        // No ReplayGain tags: the measured loudness gives the gain.
+        assert_eq!(db.measured_gain(ids["One"], false).unwrap(), Some(-8.0));
+        let album = db.measured_gain(ids["One"], true).unwrap().unwrap();
+        assert!((album + 8.0).abs() < 1e-9);
         let features = db.similarity_features().unwrap();
         assert!(
             features
