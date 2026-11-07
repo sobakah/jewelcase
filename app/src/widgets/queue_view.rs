@@ -171,15 +171,31 @@ impl QueueView {
         ));
         imp.history_box.set_orientation(gtk::Orientation::Vertical);
         imp.history_box.set_spacing(6);
-        imp.history_box.append(
+        let history_header = gtk::Box::builder().spacing(6).margin_top(6).build();
+        history_header.append(
             &gtk::Label::builder()
                 .label(gettext("Recently Played"))
                 .xalign(0.0)
+                .hexpand(true)
                 .margin_start(12)
-                .margin_top(6)
+                .valign(gtk::Align::Center)
                 .css_classes(["dim-label", "caption-heading"])
                 .build(),
         );
+        let clear_history = gtk::Button::builder()
+            .label(gettext("C_lear"))
+            .use_underline(true)
+            .tooltip_text(gettext("Clear Recently Played"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "small"])
+            .build();
+        clear_history.connect_clicked(glib::clone!(
+            #[weak]
+            player,
+            move |_| player.clear_history()
+        ));
+        history_header.append(&clear_history);
+        imp.history_box.append(&history_header);
         imp.history_box.append(&imp.history);
         let lists = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -232,22 +248,44 @@ impl QueueView {
         imp.history_tracks.replace(tracks);
     }
 
+    /// "Now Playing" sits right below the latest history (at the top with
+    /// no history), but never lower than the middle of the view. Waits for
+    /// the frame in which the refilled history is laid out: before that,
+    /// the scroll range is too small and the position would be cut off at
+    /// the start, showing the history and pushing "Now Playing" down.
     fn scroll_to_now_playing(&self) {
-        let view = self.downgrade();
-        // After the lists are laid out.
-        glib::idle_add_local_once(move || {
-            let Some(view) = view.upgrade() else { return };
-            let imp = view.imp();
-            // "Now Playing" sits below the latest history, but never lower
-            // than the middle of the view.
-            let adjustment = imp.scroller.vadjustment();
-            let history = if imp.history_box.is_visible() {
-                f64::from(imp.history_box.height() + 12)
-            } else {
-                0.0
-            };
-            adjustment.set_value((history - adjustment.page_size() / 2.0).max(0.0));
-        });
+        let ticks = std::cell::Cell::new(0);
+        self.imp().scroller.add_tick_callback(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::ControlFlow::Break,
+            move |_, _| {
+                ticks.set(ticks.get() + 1);
+                let imp = view.imp();
+                let adjustment = imp.scroller.vadjustment();
+                let history = if imp.history_box.is_visible() {
+                    let width = imp.history_box.width();
+                    let laid_out = width > 0
+                        && imp.history_box.height()
+                            == imp.history_box.measure(gtk::Orientation::Vertical, width).1;
+                    if !laid_out && ticks.get() < 60 {
+                        return glib::ControlFlow::Continue;
+                    }
+                    f64::from(imp.history_box.height() + 12)
+                } else {
+                    0.0
+                };
+                let page = adjustment.page_size();
+                let target = (history - page / 2.0).max(0.0);
+                // The range has to reach the target first.
+                if (page <= 0.0 || adjustment.upper() - page < target) && ticks.get() < 60 {
+                    return glib::ControlFlow::Continue;
+                }
+                adjustment.set_value(target);
+                glib::ControlFlow::Break
+            }
+        ));
     }
 }
 

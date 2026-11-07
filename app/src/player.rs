@@ -438,6 +438,16 @@ impl Player {
             .collect()
     }
 
+    /// Empties "Recently Played".
+    pub fn clear_history(&self) {
+        let cleared = self.library().db().map(|mut db| db.clear_history());
+        match cleared {
+            Some(Ok(())) => self.emit_by_name::<()>("history-changed", &[]),
+            Some(Err(err)) => tracing::warn!("Cannot clear the play history: {err}"),
+            None => {}
+        }
+    }
+
     fn record_history(&self, track_id: i64) {
         let recorded = self
             .library()

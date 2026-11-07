@@ -1255,6 +1255,12 @@ impl Database {
         Ok(())
     }
 
+    /// Forgets the play history ("Clear" in the queue).
+    pub fn clear_history(&mut self) -> Result<()> {
+        self.conn.execute("DELETE FROM play_history", [])?;
+        Ok(())
+    }
+
     /// The last `limit` played songs, oldest first.
     pub fn history(&self, limit: usize) -> Result<Vec<i64>> {
         let mut stmt = self
