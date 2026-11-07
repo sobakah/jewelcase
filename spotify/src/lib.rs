@@ -80,6 +80,20 @@ impl Error {
         }
     }
 
+    /// About this request only (Spotify found its query malformed, an
+    /// answer it couldn't read): other requests may still work. Anything
+    /// else (offline, rate limited, refused, logged out) holds for the
+    /// requests after it too.
+    pub fn is_about_request(&self) -> bool {
+        matches!(
+            self,
+            Self::Status {
+                status: 400 | 404,
+                ..
+            } | Self::Format(_)
+        )
+    }
+
     pub fn status(&self) -> Option<u16> {
         match self {
             Self::Status { status, .. } => Some(*status),

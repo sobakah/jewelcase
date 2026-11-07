@@ -481,7 +481,9 @@ impl PlayerView {
         if !imp.pane_auto.get() {
             let player = GatefoldApplication::get().player();
             let settings = player.settings();
-            let _ = settings.set_boolean("lyrics-pane-open", imp.lyrics_button.is_active());
+            // Closed only for a song without lyrics: still open.
+            let lyrics = imp.lyrics_button.is_active() || imp.lyrics_suspended.get();
+            let _ = settings.set_boolean("lyrics-pane-open", lyrics);
             let _ = settings.set_boolean("queue-pane-open", imp.queue_button.is_active());
         }
         self.update_panes();

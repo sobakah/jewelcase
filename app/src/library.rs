@@ -600,7 +600,9 @@ impl Library {
         let due = match meta.lookup_state.as_deref() {
             None => true,
             Some("offline") => online,
-            Some("spotify-later") => online && age > metadata::SPOTIFY_LATER,
+            // A source couldn't answer ("spotify-later": the name in
+            // development builds before 0.1.1).
+            Some("partial" | "spotify-later") => online && age > metadata::PARTIAL_AGAIN,
             // (Lookups from before Spotify and Deezer had portraits were
             // made due once by migration 019.)
             Some("done") => age > metadata::REFRESH_DONE,

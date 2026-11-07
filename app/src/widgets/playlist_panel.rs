@@ -92,12 +92,9 @@ mod imp {
                 }
             });
             klass.install_action("playlist.add-to-playlist", None, |panel, _, _| {
-                let ids: Vec<i64> = panel
-                    .imp()
-                    .entries
-                    .borrow()
-                    .iter()
-                    .filter_map(entry_track_id)
+                let ids: Vec<i64> = entry_track_ids(&panel.imp().entries.borrow())
+                    .into_iter()
+                    .flatten()
                     .collect();
                 if !ids.is_empty() {
                     super::super::playlist_picker::show(panel, ids);
@@ -945,11 +942,12 @@ impl PlaylistPanel {
         let app = GatefoldApplication::get();
         let spotify_plays = app.player().is_remote() || app.spotify().can_stream();
         let entries = self.imp().entries.borrow().clone();
-        let tracks: Vec<TrackObject> = entries
+        let wanted: Vec<PlaylistItem> = entries
             .iter()
             .filter(|e| e.track.is_some() || spotify_plays)
-            .filter_map(entry_object)
+            .cloned()
             .collect();
+        let tracks = entry_objects(&wanted);
         let skipped = entries
             .iter()
             .filter(|e| e.track.is_none() && e.spotify_uri.is_some())
@@ -1191,31 +1189,58 @@ fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
 /// The track ID an entry adds to a playlist: the library song, or the
 /// Spotify song (as one to stream, a negative ID).
 fn entry_track_id(entry: &PlaylistItem) -> Option<i64> {
-    if let Some(track) = &entry.track {
-        return Some(track.record.id);
-    }
-    entry
-        .spotify_uri
-        .as_deref()
-        .filter(|uri| uri.starts_with("spotify:track:"))?;
-    GatefoldApplication::get()
-        .library()
-        .db()?
-        .stream_track_for_item(entry.id)
-        .ok()?
+    entry_track_ids(std::slice::from_ref(entry)).pop().flatten()
 }
 
 /// An entry as a song for the queue: the library song, else the Spotify
 /// song to stream.
 fn entry_object(entry: &PlaylistItem) -> Option<TrackObject> {
-    if let Some(track) = &entry.track {
-        return Some(TrackObject::new(track.clone()));
-    }
-    let id = entry_track_id(entry)?;
+    entry_objects(std::slice::from_ref(entry)).pop()
+}
+
+/// `entry_track_id` for many entries at once (one database use), in
+/// order; `None` for entries without a song.
+fn entry_track_ids(entries: &[PlaylistItem]) -> Vec<Option<i64>> {
+    let library = GatefoldApplication::get().library();
+    let mut db = library.db();
+    entries
+        .iter()
+        .map(|entry| {
+            if let Some(track) = &entry.track {
+                return Some(track.record.id);
+            }
+            entry
+                .spotify_uri
+                .as_deref()
+                .filter(|uri| uri.starts_with("spotify:track:"))?;
+            db.as_mut()?.stream_track_for_item(entry.id).ok()?
+        })
+        .collect()
+}
+
+/// `entry_object` for many entries at once: Spotify songs are read and
+/// their covers fetched in one go, not one by one.
+fn entry_objects(entries: &[PlaylistItem]) -> Vec<TrackObject> {
+    let ids = entry_track_ids(entries);
+    let streams: Vec<i64> = entries
+        .iter()
+        .zip(&ids)
+        .filter(|(e, _)| e.track.is_none())
+        .filter_map(|(_, id)| *id)
+        .collect();
     let app = GatefoldApplication::get();
-    let track = app.library().tracks(&[id]).remove(&id)?;
-    app.spotify().fetch_stream_covers(vec![id]);
-    Some(TrackObject::new(track))
+    let mut found = app.library().tracks(&streams);
+    if !streams.is_empty() {
+        app.spotify().fetch_stream_covers(streams);
+    }
+    entries
+        .iter()
+        .zip(ids)
+        .filter_map(|(entry, id)| match &entry.track {
+            Some(track) => Some(TrackObject::new(track.clone())),
+            None => found.remove(&id?).map(TrackObject::new),
+        })
+        .collect()
 }
 
 /// One entry for the queue, or a hint when it's a Spotify song that

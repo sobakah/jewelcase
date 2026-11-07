@@ -98,6 +98,9 @@ pub struct ArtistInfo {
     pub bio: Option<String>,
     /// In priority order: Deezer, then Wikimedia Commons.
     pub portraits: Vec<PortraitCandidate>,
+    /// A portrait source couldn't be asked (offline, Deezer's quota):
+    /// worth trying again soon.
+    pub incomplete: bool,
 }
 
 pub struct Client {
@@ -128,6 +131,7 @@ impl Client {
             links: Links::default(),
             bio: None,
             portraits: Vec::new(),
+            incomplete: false,
         };
         if providers.musicbrainz {
             info.identity = match &query.mbid {
@@ -139,7 +143,7 @@ impl Client {
             }
         }
         // Deezer goes by name: also for artists MusicBrainz doesn't know.
-        info.portraits = self.portrait_candidates(query, &info.links, providers);
+        (info.portraits, info.incomplete) = self.portrait_candidates(query, &info.links, providers);
         Ok(info)
     }
 
@@ -206,19 +210,24 @@ impl Client {
         Ok(parse_artist_links(&json))
     }
 
-    /// Portrait candidates from every provider, best first.
+    /// Portrait candidates from every provider, best first, and whether
+    /// a provider couldn't be asked.
     pub fn portrait_candidates(
         &self,
         query: &ArtistQuery,
         links: &Links,
         providers: &Providers,
-    ) -> Vec<PortraitCandidate> {
+    ) -> (Vec<PortraitCandidate>, bool) {
         let mut candidates = Vec::new();
+        let mut incomplete = false;
         if providers.deezer {
             match self.deezer_portrait(query) {
                 Ok(Some(candidate)) => candidates.push(candidate),
                 Ok(None) => {}
-                Err(err) => tracing::info!("Deezer portrait of {} failed: {err}", query.name),
+                Err(err) => {
+                    tracing::info!("Deezer portrait of {} failed: {err}", query.name);
+                    incomplete = true;
+                }
             }
         }
         if providers.wikidata
@@ -227,10 +236,13 @@ impl Client {
             match self.commons_portrait(qid) {
                 Ok(Some(candidate)) => candidates.push(candidate),
                 Ok(None) => {}
-                Err(err) => tracing::info!("Commons portrait of {qid} failed: {err}"),
+                Err(err) => {
+                    tracing::info!("Commons portrait of {qid} failed: {err}");
+                    incomplete = true;
+                }
             }
         }
-        candidates
+        (candidates, incomplete)
     }
 
     /// The artist's picture on Deezer: an artist of exactly this name,

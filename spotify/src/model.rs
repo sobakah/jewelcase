@@ -65,9 +65,9 @@ pub struct Track {
     pub id: Option<String>,
     pub name: String,
     pub artists: Vec<String>,
-    /// The artists' Spotify IDs, in the same order (where Spotify gives
-    /// them).
-    pub artist_ids: Vec<String>,
+    /// The artists' Spotify IDs, one per name in `artists` (`None` where
+    /// Spotify gives none, e.g. local files).
+    pub artist_ids: Vec<Option<String>>,
     pub album: Option<String>,
     pub album_id: Option<String>,
     pub duration_ms: u64,
@@ -89,18 +89,19 @@ impl Track {
         }
         let uri = value["uri"].as_str()?.to_owned();
         let album = &value["album"];
+        // Names and IDs from the same entries, so they stay in line.
+        let (artists, artist_ids) = value["artists"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| Some((string(&a["name"])?, string(&a["id"]))))
+            .unzip();
         Some(Self {
             uri,
             id: string(&value["id"]),
             name: string(&value["name"]).unwrap_or_default(),
-            artists: value["artists"]
-                .as_array()
-                .map(|artists| artists.iter().filter_map(|a| string(&a["name"])).collect())
-                .unwrap_or_default(),
-            artist_ids: value["artists"]
-                .as_array()
-                .map(|artists| artists.iter().filter_map(|a| string(&a["id"])).collect())
-                .unwrap_or_default(),
+            artists,
+            artist_ids,
             album: string(&album["name"]),
             album_id: string(&album["id"]),
             duration_ms: value["duration_ms"].as_u64().unwrap_or(0),
@@ -404,7 +405,15 @@ mod tests {
         }});
         let entry = PlaylistEntry::parse(&row);
         assert_eq!(entry.added_at, Some(1_577_836_800));
-        assert_eq!(entry.track.unwrap().artist_ids, ["artist-a"]);
+        assert_eq!(entry.track.unwrap().artist_ids, [Some("artist-a".into())]);
+        // An artist without an ID doesn't shift the others' IDs.
+        let row = json!({"item": {
+            "type": "track", "uri": "spotify:track:b", "name": "Song", "duration_ms": 1,
+            "artists": [{"name": "Local"}, {"name": "B", "id": "artist-b"}]
+        }});
+        let track = PlaylistEntry::parse(&row).track.unwrap();
+        assert_eq!(track.artists, ["Local", "B"]);
+        assert_eq!(track.artist_ids, [None, Some("artist-b".into())]);
     }
 
     #[test]

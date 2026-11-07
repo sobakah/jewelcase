@@ -23,9 +23,12 @@ use crate::config;
 pub const REFRESH_DONE: i64 = 30 * 24 * 3600;
 /// Failed or unclear lookups are retried after this long.
 pub const REFRESH_FAILED: i64 = 7 * 24 * 3600;
-/// A lookup whose Spotify part couldn't be done (too many requests,
-/// offline) is repeated after this long.
-pub const SPOTIFY_LATER: i64 = 24 * 3600;
+/// A lookup that a portrait source couldn't answer (Spotify's or
+/// Deezer's rate limit, offline) is repeated after this long.
+pub const PARTIAL_AGAIN: i64 = 24 * 3600;
+/// Spotify is asked for portraits at most this often: after an upgrade
+/// many artists are looked up, and Spotify blocks apps that ask a lot.
+const SPOTIFY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The Spotify account, for portraits (`None`: not connected, or turned
 /// off in Preferences).
@@ -104,6 +107,7 @@ impl MetadataService {
                     client: Client::new(config::VERSION),
                     portraits: CoverCache::new(config::portrait_dir()),
                     updates,
+                    last_spotify: None,
                 };
                 // Dialogs and the open artist page go before the lookups
                 // that artist tiles queue (one at a time, each a few
@@ -150,6 +154,8 @@ struct Worker {
     client: Client,
     portraits: CoverCache,
     updates: async_channel::Sender<ArtistChanged>,
+    /// When Spotify was last asked (see SPOTIFY_INTERVAL).
+    last_spotify: Option<std::time::Instant>,
 }
 
 impl Worker {
@@ -250,36 +256,41 @@ impl Worker {
                     if let Identity::Found(mbid) = info.identity {
                         meta.lookup_mbid = Some(mbid);
                     }
-                    // Spotify's picture first (by the ID Wikidata gave,
-                    // else by name).
-                    let known = info
+                    // The ID found earlier stays unless Wikidata has one.
+                    info.links.spotify_id = info
                         .links
                         .spotify_id
-                        .clone()
+                        .take()
                         .or(artist.meta.spotify_id.clone());
+                    // Spotify's picture first (by that ID, else by name).
+                    let mut spotify_missing = false;
                     if let Some(client) = spotify {
+                        let known = info.links.spotify_id.clone();
                         match self.spotify_portrait(client, known.as_deref(), &artist.name) {
                             Ok(Some((id, candidate))) => {
                                 info.links.spotify_id.get_or_insert(id);
                                 info.portraits.insert(0, candidate);
                             }
                             Ok(None) => {}
-                            // Too many requests, offline: done otherwise,
-                            // Spotify is asked again in a day (see
-                            // SPOTIFY_LATER).
-                            Err(()) => {
-                                if meta.lookup_state.as_deref() == Some("done") {
-                                    meta.lookup_state = Some("spotify-later".into());
-                                }
-                            }
+                            Err(()) => spotify_missing = true,
                         }
+                    }
+                    // A source couldn't answer (too many requests,
+                    // offline): done otherwise, asked again in a day.
+                    let partial = spotify_missing || info.incomplete;
+                    if partial && meta.lookup_state.as_deref() == Some("done") {
+                        meta.lookup_state = Some("partial".into());
                     }
                     meta.wikidata_id = info.links.wikidata_id;
                     meta.spotify_id = info.links.spotify_id;
                     meta.website = info.links.website;
                     meta.wikipedia_url = info.links.wikipedia_url;
                     meta.bio = info.bio;
-                    if meta.portrait_key.is_none() {
+                    // Spotify's photo from before stays while Spotify can't
+                    // be asked, rather than a lesser one for a day.
+                    let keep_spotify = spotify_missing
+                        && artist.meta.portrait_source.as_deref() == Some("spotify");
+                    if meta.portrait_key.is_none() && !keep_spotify {
                         for candidate in &info.portraits {
                             if let Some(key) = self.fetch_portrait(candidate) {
                                 meta.portrait_key = Some(key);
@@ -288,6 +299,18 @@ impl Worker {
                                 break;
                             }
                         }
+                    }
+                    // Nothing new while a source couldn't answer: the
+                    // photo from before stays.
+                    if meta.portrait_key.is_none()
+                        && partial
+                        && artist.meta.portrait_source.as_deref() != Some("local")
+                    {
+                        meta.portrait_key.clone_from(&artist.meta.portrait_key);
+                        meta.portrait_source
+                            .clone_from(&artist.meta.portrait_source);
+                        meta.portrait_attribution
+                            .clone_from(&artist.meta.portrait_attribution);
                     }
                 }
                 Err(err) => {
@@ -330,7 +353,7 @@ impl Worker {
     }
 
     fn candidates(
-        &self,
+        &mut self,
         artist_id: i64,
         providers: &Providers,
         spotify: &SpotifyClient,
@@ -357,7 +380,7 @@ impl Worker {
         {
             candidates.push(candidate);
         }
-        candidates.extend(self.client.portrait_candidates(&query, &links, providers));
+        candidates.extend(self.client.portrait_candidates(&query, &links, providers).0);
         Ok(candidates
             .into_iter()
             .filter_map(|candidate| Some((self.fetch_portrait(&candidate)?, candidate)))
@@ -379,7 +402,7 @@ impl Worker {
     /// search result of exactly that name. `Err` when Spotify couldn't be
     /// asked for now (too many requests, offline), to try again later.
     fn spotify_portrait(
-        &self,
+        &mut self,
         client: &gatefold_spotify::Client,
         known: Option<&str>,
         name: &str,
@@ -398,18 +421,25 @@ impl Worker {
                 Some(stored) if stored.image_url.is_some() => {
                     Some((id.to_owned(), stored.image_url))
                 }
-                _ => match client.artist(id) {
+                _ => match self.pace_spotify(|| client.artist(id)) {
                     Ok(artist) => Some((artist.id, artist.image_url)),
                     Err(err) => return failed(&format!("artist {id}"), err),
                 },
             },
             None => {
                 let wanted = name.trim().to_lowercase();
-                match client.search_artists(name) {
-                    Ok(artists) => artists
-                        .into_iter()
-                        .find(|a| a.name.trim().to_lowercase() == wanted)
-                        .map(|a| (a.id, a.image_url)),
+                match self.pace_spotify(|| client.search_artists(name)) {
+                    // Only when it's the one artist of that name: of
+                    // several, the photo could be someone else's.
+                    Ok(artists) => {
+                        let mut same = artists
+                            .into_iter()
+                            .filter(|a| a.name.trim().to_lowercase() == wanted);
+                        match (same.next(), same.next()) {
+                            (Some(only), None) => Some((only.id, only.image_url)),
+                            _ => None,
+                        }
+                    }
                     Err(err) => return failed(&format!("search for the artist {name}"), err),
                 }
             }
@@ -424,6 +454,17 @@ impl Worker {
                 },
             ))
         }))
+    }
+
+    /// Runs a Spotify request, at least SPOTIFY_INTERVAL after the last.
+    fn pace_spotify<T>(&mut self, request: impl FnOnce() -> T) -> T {
+        if let Some(last) = self.last_spotify {
+            let wait = SPOTIFY_INTERVAL.saturating_sub(last.elapsed());
+            std::thread::sleep(wait);
+        }
+        let result = request();
+        self.last_spotify = Some(std::time::Instant::now());
+        result
     }
 
     fn set_custom(&mut self, artist_id: i64, data: Vec<u8>) -> Result<(), String> {

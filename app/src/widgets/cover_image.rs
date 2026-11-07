@@ -163,10 +163,7 @@ impl CoverImage {
             _ => CoverSize::Grid,
         };
         let texture = key.and_then(|key| covers::texture(key, size));
-        // Before the picture changes: the backdrop asks for it then.
-        imp.key
-            .replace(texture.as_ref().and(key).map(str::to_owned));
-        self.set_texture(texture.as_ref());
+        self.show(texture.as_ref(), texture.as_ref().and(key));
     }
 
     /// The cache key of the cover shown (`None` for other images).
@@ -181,7 +178,14 @@ impl CoverImage {
 
     /// Shows an image (e.g. an artist portrait), or the placeholder.
     pub fn set_texture(&self, texture: Option<&gtk::gdk::Texture>) {
+        self.show(texture, None);
+    }
+
+    /// `key`: the cover cache key of `texture`, if it's a cover.
+    fn show(&self, texture: Option<&gtk::gdk::Texture>, key: Option<&str>) {
         let imp = self.imp();
+        // Before the picture changes: the backdrop asks for it then.
+        imp.key.replace(key.map(str::to_owned));
         imp.picture.set_paintable(texture);
         imp.picture.set_visible(texture.is_some());
         imp.placeholder.set_visible(texture.is_none());

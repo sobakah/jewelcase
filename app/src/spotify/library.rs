@@ -312,8 +312,8 @@ impl Spotify {
             artists: track
                 .artist_ids
                 .iter()
-                .cloned()
-                .zip(track.artists.iter().cloned())
+                .zip(&track.artists)
+                .filter_map(|(id, name)| Some((id.clone()?, name.clone())))
                 .collect(),
         };
         self.imp()

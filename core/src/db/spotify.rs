@@ -360,13 +360,24 @@ impl Database {
         let mut choices: HashMap<String, (String, Option<i64>)> = HashMap::new();
         // Suggestions answered with No, by URI.
         let mut declined: HashMap<String, i64> = HashMap::new();
+        // When entries were added, by URI and occurrence: kept for entries
+        // Spotify gives no date for (older playlists), which would else
+        // count as added at every sync.
+        let mut added_before: HashMap<String, Vec<Option<i64>>> = HashMap::new();
         let mut kept = Vec::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, spotify_uri, match_state, local_track_id, declined_track_id
+                "SELECT id, spotify_uri, match_state, local_track_id, declined_track_id, added
                  FROM playlist_item WHERE playlist_id = ?1 ORDER BY position",
             )?;
-            type Row = (i64, Option<String>, String, Option<i64>, Option<i64>);
+            type Row = (
+                i64,
+                Option<String>,
+                String,
+                Option<i64>,
+                Option<i64>,
+                Option<i64>,
+            );
             let rows: Vec<Row> = stmt
                 .query_map([id], |row| {
                     Ok((
@@ -375,14 +386,18 @@ impl Database {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
             let mut anchor: Option<(String, usize)> = None;
             let mut seen: HashMap<String, usize> = HashMap::new();
-            for (item, uri, state, track, no) in rows {
+            for (item, uri, state, track, no, added) in rows {
                 if let (Some(uri), Some(no)) = (&uri, no) {
                     declined.insert(uri.clone(), no);
+                }
+                if let Some(uri) = &uri {
+                    added_before.entry(uri.clone()).or_default().push(added);
                 }
                 match uri {
                     Some(uri) => {
@@ -450,6 +465,12 @@ impl Database {
                 let no = declined.get(uri).copied();
                 let suggested = suggested.filter(|s| Some(*s) != no);
                 let track = entry.track.as_ref();
+                let occurrence = seen.get(uri).copied().unwrap_or(0);
+                let added = entry.added.or_else(|| {
+                    added_before
+                        .get(uri)
+                        .and_then(|dates| dates.get(occurrence).copied().flatten())
+                });
                 insert.execute(params![
                     id,
                     local,
@@ -463,7 +484,7 @@ impl Database {
                     suggested,
                     entry.image_url,
                     no,
-                    entry.added,
+                    added,
                 ])?;
                 order.push(tx.last_insert_rowid());
                 let count = seen.entry(uri).or_default();
@@ -1045,6 +1066,52 @@ mod tests {
         assert!(db.playlist_items(id).unwrap()[0].suggested_track.is_none());
         db.rematch_spotify_items(&index).unwrap();
         assert!(db.playlist_items(id).unwrap()[0].suggested_track.is_none());
+    }
+
+    #[test]
+    fn added_dates_survive_syncs_without_them() {
+        let mut db = Database::open_in_memory().unwrap();
+        let aliases = Aliases::default();
+        let index = MatchIndex::new(Vec::new(), &aliases);
+        let id = db.create_playlist("Old", 1).unwrap();
+        db.link_playlist(id, "sp3", "s0", None).unwrap();
+        let dated = |uri: &str, added: Option<i64>| RemoteEntry {
+            added,
+            ..remote(uri, "Song", 100)
+        };
+        let added = |db: &Database| -> Vec<Option<i64>> {
+            db.playlist_items(id)
+                .unwrap()
+                .iter()
+                .map(|i| i.added)
+                .collect()
+        };
+        db.set_spotify_items(
+            id,
+            &[
+                dated("spotify:track:a", Some(10)),
+                dated("spotify:track:a", Some(20)),
+            ],
+            &index,
+            "s1",
+            2,
+        )
+        .unwrap();
+        assert_eq!(added(&db), [Some(10), Some(20)]);
+        // Spotify gives no dates now: the ones from before stay, each
+        // copy its own; Spotify's own date wins when it has one.
+        db.set_spotify_items(
+            id,
+            &[
+                dated("spotify:track:a", None),
+                dated("spotify:track:a", Some(30)),
+            ],
+            &index,
+            "s2",
+            3,
+        )
+        .unwrap();
+        assert_eq!(added(&db), [Some(10), Some(30)]);
     }
 
     #[test]

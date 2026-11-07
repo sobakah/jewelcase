@@ -1087,8 +1087,10 @@ impl Spotify {
                                     uri: Some(uri), ..
                                 }) => uri,
                                 Ok(_) => continue,
-                                // Holds for the other songs too (see
-                                // resolve_entries).
+                                // About this song's query: the next one.
+                                // Else it holds for the other songs too
+                                // (see resolve_entries).
+                                Err(err) if err.is_about_request() => continue,
                                 Err(err) => {
                                     spotify.message(&super::search_error(&err));
                                     break;
