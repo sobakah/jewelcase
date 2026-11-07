@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>@app_id@</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-or-later</project_license>
+  <project_license>GPL-3.0-only</project_license>
 
   <name>Gatefold</name>
   <summary>Listen to albums, follow artists, curate playlists</summary>
@@ -48,7 +48,7 @@
   <releases>
     <release version="0.1.0" date="2026-11-05">
       <description>
-        <p>Project skeleton: empty library window and bottom-sheet player.</p>
+        <p>First version: albums, artists with online details, playlists, a player with lyrics and queue, smart shuffle, crossfade and loudness levelling, companion tools, and an optional Spotify integration.</p>
       </description>
     </release>
   </releases>

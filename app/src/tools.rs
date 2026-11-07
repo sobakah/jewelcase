@@ -591,25 +591,30 @@ impl Tools {
             return;
         }
         let editor = self.editor();
-        if editor == Editor::EarTag && !self.imp().detected.borrow().ear_tag {
-            // "Install Ear Tag…": GNOME Software.
-            gtk::UriLauncher::new(editor::EAR_TAG_INSTALL_URI).launch(
-                GatefoldApplication::get().active_window().as_ref(),
-                gio::Cancellable::NONE,
-                |_| {},
-            );
-            return;
-        }
+        let ear_tag_known = self.imp().detected.borrow().ear_tag;
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
             self,
             async move {
+                // Ear Tag may have been installed meanwhile (from the
+                // "Install" offer below): asked again before offering it.
+                if editor == Editor::EarTag && !ear_tag_known {
+                    let installed = gio::spawn_blocking(ear_tag_installed)
+                        .await
+                        .unwrap_or(false);
+                    if !installed {
+                        // "Install Ear Tag…": GNOME Software.
+                        crate::spotify::open_in_browser(editor::EAR_TAG_INSTALL_URI);
+                        return;
+                    }
+                    tools.imp().detected.borrow_mut().ear_tag = true;
+                }
                 let templates = editor.templates();
                 let command = gio::spawn_blocking(move || {
                     templates
                         .iter()
-                        .find(|t| runnable(t))
-                        .map(|t| editor::expand(t, &files))
+                        .find_map(|t| runnable(t))
+                        .map(|t| editor::expand(&t, &files))
                 })
                 .await
                 .ok()
@@ -653,6 +658,8 @@ impl Tools {
                 .replace("{tool}", name)
                 .replace("{command}", install),
         );
+        // Looked for again, so it's found once installed (no restart).
+        self.detect();
     }
 }
 
@@ -684,17 +691,24 @@ fn detect(lyrembed_override: &Path, cdimport_override: &Path) -> Detected {
         cdimport: probe("cdimport", cdimport_override),
         lyrembed,
         romanize_stdio,
-        ear_tag: std::process::Command::new("flatpak")
-            .args(["info", editor::EAR_TAG_ID])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success()),
+        ear_tag: ear_tag_installed(),
     }
 }
 
-/// Output (stdout + stderr) of a quick command, with a time limit.
+fn ear_tag_installed() -> bool {
+    std::process::Command::new("flatpak")
+        .args(["info", editor::EAR_TAG_ID])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Output (stdout + stderr) of a quick command, with a time limit. The
+/// output is read while it runs (a full pipe would stall it), and a
+/// command that's stopped is reaped (no zombie).
 fn run_for_output(argv: &[&OsStr]) -> Option<String> {
+    use std::io::Read;
     let mut child = std::process::Command::new(argv[0])
         .args(&argv[1..])
         .stdin(std::process::Stdio::null())
@@ -702,31 +716,62 @@ fn run_for_output(argv: &[&OsStr]) -> Option<String> {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .ok()?;
+    let read = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut pipe) = pipe {
+                let mut bytes = Vec::new();
+                let _ = pipe.read_to_end(&mut bytes);
+                text = String::from_utf8_lossy(&bytes).into_owned();
+            }
+            text
+        })
+    };
+    let stdout = read(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = read(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while child.try_wait().ok()?.is_none() {
         if std::time::Instant::now() > deadline {
             let _ = child.kill();
+            let _ = child.wait();
             return None;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let output = child.wait_with_output().ok()?;
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = stdout.join().unwrap_or_default();
+    text.push_str(&stderr.join().unwrap_or_default());
     Some(text)
 }
 
-/// Whether a command template's program exists (Flatpak apps via `flatpak info`).
-fn runnable(template: &[String]) -> bool {
+/// The command template, if its program exists (Flatpak apps via
+/// `flatpak info`), with the program as found: from the GNOME menu,
+/// `~/.local/bin` isn't on PATH, where starting it would look.
+fn runnable(template: &[String]) -> Option<Vec<String>> {
     match Editor::flatpak_id(template) {
         Some(id) => std::process::Command::new("flatpak")
             .args(["info", id])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .is_ok_and(|s| s.success()),
-        None => template.first().is_some_and(|program| {
-            find_program(program, None).is_some() || Path::new(program).is_file()
-        }),
+            .is_ok_and(|s| s.success())
+            .then(|| template.to_vec()),
+        None => {
+            let program = template.first()?;
+            let found = find_program(program, None)
+                .or_else(|| Path::new(program).is_file().then(|| PathBuf::from(program)))?;
+            let mut command = template.to_vec();
+            command[0] = found.to_string_lossy().into_owned();
+            Some(command)
+        }
     }
 }

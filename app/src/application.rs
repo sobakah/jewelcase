@@ -267,7 +267,8 @@ impl GatefoldApplication {
             .version(VERSION)
             .website("https://github.com/sobakah/gatefold")
             .issue_url("https://github.com/sobakah/gatefold/issues")
-            .license_type(gtk::License::Gpl30)
+            // bliss-audio is GPL-3.0-only (the code itself is "or later").
+            .license_type(gtk::License::Gpl30Only)
             .build();
         about.present(self.active_window().as_ref());
     }

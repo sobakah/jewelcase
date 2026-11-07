@@ -160,7 +160,7 @@
     <key name="spotify-streaming" type="b">
       <default>false</default>
       <summary>Stream from Spotify</summary>
-      <description>Songs that aren’t in the library play from Spotify through librespot (unofficial; only in builds with the spotify-stream feature).</description>
+      <description>Songs that aren’t in the library play from Spotify: through Spotify Soloist (official, installed separately; the default) or librespot (unofficial; only in builds with the spotify-stream feature), see spotify-stream-backend.</description>
     </key>
     <key name="spotify-stream-backend" type="s">
       <choices>

@@ -10,11 +10,11 @@ Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
-# Gatefold itself. The vendored crates' licenses are listed in
-# LICENSE.dependencies; add them here before publishing this anywhere.
-# Note: bliss-audio (smart shuffle) is GPL-3.0-only, so the built program
-# as a whole is GPL-3.0 (without "or later").
-License:        GPL-3.0-or-later
+# Gatefold's own code is GPL-3.0-or-later; bliss-audio (smart shuffle) is
+# GPL-3.0-only, so the built program is GPL-3.0-only. The vendored crates'
+# licenses are listed in LICENSE.dependencies; add them here before
+# publishing this anywhere.
+License:        GPL-3.0-only
 URL:            https://github.com/sobakah/gatefold
 Source0:        %{name}-%{version}.tar.xz
 # Rust dependencies: `cargo vendor` output, created by `make tarballs`.
@@ -30,6 +30,7 @@ BuildRequires:  blueprint-compiler
 BuildRequires:  pkgconfig(gtk4) >= 4.24
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.10
 BuildRequires:  pkgconfig(gstreamer-1.0) >= 1.28
+BuildRequires:  pkgconfig(gstreamer-app-1.0) >= 1.28
 BuildRequires:  pkgconfig(sqlite3)
 # glycin (sandboxed cover decoding) links these.
 BuildRequires:  pkgconfig(fontconfig)
@@ -45,6 +46,8 @@ BuildRequires:  /usr/bin/appstreamcli
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugin-libav
+# Song analysis (smart shuffle, crossfade, loudness): bpmdetect (soundtouch).
+Requires:       gstreamer1-plugins-bad-free
 # Cover decoding in glycin's sandbox.
 Requires:       glycin-loaders
 Requires:       bubblewrap
@@ -64,8 +67,13 @@ library; lyrics, the queue and details open when you want them.
 %build
 %meson -Dprofile=default -Dspotify_stream=%{?with_spotify_stream:true}%{!?with_spotify_stream:false}
 %meson_build
+%if %{with spotify_stream}
+%{cargo_license_summary -f spotify-stream}
+%{cargo_license -f spotify-stream} > LICENSE.dependencies
+%else
 %{cargo_license_summary}
 %{cargo_license} > LICENSE.dependencies
+%endif
 %{cargo_vendor_manifest}
 
 %install

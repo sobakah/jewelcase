@@ -422,18 +422,8 @@ impl ArtistPage {
                 .tooltip_text(&uri)
                 .css_classes(["pill", "small"])
                 .build();
-            button.connect_clicked(move |button| {
-                let window = button.root().and_downcast::<gtk::Window>();
-                gtk::UriLauncher::new(&uri).launch(
-                    window.as_ref(),
-                    gio::Cancellable::NONE,
-                    |result| {
-                        if let Err(err) = result {
-                            tracing::warn!("Cannot open link: {err}");
-                        }
-                    },
-                );
-            });
+            // (Headless tests open nothing.)
+            button.connect_clicked(move |_| crate::spotify::open_in_browser(&uri));
             imp.links.append(&button);
         }
     }

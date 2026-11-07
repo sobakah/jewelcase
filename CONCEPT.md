@@ -584,13 +584,13 @@ These are small changes in lyrembed and cdimport that would make the integration
 For now the app is built as an **RPM for Fedora 45 and installed locally**. There's no Flatpak and no distribution. COPR stays an easy step later, because the same spec file works there.
 
 - **Build system**: Meson + Cargo (GNOME Rust app layout). The spec uses the standard `%meson` / `%meson_build` / `%meson_install` macros.
-- **Rust dependencies are vendored**: `cargo vendor` produces a second source tarball (`Source1`), and the build runs offline with `--offline`/`--frozen`. Many crates used here (lofty, bliss-audio, mpris-server, oo7, librespot) aren't packaged in Fedora, so vendoring is the practical way. `Cargo.lock` is committed.
+- **Rust dependencies are vendored**: `cargo vendor` produces a second source tarball (`Source1`); `%cargo_prep -v vendor` points Cargo at it and turns off network access, so the build runs offline. Many crates used here (lofty, bliss-audio, mpris-server, oo7, librespot) aren't packaged in Fedora, so vendoring is the practical way. `Cargo.lock` is committed.
 - **Clean builds** with `mock -r fedora-45-x86_64` (catches missing BuildRequires), quick local builds with `rpmbuild -ba`. A `make rpm`/`just rpm` target wraps both.
 - **Build conditions**: `%bcond spotify_stream 0` → `rpmbuild --with spotify_stream` enables the librespot Cargo feature (§9.4). The default build contains no librespot code.
 
 | | Packages (Fedora 45) |
 |---|---|
-| **BuildRequires** | `meson`, `cargo`, `rust`, `blueprint-compiler`, `gtk4-devel`, `libadwaita-devel`, `gstreamer1-devel`, `gstreamer1-plugins-base-devel`, `sqlite-devel` (or bundled SQLite via rusqlite), `desktop-file-utils`, `libappstream-glib`, `gettext`. Plus the FFmpeg dev libraries from `ffmpeg-free-devel` if bliss uses its FFmpeg decoder, see below. |
+| **BuildRequires** | `meson`, `cargo`, `rust`, `blueprint-compiler`, `gtk4-devel`, `libadwaita-devel`, `gstreamer1-devel`, `gstreamer1-plugins-base-devel`, `sqlite-devel` (or bundled SQLite via rusqlite), `desktop-file-utils`, `appstream` (`appstreamcli`), `gettext`. Plus the FFmpeg dev libraries from `ffmpeg-free-devel` if bliss uses its FFmpeg decoder, see below. |
 | **Requires** | `gtk4`, `libadwaita`, `glycin-loaders`, `gstreamer1-plugins-base` (`playbin3`), `gstreamer1-plugins-good` (FLAC, `rgvolume` ReplayGain), `gstreamer1-plugins-bad-free` (`bpmdetect`/SoundTouch), `gstreamer1-plugin-libav` (AAC/ALAC in the M4A files) |
 | **Recommends** | `gstreamer1-plugins-ugly-free` (WMA via `asfdemux`, not needed for `~/Musik` today), `flatpak` (for Ear Tag) |
 | **Not RPM dependencies** | lyrembed, cdimport (pipx), Ear Tag (Flatpak): detected at runtime (§10) |
@@ -602,12 +602,12 @@ For now the app is built as an **RPM for Fedora 45 and installed locally**. Ther
   | What | Value |
   |---|---|
   | App ID (desktop file, metainfo, GSettings schema, D-Bus name, icons) | `io.github.sobakah.Gatefold` |
-  | MPRIS bus name | `org.mpris.MediaPlayer2.Gatefold` |
+  | MPRIS bus name | `org.mpris.MediaPlayer2.Gatefold` (`…Gatefold.Devel` for the development build) |
   | Command / binary / RPM package | `gatefold` (spec file `gatefold.spec`) |
   | Data (DB, portraits, analysis) | `~/.local/share/io.github.sobakah.Gatefold/` |
   | Cache (cover thumbnails) | `~/.cache/io.github.sobakah.Gatefold/` |
   | Keyring entries (Spotify tokens) | attribute `application = <app ID>` (the development build has its own; it copied the shared entries once when it got them) |
-  | Rust crates | `gatefold` (app), `gatefold-core`, `gatefold-metadata`, `gatefold-lyrics`, `gatefold-similarity`, `gatefold-tools`, `gatefold-spotify` |
+  | Rust crates | `gatefold` (app), `gatefold-core` (library, playback, analysis and similarity), `gatefold-metadata`, `gatefold-lyrics`, `gatefold-tools`, `gatefold-spotify`, `gatefold-soloist`, `gatefold-stream` (librespot, optional) |
   | User-Agent for MusicBrainz/Wikidata/fanart.tv | `Gatefold/<version> ( https://github.com/sobakah/gatefold )` |
 
 ---

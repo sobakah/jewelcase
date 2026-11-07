@@ -2,7 +2,7 @@
 
 A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. The design and roadmap are in [CONCEPT.md](CONCEPT.md).
 
-**Status:** Phase 0 (skeleton). The window, the bottom-sheet player, preferences with music-folder selection, and the build and packaging setup are in place. The app doesn't scan or play music yet.
+**Status:** the roadmap's phases 0–8 are done: library scanning and album grouping, artists with online details, the player with lyrics and queue, companion tools, playlists, smart shuffle and crossfade, and the optional Spotify integration (playlists, Connect devices, streaming through Spotify Soloist, saved albums and followed artists). Not released yet.
 
 ## Development setup (Fedora 45)
 
@@ -113,4 +113,5 @@ streaming tracks to the library (`matching.rs`).
 
 ## License
 
-GPL-3.0-or-later
+Gatefold's code is GPL-3.0-or-later. It uses bliss-audio (smart shuffle),
+which is GPL-3.0-only, so the program as built is GPL-3.0-only.
