@@ -169,6 +169,9 @@ impl SearchView {
                 list.append(
                     &adw::ActionRow::builder()
                         .title(gettext("Spotify can’t be searched right now"))
+                        .subtitle(crate::spotify::search_error(&err))
+                        .subtitle_lines(0)
+                        .use_markup(false)
                         .build(),
                 );
                 return;

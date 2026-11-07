@@ -1135,12 +1135,32 @@ impl Spotify {
 /// Why Spotify couldn't be searched, for the user.
 pub fn search_error(err: &Error) -> String {
     match err {
+        // Spotify limits how much an app may search; after many searches
+        // (matching a large library) it can ask to wait for hours.
+        Error::RateLimited(wait) if wait.as_secs() >= 90 => {
+            // Translators: {} is a time, e.g. "3 h" or "20 min".
+            gettext("Spotify asks Gatefold to wait {} (too many requests).")
+                .replace("{}", &wait_text(*wait))
+        }
         Error::RateLimited(_) => {
             gettext("Spotify is busy (too many requests); Gatefold tries again later.")
         }
+        Error::LoggedOut => gettext("Not connected to Spotify; connect in Preferences."),
         Error::Http(_) => gettext("Spotify can't be reached; Gatefold tries again later."),
         // Translators: {} is Spotify's own error message.
         _ => gettext("Spotify couldn't be searched ({}).").replace("{}", &err.to_string()),
+    }
+}
+
+/// "3 h", "20 min".
+fn wait_text(wait: std::time::Duration) -> String {
+    let minutes = wait.as_secs().div_ceil(60);
+    if minutes >= 90 {
+        // Translators: hours, e.g. "3 h".
+        gettext("{} h").replace("{}", &minutes.div_ceil(60).to_string())
+    } else {
+        // Translators: minutes, e.g. "20 min".
+        gettext("{} min").replace("{}", &minutes.to_string())
     }
 }
 
