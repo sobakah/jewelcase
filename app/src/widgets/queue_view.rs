@@ -23,6 +23,8 @@ mod imp {
         /// What a Spotify device plays next (remote mode, §9.3).
         pub remote_list: gtk::ListBox,
         pub history: gtk::ListBox,
+        /// "And 1,800 more songs" below the shown part of a long queue.
+        pub more: gtk::Label,
         pub history_box: gtk::Box,
         pub scroller: gtk::ScrolledWindow,
         /// The songs the history rows show, in row order.
@@ -208,6 +210,23 @@ impl QueueView {
             .build();
         lists.append(&imp.history_box);
         lists.append(&imp.list);
+        imp.more.add_css_class("dim-label");
+        imp.more.set_visible(false);
+        lists.append(&imp.more);
+        let more = imp.more.clone();
+        player.queue_model().connect_items_changed(glib::clone!(
+            #[weak]
+            player,
+            move |_, _, _, _| {
+                let count = player.queue_more();
+                more.set_visible(count > 0);
+                // Translators: {} is a number of songs after those shown.
+                more.set_label(
+                    &ngettext("And {} more song", "And {} more songs", count as u32)
+                        .replace("{}", &count.to_string()),
+                );
+            }
+        ));
         // Remote mode: Spotify's queue, read-only (the API can only add).
         imp.remote_list.set_selection_mode(gtk::SelectionMode::None);
         imp.remote_list.set_valign(gtk::Align::Start);

@@ -54,6 +54,9 @@ const RESTART_THRESHOLD_MS: u64 = 3000;
 /// Takes the controls' commands in remote mode.
 type RemoteHandler = std::rc::Rc<dyn Fn(RemoteCommand)>;
 
+/// Upcoming songs the queue view shows (the rest is counted below them).
+const QUEUE_SHOWN: usize = 200;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum State {
     #[default]
@@ -101,6 +104,8 @@ mod imp {
         /// The queue entry that was current when remote mode began: if
         /// another one is current when it ends, that one gets loaded.
         pub local_uid: Cell<Option<u64>>,
+        /// Upcoming songs the queue view doesn't show (see QUEUE_SHOWN).
+        pub queue_more: Cell<usize>,
         /// Remote position and when it was reported, to move it along.
         pub remote_clock: Cell<Option<(std::time::Instant, u64)>>,
         pub remote_tick: RefCell<Option<glib::SourceId>>,
@@ -1755,19 +1760,30 @@ impl Player {
         }
     }
 
+    /// Songs after the current one beyond what the queue view shows.
+    pub fn queue_more(&self) -> usize {
+        self.imp().queue_more.get()
+    }
+
     fn queue_changed(&self) {
         let imp = self.imp();
-        let (shuffle, repeat, upcoming) = {
+        let (shuffle, repeat, upcoming, more) = {
             let queue = imp.queue.borrow();
             let start = queue.current_index().unwrap_or(0);
+            let rest = queue.items().len().saturating_sub(start);
+            // The current song and the next ones: rows for thousands of
+            // songs (an artist's Play All) would be built on every change.
             let items: Vec<_> = queue
                 .items()
                 .iter()
                 .skip(start)
+                .take(QUEUE_SHOWN + 1)
                 .map(|i| (i.track_id, i.origin))
                 .collect();
-            (queue.is_shuffled(), queue.repeat().as_str(), items)
+            let more = rest.saturating_sub(items.len());
+            (queue.is_shuffled(), queue.repeat().as_str(), items, more)
         };
+        imp.queue_more.set(more);
         let objects: Vec<QueueEntry> = upcoming
             .iter()
             .enumerate()
