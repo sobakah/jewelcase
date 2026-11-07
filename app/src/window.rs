@@ -1404,9 +1404,11 @@ impl GatefoldWindow {
         let imp = self.imp();
         self.fill_genre_menu();
         self.announce_imported_albums();
-        // Leave the page of an artist that's no longer in the library.
+        // Leave the page of an artist that's no longer in the library
+        // (a Spotify artist's page never was).
         let library = GatefoldApplication::get().library();
         if let Some(page) = self.artist_page()
+            && page.spotify_artist_id().is_none()
             && library.artist(page.artist_id()).is_none()
         {
             imp.artist_split.set_show_sidebar(false);
