@@ -257,6 +257,16 @@ impl SearchView {
                 covers.push((cover.clone(), cover_key.clone()));
             }
             let row = Self::row(&track.name, &subtitle, &cover);
+            if !in_library {
+                row.add_prefix(
+                    &gtk::Image::builder()
+                        .icon_name("gatefold-spotify-symbolic")
+                        .pixel_size(12)
+                        .valign(gtk::Align::Center)
+                        .tooltip_text(gettext("Plays from Spotify"))
+                        .build(),
+                );
+            }
             row.add_suffix(
                 &gtk::Label::builder()
                     .label(format::duration(track.duration_ms))

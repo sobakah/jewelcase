@@ -282,9 +282,11 @@ impl ArtistPage {
         imp.bio_box.set_visible(false);
         imp.identify_banner.set_revealed(false);
         imp.latin_name.set_visible(false);
-        // No image choices: the picture is Spotify's.
-        imp.portrait_button.set_menu_model(None::<&gio::MenuModel>);
+        // No image choices: the picture is Spotify's. (Without its menu
+        // the button would be insensitive, and the picture dimmed.)
         imp.portrait_button.set_can_target(false);
+        imp.portrait_button.set_focusable(false);
+        imp.portrait_button.set_tooltip_text(None);
         page.refresh();
         page
     }

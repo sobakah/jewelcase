@@ -105,11 +105,9 @@ impl TrackRow {
         row.add_controller(motion);
         row.update_lead();
 
-        let title = gtk::Label::builder()
-            .label(track.title())
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
+        // Songs that play from Spotify (a Spotify album's songs that aren't
+        // in the library) show its icon (§9.4).
+        let title = super::spotify_title(&track.title(), track.is_stand_in());
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .valign(gtk::Align::Center)
