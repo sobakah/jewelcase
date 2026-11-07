@@ -355,6 +355,23 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         }
     ));
     group.add(&key);
+    // Spotify's songs are louder than ReplayGain'd files.
+    let offset = adw::SpinRow::builder()
+        .title(gettext("Volume of Spotify Songs"))
+        .subtitle(gettext(
+            "In dB; −4 makes them about as loud as your files with ReplayGain",
+        ))
+        .adjustment(&gtk::Adjustment::new(-4.0, -15.0, 6.0, 1.0, 3.0, 0.0))
+        .build();
+    settings
+        .bind("spotify-volume-offset", &offset, "value")
+        .build();
+    offset.connect_value_notify(glib::clone!(
+        #[weak]
+        spotify,
+        move |_| spotify.stream_volume(GatefoldApplication::get().player().volume())
+    ));
+    group.add(&offset);
 
     let status = adw::ActionRow::builder()
         .title(gettext("Status"))
@@ -373,6 +390,8 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         download,
         #[weak]
         key,
+        #[weak]
+        offset,
         #[weak]
         status,
         move |spotify: &Spotify| {
@@ -393,6 +412,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             });
             program.set_visible(soloist);
             key.set_visible(soloist);
+            offset.set_visible(soloist);
             if soloist {
                 let running = gatefold_soloist::find_running();
                 let configured = spotify.settings().string("soloist-path");

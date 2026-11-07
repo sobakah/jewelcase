@@ -149,6 +149,12 @@
       <summary>How Spotify songs stream</summary>
       <description>soloist: Spotify’s official Soloist (a running one, e.g. from soloistd, or started by Gatefold). librespot: unofficial, only in builds with the spotify-stream feature.</description>
     </key>
+    <key name="spotify-volume-offset" type="i">
+      <range min="-15" max="6"/>
+      <default>-4</default>
+      <summary>Volume of Spotify songs in Soloist (dB)</summary>
+      <description>Spotify’s songs are about 4 dB louder than files played with ReplayGain; this evens them out.</description>
+    </key>
     <key name="soloist-path" type="s">
       <default>""</default>
       <summary>Spotify Soloist program</summary>

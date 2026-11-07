@@ -65,7 +65,26 @@ pub struct SoloistState {
     /// Soloist moving on right after Gatefold paused it isn't someone
     /// else playing.
     quiet_until: Option<std::time::Instant>,
+    /// Gatefold's next song when it's a Spotify song too: handed to
+    /// Soloist's queue shortly before the end, so it follows seamlessly.
+    next_uri: Option<String>,
+    queued_next: Option<String>,
+    /// Soloist moved on to the handed-over song: no new "play" for it.
+    chained: Option<String>,
+    /// Muted for the last moment of a song followed by a local one, so
+    /// Soloist's own next song isn't heard before it's paused.
+    ducked: bool,
+    /// Counts reschedules of the end timers; an older timer does nothing
+    /// (removing one that already ran would panic).
+    end_generation: u64,
+    /// Gatefold's volume (0 to 1), before the Spotify offset.
+    volume: f64,
 }
+
+/// Before the end, the next Spotify song goes into Soloist's queue …
+const HAND_OVER_BEFORE_MS: u64 = 10_000;
+/// … or, with a local song next, Soloist is muted.
+const DUCK_BEFORE_MS: u64 = 400;
 
 /// How long after pausing Soloist its own moves are ignored.
 const QUIET: std::time::Duration = std::time::Duration::from_secs(3);
@@ -202,10 +221,12 @@ impl Spotify {
             let state = &mut stream.soloist;
             state.generation += 1;
             let old = state.soloist.take();
-            let (generation, reconnects) = (state.generation, state.reconnects);
+            let (generation, reconnects, end_generation) =
+                (state.generation, state.reconnects, state.end_generation);
             *state = SoloistState {
                 generation,
                 reconnects,
+                end_generation,
                 ..SoloistState::default()
             };
             old
@@ -299,6 +320,9 @@ impl Spotify {
                 self.imp().stream.borrow_mut().soloist.position = Some(position);
                 if self.soloist_receiving() {
                     self.receiver_show(false);
+                } else {
+                    // A seek (or a correction) moves the end.
+                    self.schedule_end();
                 }
             }
             Event::Queue(items) => {
@@ -399,9 +423,27 @@ impl Spotify {
                 if let (Some(ms), Some(soloist)) = (seek, self.soloist()) {
                     soloist.seek(ms);
                 }
+                self.schedule_end();
             }
         } else if started {
-            self.soloist_ended();
+            let chained = self.imp().stream.borrow().soloist.queued_next.as_deref() == Some(uri);
+            if chained {
+                // The handed-over song plays: it's Gatefold's next one.
+                {
+                    let mut stream = self.imp().stream.borrow_mut();
+                    let state = &mut stream.soloist;
+                    state.queued_next = None;
+                    state.chained = Some(uri.to_owned());
+                    state.wanted = Some(uri.to_owned());
+                    state.started = true;
+                    state.position = None;
+                }
+                GatefoldApplication::get()
+                    .player()
+                    .stream_note(StreamNote::Ended);
+            } else {
+                self.soloist_ended();
+            }
         }
     }
 
@@ -434,9 +476,107 @@ impl Spotify {
         if let Some(soloist) = self.soloist() {
             soloist.pause();
         }
+        self.restore_volume();
         GatefoldApplication::get()
             .player()
             .stream_note(StreamNote::Ended);
+    }
+
+    /// Gatefold's next song: a Spotify song (handed over before the end)
+    /// or not (Soloist is muted at the very end).
+    pub(super) fn soloist_next(&self, uri: Option<&str>) {
+        self.imp().stream.borrow_mut().soloist.next_uri = uri.map(str::to_owned);
+        self.schedule_end();
+    }
+
+    /// Timers for the end of the current song (see `soloist_next`).
+    fn schedule_end(&self) {
+        let (generation, wanted, remaining) = {
+            let mut stream = self.imp().stream.borrow_mut();
+            let state = &mut stream.soloist;
+            state.end_generation += 1;
+            if !state.started || state.receiving {
+                return;
+            }
+            let Some(wanted) = state.wanted.clone() else {
+                return;
+            };
+            let duration = state
+                .current
+                .as_ref()
+                .filter(|c| c.uri == wanted)
+                .and_then(|c| c.duration_ms)
+                .unwrap_or_else(|| GatefoldApplication::get().player().duration());
+            let position = state.position.map_or(0, |p| p.now());
+            if duration == 0 || position >= duration {
+                return;
+            }
+            (state.end_generation, wanted, duration - position)
+        };
+        let still = move |spotify: &Spotify| {
+            let state = &spotify.imp().stream.borrow().soloist;
+            state.end_generation == generation && state.wanted.as_deref() == Some(wanted.as_str())
+        };
+        glib::timeout_add_local_once(
+            std::time::Duration::from_millis(remaining.saturating_sub(HAND_OVER_BEFORE_MS)),
+            glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                #[strong]
+                still,
+                move || {
+                    if !still(&spotify) {
+                        return;
+                    }
+                    let next = {
+                        let state = &spotify.imp().stream.borrow().soloist;
+                        state
+                            .next_uri
+                            .clone()
+                            .filter(|_| state.queued_next.is_none())
+                    };
+                    if let (Some(next), Some(soloist)) = (next, spotify.soloist()) {
+                        soloist.add_to_queue(&next);
+                        spotify.imp().stream.borrow_mut().soloist.queued_next = Some(next);
+                    }
+                }
+            ),
+        );
+        glib::timeout_add_local_once(
+            std::time::Duration::from_millis(remaining.saturating_sub(DUCK_BEFORE_MS)),
+            glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                move || {
+                    let local_next = spotify.imp().stream.borrow().soloist.next_uri.is_none();
+                    if still(&spotify)
+                        && local_next
+                        && let Some(soloist) = spotify.soloist()
+                    {
+                        soloist.set_volume(0);
+                        spotify.imp().stream.borrow_mut().soloist.ducked = true;
+                    }
+                }
+            ),
+        );
+    }
+
+    fn restore_volume(&self) {
+        let ducked = std::mem::take(&mut self.imp().stream.borrow_mut().soloist.ducked);
+        if ducked {
+            let volume = self.imp().stream.borrow().soloist.volume;
+            self.soloist_volume(volume);
+        }
+    }
+
+    /// Soloist's volume: Gatefold's, lowered by the offset for Spotify's
+    /// louder songs (Preferences, default −4 dB).
+    fn soloist_percent(&self, volume: f64) -> u8 {
+        let offset_db = f64::from(self.settings().int("spotify-volume-offset"));
+        let factor = 10f64.powf(offset_db / 20.0);
+        (volume.clamp(0.0, 1.0) * factor * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as u8
     }
 
     fn soloist_unavailable(&self) {
@@ -451,6 +591,18 @@ impl Spotify {
     }
 
     pub(super) fn soloist_load(&self, uri: &str, start_ms: u64, play: bool) {
+        // Soloist already moved on to it (handed over before the end).
+        let chained = {
+            let mut stream = self.imp().stream.borrow_mut();
+            let chained = stream.soloist.chained.take();
+            play && chained.as_deref() == Some(uri)
+        };
+        if chained {
+            self.restore_volume();
+            self.schedule_end();
+            return;
+        }
+        self.restore_volume();
         let Some(soloist) = self.soloist() else {
             GatefoldApplication::get()
                 .player()
@@ -561,8 +713,9 @@ impl Spotify {
     }
 
     pub(super) fn soloist_volume(&self, volume: f64) {
+        self.imp().stream.borrow_mut().soloist.volume = volume;
         if let Some(soloist) = self.soloist() {
-            soloist.set_volume((volume.clamp(0.0, 1.0) * 100.0).round() as u8);
+            soloist.set_volume(self.soloist_percent(volume));
         }
     }
 

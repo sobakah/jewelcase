@@ -422,9 +422,16 @@ impl Spotify {
         }
     }
 
-    pub fn stream_preload(&self, uri: &str) {
-        if self.stream_backend() == Backend::Librespot {
-            self.librespot_preload(uri);
+    /// Gatefold's next song while a song streams: a Spotify song (fetched
+    /// or handed over early) or none (a local song follows).
+    pub fn stream_next(&self, uri: Option<&str>) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_next(uri),
+            Backend::Librespot => {
+                if let Some(uri) = uri {
+                    self.librespot_preload(uri);
+                }
+            }
         }
     }
 

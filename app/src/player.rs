@@ -1186,17 +1186,21 @@ impl Player {
             queue.peek_next(true).map(|i| queue.items()[i])
         };
         let next = next.and_then(|item| self.track(item.track_id).map(|t| (t, item.uid)));
-        // A streamed song next: the stream fetches it early; local
-        // playback ends with EOS and the song is loaded then.
+        // While a song streams, the stream learns what follows: a Spotify
+        // song (taken early) or none (a local one).
+        if self.imp().streaming.get() {
+            let next_uri = next
+                .as_ref()
+                .filter(|(track, _)| track.is_stand_in())
+                .and_then(|(track, _)| self.stream_uri(track));
+            self.spotify().stream_next(next_uri.as_deref());
+        }
+        // A streamed song next: local playback ends with EOS and the song
+        // is loaded then.
         if let Some((track, _)) = &next
             && track.is_stand_in()
         {
             engine.set_next(None);
-            if self.imp().streaming.get()
-                && let Some(uri) = self.stream_uri(track)
-            {
-                self.spotify().stream_preload(&uri);
-            }
             return;
         }
         let next = next
