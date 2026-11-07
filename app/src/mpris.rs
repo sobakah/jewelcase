@@ -157,7 +157,14 @@ fn connect_updates(server: &std::rc::Rc<mpris_server::Player>, player: &Player) 
 
 fn current_track_id(player: &Player) -> Option<TrackId> {
     let track = player.current_track()?;
-    TrackId::try_from(format!("/io/github/sobakah/Gatefold/Track/{}", track.id())).ok()
+    // Object paths take no "-": streamed songs (negative IDs) get an "s".
+    let id = track.id();
+    let part = if id < 0 {
+        format!("s{}", id.unsigned_abs())
+    } else {
+        id.to_string()
+    };
+    TrackId::try_from(format!("/io/github/sobakah/Gatefold/Track/{part}")).ok()
 }
 
 fn metadata(player: &Player) -> Metadata {

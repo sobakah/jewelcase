@@ -73,6 +73,7 @@ mod imp {
                 .expect("just set")
                 .connect_local("reloaded", false, move |_| {
                     to_reload.reload_similarity();
+                    to_reload.library_reloaded();
                     None
                 });
             self.analyzer.set(analyzer).expect("set once");

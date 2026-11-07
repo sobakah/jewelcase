@@ -52,7 +52,7 @@ pub const REMOTE_HAND_OVER: usize = 20;
 const RESTART_THRESHOLD_MS: u64 = 3000;
 
 /// Takes the controls' commands in remote mode.
-type RemoteHandler = Box<dyn Fn(RemoteCommand)>;
+type RemoteHandler = std::rc::Rc<dyn Fn(RemoteCommand)>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum State {
@@ -654,19 +654,33 @@ impl Player {
         }
     }
 
+    /// Media keys and MPRIS: in remote mode for the device (whose state is
+    /// `playing`; the local state stays paused meanwhile).
     pub fn play(&self) {
-        if self.imp().state.get() != State::Playing {
+        if self.is_remote() {
+            if !self.playing() {
+                self.forward(RemoteCommand::PlayPause);
+            }
+        } else if self.imp().state.get() != State::Playing {
             self.play_pause();
         }
     }
 
     pub fn pause(&self) {
-        if self.imp().state.get() == State::Playing {
+        if self.is_remote() {
+            if self.playing() {
+                self.forward(RemoteCommand::Pause);
+            }
+        } else if self.imp().state.get() == State::Playing {
             self.play_pause();
         }
     }
 
     pub fn stop(&self) {
+        if self.is_remote() {
+            self.forward(RemoteCommand::Pause);
+            return;
+        }
         self.finish_crossfade();
         if let Some(engine) = self.engine() {
             engine.stop();
@@ -802,7 +816,9 @@ impl Player {
 
     /// Sends a command to the remote device; false when playing here.
     fn forward(&self, command: RemoteCommand) -> bool {
-        match self.imp().remote.borrow().as_ref() {
+        // Not borrowed while it runs: a handler may end remote mode.
+        let handler = self.imp().remote.borrow().clone();
+        match handler {
             Some(handler) => {
                 handler(command);
                 true
@@ -828,7 +844,7 @@ impl Player {
                 .set(imp.queue.borrow().current().map(|item| item.uid));
             self.save();
         }
-        imp.remote.replace(Some(Box::new(handler)));
+        imp.remote.replace(Some(std::rc::Rc::new(handler)));
         self.set_remote_device(Some(device));
         self.update_actions();
     }
@@ -1393,6 +1409,22 @@ impl Player {
         self.imp().edges.borrow_mut().clear();
     }
 
+    /// The library was read again: songs are looked up anew (changed tags,
+    /// covers, albums), the current one too.
+    pub fn library_reloaded(&self) {
+        let imp = self.imp();
+        imp.tracks.borrow_mut().clear();
+        if self.is_remote() {
+            return;
+        }
+        let current = imp.queue.borrow().current().copied();
+        if let Some(track) = current.and_then(|item| self.track(item.track_id)) {
+            imp.current_track.replace(Some(track));
+            self.notify_current_track();
+        }
+        self.queue_changed();
+    }
+
     fn similarity(&self) -> std::rc::Rc<Vec<SongFeatures>> {
         if let Some(data) = self.imp().similarity.borrow().as_ref() {
             return data.clone();
@@ -1541,6 +1573,18 @@ impl Player {
             PlayerEvent::StreamStarted => {
                 if let Some(uid) = imp.pending_next.take() {
                     let found = imp.queue.borrow_mut().jump_to_uid(uid);
+                    if !found {
+                        // The song GStreamer took was removed meanwhile:
+                        // the queue's next one plays instead.
+                        let next = imp.queue.borrow_mut().advance(true).is_some();
+                        if next {
+                            self.load_current(true, 0);
+                        } else {
+                            self.stop();
+                        }
+                        self.queue_changed();
+                        return;
+                    }
                     if found {
                         let current = imp.queue.borrow().current().copied();
                         // The gapless song's own measured gain (within an
@@ -1578,13 +1622,27 @@ impl Player {
             }
             PlayerEvent::Error(message) => {
                 tracing::warn!("Playback error: {message}");
-                let title = self.current_track().map(|t| t.title()).unwrap_or_default();
+                let was_playing = imp.state.get() == State::Playing;
+                // A gapless next song that fails: that one is meant, not
+                // the one that just played.
+                let failed = imp.pending_next.take().and_then(|uid| {
+                    let mut queue = imp.queue.borrow_mut();
+                    queue
+                        .jump_to_uid(uid)
+                        .then(|| queue.current().map(|i| i.track_id))?
+                });
+                let title = failed
+                    .and_then(|id| self.track(id))
+                    .or_else(|| self.current_track())
+                    .map(|t| t.title())
+                    .unwrap_or_default();
                 // Translators: {} is a song title.
                 let text = gettext("“{}” can't be played").replace("{}", &title);
                 self.emit_by_name::<()>("message", &[&text]);
                 let advanced = imp.queue.borrow_mut().advance(false).is_some();
                 if advanced && imp.queue.borrow().current_index() != Some(0) {
-                    self.load_current(true, 0);
+                    // Plays on only if it was playing.
+                    self.load_current(was_playing, 0);
                     self.queue_changed();
                 } else {
                     self.stop();
@@ -1600,7 +1658,12 @@ impl Player {
         match self.settings().string("replaygain").as_str() {
             "album" => true,
             "track" => false,
-            _ => !self.imp().queue.borrow().is_shuffled(),
+            // "auto": an album played in order; playlists, artists and
+            // shuffle even out each song.
+            _ => {
+                let queue = self.imp().queue.borrow();
+                queue.context_album().is_some() && !queue.is_shuffled()
+            }
         }
     }
 
@@ -1759,8 +1822,20 @@ impl Player {
                 .replace("{}", &skipped.to_string());
             self.emit_by_name::<()>("message", &[&text]);
         }
-        if self.imp().queue.borrow().current().is_some() {
-            self.load_current(false, snapshot.position_ms);
+        // The saved position belongs to the saved song: if that one is
+        // gone and another took its place, from the start.
+        let saved = snapshot
+            .current
+            .and_then(|c| snapshot.items.get(c))
+            .map(|i| i.track_id);
+        let current = self.imp().queue.borrow().current().map(|i| i.track_id);
+        let position = if current.is_some() && current == saved {
+            snapshot.position_ms
+        } else {
+            0
+        };
+        if current.is_some() {
+            self.load_current(false, position);
         }
         self.queue_changed();
     }
