@@ -98,6 +98,9 @@ mod imp {
         pub stream_failures: Cell<u32>,
         /// The local position, kept while remote.
         pub local_position: Cell<u64>,
+        /// The queue entry that was current when remote mode began: if
+        /// another one is current when it ends, that one gets loaded.
+        pub local_uid: Cell<Option<u64>>,
         /// Remote position and when it was reported, to move it along.
         pub remote_clock: Cell<Option<(std::time::Instant, u64)>>,
         pub remote_tick: RefCell<Option<glib::SourceId>>,
@@ -812,6 +815,8 @@ impl Player {
     pub fn enter_remote(&self, device: &str, handler: impl Fn(RemoteCommand) + 'static) {
         let imp = self.imp();
         if !self.is_remote() {
+            // A fade's other song stops too, not only the active engine.
+            self.finish_crossfade();
             if imp.state.get() == State::Playing
                 && let Some(engine) = self.engine()
             {
@@ -819,6 +824,8 @@ impl Player {
                 self.set_state(State::Paused);
             }
             imp.local_position.set(self.position());
+            imp.local_uid
+                .set(imp.queue.borrow().current().map(|item| item.uid));
             self.save();
         }
         imp.remote.replace(Some(Box::new(handler)));
@@ -957,6 +964,16 @@ impl Player {
         self.set_remote_receiver(false);
         self.set_remote_device(None);
         let current = imp.queue.borrow().current().copied();
+        // Something else was started meanwhile (it played on the device):
+        // the engine still holds the old song, so the new one is loaded.
+        if current.map(|item| item.uid) != imp.local_uid.take() {
+            if imp.playing.replace(false) {
+                self.notify_playing();
+            }
+            self.load_current(false, 0);
+            self.queue_changed();
+            return;
+        }
         let track = current.and_then(|item| self.track(item.track_id));
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
         imp.current_track.replace(track);
@@ -1269,7 +1286,13 @@ impl Player {
                 gettext("“{}” is only on Spotify; turn on streaming in Preferences to play it")
                     .replace("{}", &track.title());
             self.emit_by_name::<()>("message", &[&text]);
-            imp.streaming.set(false);
+            // Whatever played before stops: a file, or a streamed song.
+            if let Some(engine) = self.engine() {
+                engine.stop();
+            }
+            if imp.streaming.replace(false) {
+                spotify.stream_stop();
+            }
             self.set_state(State::Stopped);
             return;
         };
@@ -1761,11 +1784,15 @@ impl Player {
         if let Some(source) = self.imp().save.take() {
             source.remove();
         }
-        let live = self.imp().state.get() != State::Stopped && !self.is_remote();
-        let position = live
-            .then(|| self.engine_position())
-            .flatten()
-            .unwrap_or_else(|| self.position());
+        // In remote mode the position shown is the device's; the queue's
+        // is where local playback paused.
+        let position = if self.is_remote() {
+            self.imp().local_position.get()
+        } else if self.imp().state.get() != State::Stopped {
+            self.engine_position().unwrap_or_else(|| self.position())
+        } else {
+            self.position()
+        };
         let snapshot = self.imp().queue.borrow().snapshot(position);
         if let Some(mut db) = self.library().db()
             && let Err(err) = db.save_queue(&snapshot)
