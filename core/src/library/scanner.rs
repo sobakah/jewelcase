@@ -71,8 +71,24 @@ pub fn scan(
     let mut summary = ScanSummary::default();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
+    // Folders whose songs are kept though none were found: a missing or
+    // empty library folder (an unmounted drive leaves an empty mount
+    // point) and folders that couldn't be read. Their songs come back
+    // with the drive, history and all.
+    let mut unavailable: Vec<PathBuf> = Vec::new();
     for folder in folders {
-        walk(folder, &mut found, &mut seen, &mut summary.symlinks_skipped);
+        let empty = fs::read_dir(folder).map_or(true, |mut entries| entries.next().is_none());
+        if empty {
+            unavailable.push(folder.clone());
+            continue;
+        }
+        walk(
+            folder,
+            &mut found,
+            &mut seen,
+            &mut summary.symlinks_skipped,
+            &mut unavailable,
+        );
     }
     summary.files = found.len();
 
@@ -81,11 +97,10 @@ pub fn scan(
         .into_iter()
         .filter(|f| stamps.get(&f.path) != Some(&(f.mtime, f.size)))
         .collect();
-    let missing_folders: Vec<&PathBuf> = folders.iter().filter(|f| !f.is_dir()).collect();
     let removed: Vec<PathBuf> = stamps
         .into_keys()
         .filter(|path| !seen.contains(path))
-        .filter(|path| !missing_folders.iter().any(|f| path.starts_with(f)))
+        .filter(|path| !unavailable.iter().any(|f| path.starts_with(f)))
         .collect();
 
     summary.read = read_files(db, &changed, progress, &mut summary.failed)?;
@@ -106,11 +121,18 @@ pub fn scan(
     Ok(summary)
 }
 
-fn walk(dir: &Path, found: &mut Vec<FoundFile>, seen: &mut HashSet<PathBuf>, symlinks: &mut usize) {
+fn walk(
+    dir: &Path,
+    found: &mut Vec<FoundFile>,
+    seen: &mut HashSet<PathBuf>,
+    symlinks: &mut usize,
+    unreadable: &mut Vec<PathBuf>,
+) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) => {
             tracing::warn!("Cannot read {}: {err}", dir.display());
+            unreadable.push(dir.to_path_buf());
             return;
         }
     };
@@ -130,7 +152,7 @@ fn walk(dir: &Path, found: &mut Vec<FoundFile>, seen: &mut HashSet<PathBuf>, sym
             *symlinks += 1;
             tracing::debug!("Skipping symlink {}", path.display());
         } else if file_type.is_dir() {
-            walk(&path, found, seen, symlinks);
+            walk(&path, found, seen, symlinks, unreadable);
         } else if file_type.is_file() && is_audio(&path) {
             let Ok(meta) = entry.metadata() else {
                 continue;
@@ -341,6 +363,7 @@ mod tests {
             &mut found,
             &mut HashSet::new(),
             &mut symlinks,
+            &mut Vec::new(),
         );
         let paths: Vec<_> = found.iter().map(|f| f.path.clone()).collect();
         assert_eq!(paths, [root.join("Adele/25/01 Hello.flac")]);
@@ -379,22 +402,46 @@ mod tests {
             path: music.join("gone.flac"),
             ..stored.clone()
         };
-        db.upsert_tracks(&[stored, gone], 0).unwrap();
+        // An empty mount point (the drive isn't mounted) and a folder
+        // that can't be read keep their songs too.
+        let mount_point = dir.path().join("NAS");
+        fs::create_dir_all(&mount_point).unwrap();
+        let on_nas = ScannedFile {
+            path: mount_point.join("b.flac"),
+            ..stored.clone()
+        };
+        let locked = music.join("Locked");
+        fs::create_dir_all(&locked).unwrap();
+        let in_locked = ScannedFile {
+            path: locked.join("c.flac"),
+            ..stored.clone()
+        };
+        db.upsert_tracks(&[stored, gone, on_nas, in_locked], 0)
+            .unwrap();
+        fs::set_permissions(&locked, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
         let summary = scan(
             &mut db,
-            &[music, unmounted.clone()],
+            &[music, unmounted.clone(), mount_point.clone()],
             &Aliases::default(),
             &covers,
             &|_| {},
         )
         .unwrap();
+        fs::set_permissions(&locked, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         assert_eq!(summary.removed, 1);
-        let left: Vec<_> = db
+        let mut left: Vec<_> = db
             .all_tracks()
             .unwrap()
             .into_iter()
             .map(|t| t.path)
             .collect();
-        assert_eq!(left, [unmounted.join("a.flac")]);
+        left.sort();
+        let mut expected = vec![
+            unmounted.join("a.flac"),
+            mount_point.join("b.flac"),
+            locked.join("c.flac"),
+        ];
+        expected.sort();
+        assert_eq!(left, expected);
     }
 }

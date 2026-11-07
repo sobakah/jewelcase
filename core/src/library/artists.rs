@@ -64,25 +64,72 @@ impl Aliases {
         aliases
     }
 
-    /// Runs `<program> --list-aliases`; empty if that fails.
-    pub fn from_program(program: &std::path::Path) -> Self {
-        match std::process::Command::new(program)
+    /// Runs `<program> --list-aliases` (at most 20 s); `None` if that
+    /// fails.
+    pub fn list_from_program(program: &std::path::Path) -> Option<String> {
+        use std::io::Read;
+        let mut child = std::process::Command::new(program)
             .arg("--list-aliases")
             .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                Self::parse_lyrembed(&String::from_utf8_lossy(&output.stdout))
+            .spawn()
+            .map_err(|err| tracing::debug!("lyrembed is not available: {err}"))
+            .ok()?;
+        let mut stdout = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stdout.read_to_string(&mut text);
+            text
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                _ => {
+                    tracing::info!("lyrembed --list-aliases didn't answer; stopped it");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
             }
-            Ok(output) => {
-                tracing::info!("lyrembed --list-aliases failed: {}", output.status);
-                Self::default()
+        };
+        let text = reader.join().unwrap_or_default();
+        if status.success() {
+            Some(text)
+        } else {
+            tracing::info!("lyrembed --list-aliases failed: {status}");
+            None
+        }
+    }
+
+    /// Runs `<program> --list-aliases`; empty if that fails.
+    pub fn from_program(program: &std::path::Path) -> Self {
+        Self::list_from_program(program)
+            .map(|text| Self::parse_lyrembed(&text))
+            .unwrap_or_default()
+    }
+
+    /// lyrembed's aliases, remembered in `cache`: when lyrembed can't be
+    /// asked (not found, failing), the last list it gave. Artists are
+    /// identified by their aliases, so a list that comes and goes would
+    /// split them and lose what was looked up about them.
+    pub fn from_program_cached(program: Option<&std::path::Path>, cache: &std::path::Path) -> Self {
+        if let Some(text) = program.and_then(Self::list_from_program) {
+            if let Err(err) = std::fs::write(cache, &text) {
+                tracing::info!("Cannot remember lyrembed's aliases: {err}");
             }
-            Err(err) => {
-                tracing::debug!("lyrembed is not available: {err}");
-                Self::default()
+            return Self::parse_lyrembed(&text);
+        }
+        match std::fs::read_to_string(cache) {
+            Ok(text) => {
+                tracing::info!("Using the aliases lyrembed gave last time");
+                Self::parse_lyrembed(&text)
             }
+            Err(_) => Self::default(),
         }
     }
 

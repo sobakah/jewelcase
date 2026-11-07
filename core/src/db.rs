@@ -396,6 +396,7 @@ impl Database {
         }
         let kept: HashSet<i64> = album_ids.into_values().collect();
         delete_except(&tx, "album", &kept)?;
+        carry_artist_data(&tx, &artist_ids)?;
         delete_except(&tx, "artist", &artist_ids)?;
         tx.commit()?;
         Ok(())
@@ -1582,6 +1583,42 @@ fn find_track(conn: &Connection, s: &Snapshot) -> rusqlite::Result<Option<i64>> 
     .optional()
 }
 
+/// What's looked up about an artist or chosen for them, kept when the
+/// artist's key changes (different aliases from lyrembed, homonyms told
+/// apart): the new row of the same name takes the old row's data.
+const ARTIST_DATA: &str = "lookup_state, looked_up, lookup_mbid, wikidata_id, spotify_id,
+    wikipedia_url, website, bio, portrait_key, portrait_source, portrait_attribution,
+    custom_portrait_key";
+
+fn carry_artist_data(tx: &rusqlite::Transaction, kept: &HashSet<i64>) -> Result<()> {
+    let rows: Vec<(i64, String, bool)> = {
+        let mut stmt = tx.prepare(
+            "SELECT id, lower(name), lookup_state IS NULL AND custom_portrait_key IS NULL
+             FROM artist",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let leaving: HashMap<&str, i64> = rows
+        .iter()
+        .filter(|(id, _, _)| !kept.contains(id))
+        .map(|(id, name, _)| (name.as_str(), *id))
+        .collect();
+    let mut copy = tx.prepare(&format!(
+        "UPDATE artist SET ({ARTIST_DATA}) = (SELECT {ARTIST_DATA} FROM artist WHERE id = ?2)
+         WHERE id = ?1"
+    ))?;
+    for (id, name, fresh) in &rows {
+        if *fresh
+            && kept.contains(id)
+            && let Some(old) = leaving.get(name.as_str())
+        {
+            copy.execute(params![id, old])?;
+        }
+    }
+    Ok(())
+}
+
 const UPSERT_ARTIST: &str =
     "INSERT INTO artist (key, name, sort_name, mbid) VALUES (?1, ?2, ?3, ?4)
   ON CONFLICT(key) DO UPDATE SET name = excluded.name, sort_name = excluded.sort_name,
@@ -1773,6 +1810,34 @@ mod tests {
             },
             cover_key: Some("eabc".into()),
         }
+    }
+
+    #[test]
+    fn artist_data_survives_a_key_change() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/A/1/01.flac", "1", "One", 1)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let adele = db.artists().unwrap()[0].clone();
+        let meta = ArtistMeta {
+            lookup_state: Some("done".into()),
+            bio: Some("Singer".into()),
+            ..ArtistMeta::default()
+        };
+        db.set_artist_meta(adele.id, &meta).unwrap();
+        db.set_custom_portrait(adele.id, Some("p1")).unwrap();
+        // Other aliases from lyrembed: the same artist gets another key.
+        let tracks = db.all_tracks().unwrap();
+        let albums = group_albums(&tracks);
+        let mut artists =
+            crate::library::artists::build_artists(&albums, &tracks, &Default::default());
+        artists[0].key = "name:adele adkins".into();
+        db.replace_library(&albums, &artists).unwrap();
+        let after = db.artists().unwrap();
+        assert_eq!(after.len(), 1);
+        assert_ne!(after[0].id, adele.id);
+        assert_eq!(after[0].meta.bio.as_deref(), Some("Singer"));
+        assert_eq!(after[0].meta.custom_portrait_key.as_deref(), Some("p1"));
     }
 
     pub(super) fn rebuild(db: &mut Database) {

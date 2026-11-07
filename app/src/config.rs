@@ -25,6 +25,13 @@ pub fn is_development() -> bool {
 }
 
 /// `~/.local/share/<app id>/library.sqlite` (CONCEPT.md §12).
+/// lyrembed's last alias list, for when it can't be asked.
+pub fn aliases_cache_path() -> std::path::PathBuf {
+    gtk::glib::user_data_dir()
+        .join(APP_ID)
+        .join("lyrembed-aliases.txt")
+}
+
 pub fn database_path() -> std::path::PathBuf {
     gtk::glib::user_data_dir()
         .join(APP_ID)
