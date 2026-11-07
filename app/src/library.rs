@@ -67,6 +67,9 @@ mod imp {
         pub settings: OnceCell<gio::Settings>,
         pub rescan_pending: Cell<bool>,
         pub watcher: RefCell<Option<WatcherHandle>>,
+        /// Drives coming and going (a library folder on a USB drive or a
+        /// network share mounted later).
+        pub volumes: std::cell::OnceCell<gio::VolumeMonitor>,
         pub watch_timeout: RefCell<Option<glib::SourceId>>,
     }
 
@@ -189,8 +192,27 @@ impl Library {
 
         self.reload();
         self.watch_folders();
+        self.watch_mounts();
         self.rescan();
         Ok(())
+    }
+
+    /// A drive mounted or unmounted: its folders are watched (inotify can't
+    /// watch what wasn't there), and a rescan picks up its songs.
+    fn watch_mounts(&self) {
+        let monitor = gio::VolumeMonitor::get();
+        let changed = glib::clone!(
+            #[weak(rename_to = library)]
+            self,
+            move || {
+                library.watch_folders();
+                library.schedule_rescan();
+            }
+        );
+        let on_added = changed.clone();
+        monitor.connect_mount_added(move |_, _| on_added());
+        monitor.connect_mount_removed(move |_, _| changed());
+        let _ = self.imp().volumes.set(monitor);
     }
 
     /// Album groups, in database order (the window sorts them).

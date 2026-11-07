@@ -303,7 +303,13 @@ pub fn build_artists(
             })
             .filter_map(|name| lookup(&name))
             .collect();
-        for name in track_artist_names(artist) {
+        // The whole credit too: a band called "Mumford & Sons" is one
+        // artist, not "Mumford" and "Sons".
+        let mut names = track_artist_names(artist);
+        if !names.contains(artist) {
+            names.push(artist.clone());
+        }
+        for name in names {
             if let Some(i) = lookup(&name)
                 && !on_own_album.contains(&i)
                 && !artists[i].appears_on.contains(&track.id)

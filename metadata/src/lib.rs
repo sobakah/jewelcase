@@ -273,8 +273,12 @@ impl Client {
         else {
             return Ok(None);
         };
+        // One path segment: "AC/DC" must become "AC%2FDC".
         let json = self.json(
-            &format!("https://{host}/api/rest_v1/page/summary/{title}"),
+            &format!(
+                "https://{host}/api/rest_v1/page/summary/{}",
+                path_segment(title)
+            ),
             &[],
         )?;
         Ok(json
@@ -592,9 +596,40 @@ fn strip_html(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// A Wikipedia title as one URL path segment: percent-encoded except
+/// unreserved characters; `%XX` already in it stays.
+fn path_segment(title: &str) -> String {
+    let bytes = title.as_bytes();
+    let mut out = String::with_capacity(title.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let encoded_already = b == b'%'
+            && bytes.len() > i + 2
+            && bytes[i + 1].is_ascii_hexdigit()
+            && bytes[i + 2].is_ascii_hexdigit();
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) || encoded_already {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+        i += 1;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wikipedia_titles_are_one_path_segment() {
+        assert_eq!(path_segment("AC/DC"), "AC%2FDC");
+        assert_eq!(path_segment("Stray_Kids"), "Stray_Kids");
+        assert_eq!(path_segment("BTS_(band)"), "BTS_%28band%29");
+        assert_eq!(path_segment("Bj%C3%B6rk"), "Bj%C3%B6rk");
+        assert_eq!(path_segment("Björk"), "Bj%C3%B6rk");
+    }
     use serde_json::json;
 
     fn candidate(mbid: &str, name: &str, score: u32) -> Candidate {

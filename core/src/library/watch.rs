@@ -24,8 +24,12 @@ impl LibraryWatcher {
             },
             Config::default().with_follow_symlinks(false),
         )?;
+        // One folder that can't be watched (permissions, too many watches)
+        // doesn't stop the others.
         for folder in folders.iter().filter(|f| f.is_dir()) {
-            watcher.watch(folder, RecursiveMode::Recursive)?;
+            if let Err(err) = watcher.watch(folder, RecursiveMode::Recursive) {
+                tracing::warn!("Cannot watch {}: {err}", folder.display());
+            }
         }
         Ok(Self { _watcher: watcher })
     }

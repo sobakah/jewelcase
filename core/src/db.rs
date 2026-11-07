@@ -36,6 +36,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/011_song_edges.sql")),
     M::up(include_str!("db/012_loudness.sql")),
     M::up(include_str!("db/013_spotify_library.sql")),
+    M::up(include_str!("db/014_folder_covers.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -307,6 +308,61 @@ impl Database {
             let mut stmt = tx.prepare_cached("DELETE FROM track WHERE path = ?1")?;
             for path in paths {
                 stmt.execute([path_str(path)])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Folder cover images as last seen: folder → (image, mtime, size).
+    pub fn folder_cover_stamps(&self) -> Result<HashMap<PathBuf, (PathBuf, i64, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT folder, image, mtime, size FROM folder_cover")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                PathBuf::from(row.get::<_, String>(0)?),
+                (
+                    PathBuf::from(row.get::<_, String>(1)?),
+                    row.get(2)?,
+                    row.get(3)?,
+                ),
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The folder cover images now; folders not listed have none.
+    pub fn replace_folder_cover_stamps(
+        &mut self,
+        stamps: &HashMap<PathBuf, (PathBuf, i64, i64)>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM folder_cover", [])?;
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO folder_cover (folder, image, mtime, size) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (folder, (image, mtime, size)) in stamps {
+                insert.execute(params![
+                    folder.to_string_lossy(),
+                    image.to_string_lossy(),
+                    mtime,
+                    size
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// New cover keys for songs (folder covers that changed).
+    pub fn set_track_cover_keys(&mut self, keys: &[(i64, Option<String>)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut update = tx.prepare("UPDATE track SET cover_key = ?2 WHERE id = ?1")?;
+            for (id, key) in keys {
+                update.execute(params![id, key])?;
             }
         }
         tx.commit()?;
@@ -1619,9 +1675,24 @@ fn carry_artist_data(tx: &rusqlite::Transaction, kept: &HashSet<i64>) -> Result<
     Ok(())
 }
 
+/// An artist row; when another artist of the same name (another
+/// MusicBrainz ID) takes over the key, what was looked up about the first
+/// one goes (it isn't about this one).
 const UPSERT_ARTIST: &str =
     "INSERT INTO artist (key, name, sort_name, mbid) VALUES (?1, ?2, ?3, ?4)
   ON CONFLICT(key) DO UPDATE SET name = excluded.name, sort_name = excluded.sort_name,
+    lookup_state = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE lookup_state END,
+    looked_up = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE looked_up END,
+    lookup_mbid = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE lookup_mbid END,
+    wikidata_id = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE wikidata_id END,
+    spotify_id = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE spotify_id END,
+    wikipedia_url = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE wikipedia_url END,
+    website = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE website END,
+    bio = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE bio END,
+    portrait_key = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE portrait_key END,
+    portrait_source = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE portrait_source END,
+    portrait_attribution = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE portrait_attribution END,
+    custom_portrait_key = CASE WHEN excluded.mbid IS NOT NULL AND COALESCE(artist.mbid, artist.lookup_mbid) IS NOT NULL AND excluded.mbid != COALESCE(artist.mbid, artist.lookup_mbid) THEN NULL ELSE custom_portrait_key END,
     mbid = excluded.mbid
   RETURNING id";
 
@@ -1810,6 +1881,39 @@ mod tests {
             },
             cover_key: Some("eabc".into()),
         }
+    }
+
+    #[test]
+    fn another_artist_of_the_same_name_doesnt_inherit_the_data() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/A/1/01.flac", "1", "One", 1)], 1)
+            .unwrap();
+        let tracks = db.all_tracks().unwrap();
+        let albums = group_albums(&tracks);
+        let mut artists =
+            crate::library::artists::build_artists(&albums, &tracks, &Default::default());
+        artists[0].mbid = Some("us-nirvana".into());
+        db.replace_library(&albums, &artists).unwrap();
+        let first = db.artists().unwrap()[0].clone();
+        let meta = ArtistMeta {
+            lookup_state: Some("done".into()),
+            bio: Some("From Seattle".into()),
+            ..ArtistMeta::default()
+        };
+        db.set_artist_meta(first.id, &meta).unwrap();
+        // Same key, the same MBID: the data stays.
+        db.replace_library(&albums, &artists).unwrap();
+        assert_eq!(
+            db.artists().unwrap()[0].meta.bio.as_deref(),
+            Some("From Seattle")
+        );
+        // Now another artist of that name owns the key.
+        artists[0].mbid = Some("uk-nirvana".into());
+        db.replace_library(&albums, &artists).unwrap();
+        let after = db.artists().unwrap()[0].clone();
+        assert_eq!(after.id, first.id);
+        assert_eq!(after.meta.bio, None);
+        assert_eq!(after.meta.lookup_state, None);
     }
 
     #[test]

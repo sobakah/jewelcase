@@ -106,6 +106,7 @@ pub fn scan(
     summary.read = read_files(db, &changed, progress, &mut summary.failed)?;
     summary.removed = removed.len();
     db.delete_tracks(&removed)?;
+    update_folder_covers(db, &seen)?;
 
     let tracks = db.all_tracks()?;
     let albums = group_albums(&tracks);
@@ -289,6 +290,61 @@ fn folder_cover_key(track: &Path, cache: &FolderCovers) -> Option<String> {
     key
 }
 
+/// A folder image (cover.jpg …) added, replaced or removed since the last
+/// scan: the songs there without an embedded picture get the new cover.
+/// (Only changed audio files are read, so this isn't noticed otherwise.)
+fn update_folder_covers(db: &mut Database, found: &HashSet<PathBuf>) -> Result<(), DbError> {
+    let stamp = |path: &Path| -> Option<(i64, i64)> {
+        let meta = fs::metadata(path).ok()?;
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs() as i64);
+        Some((mtime, meta.len() as i64))
+    };
+    // The folders songs take covers from: their own and the album folder
+    // above a disc folder.
+    let mut folders: HashSet<PathBuf> = HashSet::new();
+    for path in found {
+        if let Some(parent) = path.parent() {
+            folders.insert(parent.to_path_buf());
+            folders.insert(album_folder(path).to_path_buf());
+        }
+    }
+    let old = db.folder_cover_stamps()?;
+    let mut now = HashMap::new();
+    let mut changed: Vec<PathBuf> = Vec::new();
+    for folder in folders {
+        let current = covers::find_folder_cover(&folder)
+            .and_then(|image| stamp(&image).map(|(m, s)| (image, m, s)));
+        if current.as_ref() != old.get(&folder) {
+            changed.push(folder.clone());
+        }
+        if let Some(current) = current {
+            now.insert(folder, current);
+        }
+    }
+    if !changed.is_empty() {
+        let cache = FolderCovers::default();
+        let updates: Vec<(i64, Option<String>)> = db
+            .all_tracks()?
+            .into_iter()
+            .filter(|t| t.cover_key.as_deref().is_none_or(|k| k.starts_with('f')))
+            .filter(|t| changed.iter().any(|f| t.path.starts_with(f)))
+            .filter_map(|t| {
+                let key = folder_cover_key(&t.path, &cache);
+                (key != t.cover_key).then_some((t.id, key))
+            })
+            .collect();
+        if !updates.is_empty() {
+            tracing::info!("{} songs take a changed folder cover", updates.len());
+            db.set_track_cover_keys(&updates)?;
+        }
+    }
+    db.replace_folder_cover_stamps(&now)
+}
+
 /// Creates thumbnails for album covers that aren't cached yet.
 fn make_covers(
     db: &Database,
@@ -368,6 +424,52 @@ mod tests {
         let paths: Vec<_> = found.iter().map(|f| f.path.clone()).collect();
         assert_eq!(paths, [root.join("Adele/25/01 Hello.flac")]);
         assert_eq!(symlinks, 2);
+    }
+
+    #[test]
+    fn a_new_or_replaced_folder_cover_reaches_the_songs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut db = Database::open_in_memory().unwrap();
+        let album = dir.path().join("Adele/25");
+        fs::create_dir_all(&album).unwrap();
+        let song = album.join("01.flac");
+        let embedded = album.join("02.flac");
+        let file = |path: &Path, cover_key: Option<&str>| ScannedFile {
+            path: path.to_path_buf(),
+            mtime: 0,
+            size: 0,
+            tags: tags::TrackTags::default(),
+            cover_key: cover_key.map(str::to_owned),
+        };
+        db.upsert_tracks(&[file(&song, None), file(&embedded, Some("eown"))], 0)
+            .unwrap();
+        let seen: HashSet<PathBuf> = [song.clone(), embedded.clone()].into();
+        let key_of = |db: &Database, path: &Path| {
+            db.all_tracks()
+                .unwrap()
+                .into_iter()
+                .find(|t| t.path == path)
+                .unwrap()
+                .cover_key
+        };
+
+        fs::write(album.join("cover.jpg"), b"first").unwrap();
+        update_folder_covers(&mut db, &seen).unwrap();
+        let first = key_of(&db, &song);
+        assert_eq!(first, Some(covers::cover_key('f', b"first")));
+        // A song with its own picture keeps it.
+        assert_eq!(key_of(&db, &embedded).as_deref(), Some("eown"));
+
+        fs::write(album.join("cover.jpg"), b"second, longer").unwrap();
+        update_folder_covers(&mut db, &seen).unwrap();
+        assert_eq!(
+            key_of(&db, &song),
+            Some(covers::cover_key('f', b"second, longer"))
+        );
+
+        fs::remove_file(album.join("cover.jpg")).unwrap();
+        update_folder_covers(&mut db, &seen).unwrap();
+        assert_eq!(key_of(&db, &song), None);
     }
 
     #[test]

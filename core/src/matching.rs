@@ -114,7 +114,15 @@ pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) ->
     if keys(local.artists).is_disjoint(&keys(remote.artists)) {
         return false;
     }
-    if Title::parse(local.title).agrees(&Title::parse(remote.title)) {
+    // The same title is the same release only with the same version
+    // ("X (Remixes)" isn't "X") and about as many songs (the single "Lover"
+    // isn't the album "Lover"; deluxe editions add a few).
+    let (local_title, remote_title) = (Title::parse(local.title), Title::parse(remote.title));
+    let similar_size = local.tracks == 0
+        || remote.tracks == 0
+        || local.tracks.abs_diff(remote.tracks) <= 3.max(local.tracks.max(remote.tracks) / 5);
+    if local_title.agrees(&remote_title) && local_title.notes == remote_title.notes && similar_size
+    {
         return true;
     }
     let words = |title: &str| -> BTreeSet<String> {
@@ -126,6 +134,7 @@ pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) ->
             .collect()
     };
     local.year.is_some()
+        && local_title.notes == remote_title.notes
         && local.year == remote.year
         && local.tracks > 0
         && local.tracks == remote.tracks
@@ -359,7 +368,7 @@ fn version_note(extra: &str) -> Option<String> {
         return Some("demo".into());
     }
     // Remixes differ from each other: keep who remixed.
-    if has("remix") || has("mix") && !has("original") || has("rmx") {
+    if has("remix") || has("remixes") || has("mix") && !has("original") || has("rmx") {
         let who: String = text.chars().filter(|c| c.is_alphanumeric()).collect();
         return Some(format!("remix {who}"));
     }
@@ -610,6 +619,23 @@ mod tests {
         assert!(!same_album(
             &local,
             &facts("樂-STAR", bts, 2023, 8, None),
+            &aliases
+        ));
+        // A single or a remix album of the same name isn't the album.
+        let lover = facts("Lover", skz, 2019, 18, None);
+        assert!(!same_album(
+            &lover,
+            &facts("Lover", skz, 2019, 1, None),
+            &aliases
+        ));
+        assert!(!same_album(
+            &lover,
+            &facts("Lover (Remixes)", skz, 2019, 18, None),
+            &aliases
+        ));
+        assert!(same_album(
+            &lover,
+            &facts("Lover (Deluxe)", skz, 2019, 21, None),
             &aliases
         ));
         let answer = facts("LOVE YOURSELF 結 ‘Answer’", bts, 2018, 25, None);

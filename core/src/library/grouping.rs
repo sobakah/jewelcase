@@ -205,8 +205,23 @@ fn build_album(key: String, tracks: &[&TrackRecord]) -> AlbumInfo {
     let title = title.to_owned();
     let edition = most_common(&|t| t.tags.release_comment.clone()).or(title_edition);
 
+    // Without an album artist tag: the track artist of most songs (more
+    // than half, §3.3 rule 2), else "Various Artists" (an untagged
+    // compilation mustn't be credited to whoever has the most songs).
+    let majority_artist = || {
+        let artist = most_common(&|t| t.tags.artist.clone())?;
+        let count = tracks
+            .iter()
+            .filter(|t| t.tags.artist.as_deref() == Some(artist.as_str()))
+            .count();
+        if count * 2 > tracks.len() {
+            Some(artist)
+        } else {
+            Some("Various Artists".to_owned())
+        }
+    };
     let artist_credit = most_common(&|t| t.tags.album_artist.clone())
-        .or_else(|| most_common(&|t| t.tags.artist.clone()))
+        .or_else(majority_artist)
         .unwrap_or_default();
     let album_artists = most_common_list(tracks.iter().map(|t| &t.tags.album_artists))
         .unwrap_or_else(|| {
