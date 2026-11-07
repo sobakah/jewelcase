@@ -12,10 +12,11 @@ fn main() {
         let key = gatefold_core::analysis::content_key(path);
         match gatefold_core::analysis::analyze(path) {
             Ok(result) => println!(
-                "{arg}\n  key {:?}, {} features, BPM {:?}, {:.1} s",
+                "{arg}\n  key {:?}, {} features, BPM {:?}, edges {:?}, {:.1} s",
                 key.ok(),
                 result.features.len(),
                 result.bpm,
+                result.edges,
                 start.elapsed().as_secs_f64()
             ),
             Err(err) => println!("{arg}\n  failed: {err}"),

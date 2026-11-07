@@ -43,6 +43,11 @@
       <summary>Crossfade (seconds)</summary>
       <description>Songs fade into each other this long; 0 plays them gaplessly. Only between files (not Spotify songs).</description>
     </key>
+    <key name="crossfade-smart" type="b">
+      <default>true</default>
+      <summary>Smart crossfade</summary>
+      <description>The fade starts where a song gets quiet and ends where it’s over, and the next song starts after its silence; uses the song analysis. Off, or for songs not analyzed: the last seconds fade.</description>
+    </key>
     <key name="crossfade-albums" type="b">
       <default>false</default>
       <summary>Crossfade within albums</summary>

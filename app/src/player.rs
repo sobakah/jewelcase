@@ -30,6 +30,11 @@ const HISTORY_MIN_MS: u64 = 30_000;
 /// After this many streamed songs fail in a row, playback stops.
 const STREAM_FAILURES_TO_STOP: u32 = 3;
 
+/// A smart crossfade lasts at least this long (abrupt endings).
+const SMART_FADE_MIN_MS: u64 = 800;
+/// Silence skipped at the start of the next song is at most this long.
+const SMART_LEAD_IN_MAX_MS: u64 = 10_000;
+
 /// A crossfade in progress.
 pub struct Fade {
     /// The engine fading out.
@@ -105,6 +110,8 @@ mod imp {
         pub active: Cell<usize>,
         /// A crossfade in progress: the engine fading out, and when.
         pub fade: RefCell<Option<Fade>>,
+        /// Where songs' music starts and ends (smart crossfade), by track.
+        pub edges: RefCell<HashMap<i64, Option<gatefold_core::analysis::Edges>>>,
         pub library: OnceCell<Library>,
         pub settings: OnceCell<gio::Settings>,
         pub actions: gio::SimpleActionGroup,
@@ -1053,16 +1060,54 @@ impl Player {
             && !self.settings().boolean("crossfade-albums"))
     }
 
+    /// Where a song's music starts and ends, from the analysis.
+    fn song_edges(&self, track_id: i64) -> Option<gatefold_core::analysis::Edges> {
+        if track_id < 0 {
+            return None;
+        }
+        if let Some(edges) = self.imp().edges.borrow().get(&track_id) {
+            return *edges;
+        }
+        let edges = self
+            .library()
+            .db()
+            .and_then(|db| db.song_edges(track_id).ok().flatten());
+        self.imp().edges.borrow_mut().insert(track_id, edges);
+        edges
+    }
+
+    /// When the fade starts and how long it takes. Smart: from where the
+    /// song gets quiet to where it's over (at most the setting, at least
+    /// a short overlap for abrupt endings); else the last seconds.
+    fn crossfade_plan(&self, track_id: i64, duration: u64) -> (u64, u64) {
+        let longest = self.crossfade_ms();
+        let smart = self.settings().boolean("crossfade-smart");
+        if smart && let Some(edges) = self.song_edges(track_id) {
+            let end = edges.end_ms.min(duration);
+            let length = end
+                .saturating_sub(edges.outro_ms)
+                .clamp(SMART_FADE_MIN_MS.min(longest), longest);
+            return (end.saturating_sub(length), length);
+        }
+        (duration.saturating_sub(longest), longest)
+    }
+
     /// While playing: near the end, the next song starts on the other
     /// engine and the two fade into each other.
     fn maybe_crossfade(&self, position: u64) {
         let imp = self.imp();
-        let length = self.crossfade_ms();
-        if length == 0 || imp.fade.borrow().is_some() || imp.state.get() != State::Playing {
+        if self.crossfade_ms() == 0
+            || imp.fade.borrow().is_some()
+            || imp.state.get() != State::Playing
+        {
             return;
         }
         let duration = self.duration();
-        if duration == 0 || duration.saturating_sub(position) > length {
+        let Some(current) = self.current_track() else {
+            return;
+        };
+        let (start, length) = self.crossfade_plan(current.id(), duration);
+        if duration == 0 || position < start {
             return;
         }
         let next = {
@@ -1084,7 +1129,17 @@ impl Player {
         let Some(engine) = self.engine_at(new) else {
             return;
         };
-        tracing::debug!("Crossfade into “{}” ({length} ms)", track.title());
+        // Smart: the next song starts after its silence.
+        let lead_in = if self.settings().boolean("crossfade-smart") {
+            self.song_edges(track.id())
+                .map_or(0, |e| e.lead_in_ms.min(SMART_LEAD_IN_MAX_MS))
+        } else {
+            0
+        };
+        tracing::debug!(
+            "Crossfade into “{}” ({length} ms, from {lead_in} ms)",
+            track.title()
+        );
         // The next song is now the current one.
         imp.queue.borrow_mut().advance(true);
         imp.pending_next.set(None);
@@ -1093,9 +1148,9 @@ impl Player {
         }
         imp.active.set(new);
         engine.set_volume(0.0);
-        engine.load(&uri, 0, true);
+        engine.load(&uri, lead_in, true);
         self.set_current_track(Some(track));
-        self.set_position(0);
+        self.set_position(lead_in);
         self.emit_by_name::<()>("seeked", &[]);
         let timer = glib::timeout_add_local(
             Duration::from_millis(40),
@@ -1294,6 +1349,7 @@ impl Player {
     /// Forgets the similarity data (new analysis results, a rescan).
     pub fn reload_similarity(&self) {
         self.imp().similarity.replace(None);
+        self.imp().edges.borrow_mut().clear();
     }
 
     fn similarity(&self) -> std::rc::Rc<Vec<SongFeatures>> {

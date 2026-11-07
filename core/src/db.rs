@@ -31,6 +31,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/008_streaming.sql")),
     M::up(include_str!("db/009_reread_spotify.sql")),
     M::up(include_str!("db/010_larger_spotify_images.sql")),
+    M::up(include_str!("db/011_song_edges.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1218,21 +1219,48 @@ impl Database {
         now: i64,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO analysis (key, features, features_version, bpm, failed, analyzed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO analysis (key, features, features_version, bpm, failed, analyzed,
+               lead_in_ms, outro_ms, end_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(key) DO UPDATE SET features = excluded.features,
                features_version = excluded.features_version, bpm = excluded.bpm,
-               failed = excluded.failed, analyzed = excluded.analyzed",
+               failed = excluded.failed, analyzed = excluded.analyzed,
+               lead_in_ms = excluded.lead_in_ms, outro_ms = excluded.outro_ms,
+               end_ms = excluded.end_ms",
             params![
                 key,
                 result.map(|r| crate::analysis::features_to_blob(&r.features)),
                 result.map(|r| i64::from(r.features_version)),
                 result.and_then(|r| r.bpm),
                 result.is_none(),
-                now
+                now,
+                result.and_then(|r| r.edges).map(|e| e.lead_in_ms as i64),
+                result.and_then(|r| r.edges).map(|e| e.outro_ms as i64),
+                result.and_then(|r| r.edges).map(|e| e.end_ms as i64),
             ],
         )?;
         Ok(())
+    }
+
+    /// Where a library song's music starts and ends (smart crossfade);
+    /// `None` until it's analyzed.
+    pub fn song_edges(&self, track_id: i64) -> Result<Option<crate::analysis::Edges>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT a.lead_in_ms, a.outro_ms, a.end_ms FROM track t
+                 JOIN analysis a ON a.key = t.content_key
+                 WHERE t.id = ?1 AND a.end_ms IS NOT NULL",
+                [track_id],
+                |row| {
+                    Ok(crate::analysis::Edges {
+                        lead_in_ms: row.get::<_, i64>(0)?.max(0) as u64,
+                        outro_ms: row.get::<_, i64>(1)?.max(0) as u64,
+                        end_ms: row.get::<_, i64>(2)?.max(0) as u64,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// (analyzed, all) songs, for the progress in Preferences.
@@ -1924,6 +1952,11 @@ mod tests {
         assert_eq!(db.tracks_to_analyze(10).unwrap().len(), 2);
         assert_eq!(db.analysis_progress().unwrap(), (0, 2));
         let result = crate::analysis::SongAnalysis {
+            edges: Some(crate::analysis::Edges {
+                lead_in_ms: 100,
+                outro_ms: 170_000,
+                end_ms: 178_000,
+            }),
             features: vec![1.0, 2.0],
             features_version: crate::analysis::FEATURES_VERSION,
             bpm: Some(120.0),
@@ -1934,6 +1967,10 @@ mod tests {
         assert!(db.has_analysis("k1").unwrap());
         db.set_content_key(ids["One again"], "k1").unwrap();
         assert!(db.tracks_to_analyze(10).unwrap().is_empty());
+        assert_eq!(
+            db.song_edges(ids["One again"]).unwrap().map(|e| e.outro_ms),
+            Some(170_000)
+        );
         assert_eq!(db.analysis_progress().unwrap(), (2, 2));
         let features = db.similarity_features().unwrap();
         assert!(

@@ -118,7 +118,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
       Adw.SpinRow crossfade_row {
         title: _("_Crossfade");
-        subtitle: _("Seconds; 0 is off");
+        subtitle: _("The longest fade, in seconds; 0 is off");
         use-underline: true;
 
         adjustment: Gtk.Adjustment {
@@ -127,6 +127,12 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
           step-increment: 1;
           page-increment: 3;
         };
+      }
+
+      Adw.SwitchRow crossfade_smart_row {
+        title: _("_Smart Crossfade");
+        subtitle: _("Fades where a song gets quiet and skips silence at the next song’s start; uses the song analysis (Library page)");
+        use-underline: true;
       }
 
       Adw.SwitchRow crossfade_albums_row {

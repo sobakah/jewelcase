@@ -19,11 +19,68 @@ pub struct SongAnalysis {
     pub features_version: u8,
     /// Detected tempo; `None` if the detector had no answer.
     pub bpm: Option<f64>,
+    /// Where the music starts and ends, for smart crossfades.
+    pub edges: Option<Edges>,
+}
+
+/// Where a song's music is, from its loudness over time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edges {
+    /// The silence at the start ends here.
+    pub lead_in_ms: u64,
+    /// The song gets quiet here: a fade-out or quiet ending starts.
+    pub outro_ms: u64,
+    /// The music is over here (silence follows).
+    pub end_ms: u64,
+}
+
+/// 50 ms of samples.
+const WINDOW: usize = SAMPLE_RATE as usize / 20;
+
+/// Finds a song's edges: silence is 40 dB below its typical loudness
+/// (the 90th percentile of 50 ms windows), "quiet" 15 dB below, judged
+/// over one-second stretches so short breaks don't count.
+pub fn edges(samples: &[f32]) -> Option<Edges> {
+    let rms: Vec<f32> = samples
+        .chunks(WINDOW)
+        .map(|w| (w.iter().map(|s| s * s).sum::<f32>() / w.len().max(1) as f32).sqrt())
+        .collect();
+    if rms.len() < 40 {
+        return None;
+    }
+    let mut sorted = rms.clone();
+    sorted.sort_by(f32::total_cmp);
+    let reference = sorted[sorted.len() * 9 / 10];
+    if reference <= 1e-5 {
+        return None;
+    }
+    let silence = reference * 0.01; // −40 dB
+    let quiet = reference * 0.178; // −15 dB
+    let ms = |windows: usize| (windows * 50) as u64;
+    let lead_in = rms.iter().position(|r| *r > silence)?;
+    let end = rms.iter().rposition(|r| *r > silence)? + 1;
+    // One-second averages (20 windows) for the quiet ending.
+    let smooth: Vec<f32> = (0..rms.len())
+        .map(|i| {
+            let window = &rms[i.saturating_sub(19)..=i];
+            window.iter().sum::<f32>() / window.len() as f32
+        })
+        .collect();
+    let outro = smooth[..end]
+        .iter()
+        .rposition(|r| *r > quiet)
+        .map_or(end, |i| i + 1)
+        .min(end);
+    Some(Edges {
+        lead_in_ms: ms(lead_in),
+        outro_ms: ms(outro),
+        end_ms: ms(end),
+    })
 }
 
 /// The bliss feature version results are stored with; older ones are
 /// analyzed again.
-pub const FEATURES_VERSION: u8 = 2;
+pub const FEATURES_VERSION: u8 = 3;
 
 /// Identifies a file's audio independently of its path, so moved or
 /// renamed files (and identical files in merged editions) are analyzed
@@ -58,6 +115,7 @@ pub fn analyze(path: &Path) -> Result<SongAnalysis, String> {
         return Err("less than a second of audio".into());
     }
     let duration = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE));
+    let edges = edges(&samples);
     let song = Song::try_from(PreAnalyzedSong {
         path: path.to_path_buf(),
         duration,
@@ -66,6 +124,7 @@ pub fn analyze(path: &Path) -> Result<SongAnalysis, String> {
     })
     .map_err(|e| e.to_string())?;
     Ok(SongAnalysis {
+        edges,
         features: song.analysis.as_vec(),
         features_version: FEATURES_VERSION,
         bpm: bpm
@@ -205,6 +264,31 @@ mod tests {
         other[300_000] ^= 0xff;
         std::fs::write(&b, &other).unwrap();
         assert_ne!(content_key(&a).unwrap(), content_key(&b).unwrap());
+    }
+
+    #[test]
+    fn edges_find_silence_and_the_fade_out() {
+        let rate = SAMPLE_RATE as usize;
+        let tone = |seconds: f32, amplitude: f32| -> Vec<f32> {
+            (0..(seconds * rate as f32) as usize)
+                .map(|i| amplitude * (i as f32 * 0.05).sin())
+                .collect()
+        };
+        // 1 s silence, 20 s music, a 4 s fade-out, 2 s silence.
+        let mut samples = vec![0.0; rate];
+        samples.extend(tone(20.0, 0.5));
+        samples.extend((0..4 * rate).map(|i| {
+            let fade = 1.0 - i as f32 / (4 * rate) as f32;
+            0.5 * fade * fade * (i as f32 * 0.05).sin()
+        }));
+        samples.extend(vec![0.0; 2 * rate]);
+        let found = edges(&samples).unwrap();
+        assert!((950..=1050).contains(&found.lead_in_ms), "{found:?}");
+        // Quiet (−15 dB) well into the fade, the end close to its end.
+        assert!((21_500..=24_500).contains(&found.outro_ms), "{found:?}");
+        assert!((24_000..=25_100).contains(&found.end_ms), "{found:?}");
+        assert!(found.outro_ms < found.end_ms);
+        assert_eq!(edges(&vec![0.0; rate * 5]), None);
     }
 
     #[test]

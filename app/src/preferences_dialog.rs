@@ -36,6 +36,8 @@ mod imp {
         #[template_child]
         pub crossfade_albums_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub crossfade_smart_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
@@ -174,11 +176,16 @@ mod imp {
             settings
                 .bind("crossfade-albums", &*self.crossfade_albums_row, "active")
                 .build();
-            self.crossfade_row
-                .bind_property("value", &*self.crossfade_albums_row, "sensitive")
-                .transform_to(|_, value: f64| Some(value > 0.0))
-                .sync_create()
+            settings
+                .bind("crossfade-smart", &*self.crossfade_smart_row, "active")
                 .build();
+            for row in [&*self.crossfade_albums_row, &*self.crossfade_smart_row] {
+                self.crossfade_row
+                    .bind_property("value", row, "sensitive")
+                    .transform_to(|_, value: f64| Some(value > 0.0))
+                    .sync_create()
+                    .build();
+            }
             // No pre-amp without ReplayGain.
             self.replaygain_row
                 .bind_property("selected", &*self.preamp_row, "sensitive")
