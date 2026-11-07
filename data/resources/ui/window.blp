@@ -257,19 +257,27 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                     min-sidebar-width: 320;
                     max-sidebar-width: 440;
                     sidebar-width-fraction: 0.38;
+                    // Saved Spotify albums: a shelf above, apart from the
+                    // library (CONCEPT.md §9.8).
+                    content: Gtk.Box {
+                      orientation: vertical;
 
-                    content: Gtk.ScrolledWindow {
-                      hscrollbar-policy: never;
+                      $GatefoldSpotifyShelf album_shelf {}
 
-                      child: Gtk.GridView album_grid {
-                        max-columns: 12;
-                        min-columns: 2;
-                        single-click-activate: true;
+                      Gtk.ScrolledWindow {
+                        hscrollbar-policy: never;
+                        vexpand: true;
 
-                        styles [
-                          "album-grid",
-                        ]
-                      };
+                        child: Gtk.GridView album_grid {
+                          max-columns: 12;
+                          min-columns: 2;
+                          single-click-activate: true;
+
+                          styles [
+                            "album-grid",
+                          ]
+                        };
+                      }
                     };
 
                     sidebar: $GatefoldAlbumPanel album_panel {};
@@ -351,19 +359,26 @@ template $GatefoldWindow: Adw.ApplicationWindow {
 
                   Gtk.StackPage {
                     name: "artists";
+                    // Followed Spotify artists: a shelf above (§9.8).
+                    child: Gtk.Box {
+                      orientation: vertical;
 
-                    child: Gtk.ScrolledWindow {
-                      hscrollbar-policy: never;
+                      $GatefoldSpotifyShelf artist_shelf {}
 
-                      child: Gtk.GridView artist_grid {
-                        max-columns: 12;
-                        min-columns: 2;
-                        single-click-activate: true;
+                      Gtk.ScrolledWindow {
+                        hscrollbar-policy: never;
+                        vexpand: true;
 
-                        styles [
-                          "artist-grid",
-                        ]
-                      };
+                        child: Gtk.GridView artist_grid {
+                          max-columns: 12;
+                          min-columns: 2;
+                          single-click-activate: true;
+
+                          styles [
+                            "artist-grid",
+                          ]
+                        };
+                      }
                     };
                   }
                 };

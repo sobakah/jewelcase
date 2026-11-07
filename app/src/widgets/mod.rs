@@ -17,6 +17,7 @@ mod queue_view;
 mod reorder;
 mod search_view;
 mod shuffle_options;
+mod spotify_shelf;
 mod track_info;
 mod track_row;
 
@@ -32,6 +33,7 @@ pub use playlist_panel::PlaylistPanel;
 pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;
+pub use spotify_shelf::{ShelfItem, SpotifyShelf, sized_tile};
 pub use track_row::TrackRow;
 
 /// A song title, with the Spotify icon before it for songs that play from

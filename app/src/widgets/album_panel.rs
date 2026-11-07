@@ -47,6 +47,8 @@ mod imp {
         pub track_objects: RefCell<Vec<TrackObject>>,
         pub rows: RefCell<Vec<TrackRow>>,
         pub versions_handler: RefCell<Option<glib::SignalHandlerId>>,
+        /// A Spotify album shown instead of a library one (§9.8).
+        pub spotify: RefCell<Option<gatefold_core::db::SpotifyAlbum>>,
     }
 
     #[glib::object_subclass]
@@ -89,6 +91,14 @@ mod imp {
             klass.install_action("panel.lyrembed", None, |panel, _, _| {
                 if let Some(dir) = panel.album_dir() {
                     GatefoldApplication::get().tools().lyrembed_page(&dir);
+                }
+            });
+            klass.install_action("panel.open-spotify", None, |panel, _, _| {
+                if let Some(album) = panel.imp().spotify.borrow().as_ref() {
+                    crate::spotify::open_in_browser(&format!(
+                        "https://open.spotify.com/album/{}",
+                        album.spotify_id
+                    ));
                 }
             });
             klass.install_action("panel.add-to-queue", None, |panel, _, _| {
@@ -148,8 +158,126 @@ impl AlbumPanel {
             0
         };
         imp.album.replace(Some(album.clone()));
+        imp.spotify.replace(None);
+        self.set_spotify_mode(false);
         self.setup_versions(album, version);
         self.show_version(version);
+    }
+
+    /// Menu entries for files (tags, lyrics) or for Spotify.
+    fn set_spotify_mode(&self, spotify: bool) {
+        for action in ["panel.edit-tags", "panel.find-lyrics", "panel.lyrembed"] {
+            self.action_set_enabled(action, !spotify);
+        }
+        self.action_set_enabled("panel.open-spotify", spotify);
+    }
+
+    pub fn spotify_album(&self) -> Option<gatefold_core::db::SpotifyAlbum> {
+        self.imp().spotify.borrow().clone()
+    }
+
+    /// A Spotify album (§9.8): its songs play from the library where it has
+    /// them and stream otherwise.
+    pub fn set_spotify_album(&self, album: &gatefold_core::db::SpotifyAlbum) {
+        let imp = self.imp();
+        imp.album.replace(None);
+        imp.spotify.replace(Some(album.clone()));
+        self.set_spotify_mode(true);
+        imp.versions_box.set_visible(false);
+        imp.cover.set_cover(album.cover_key().as_deref());
+        imp.cover
+            .set_label(&gettext("Cover of {}").replace("{}", &album.name));
+        imp.title.set_label(&album.name);
+        imp.edition.set_visible(false);
+        self.fill_spotify_artists(album);
+        let mut meta = Vec::new();
+        if let Some(year) = album.year {
+            meta.push(year.to_string());
+        }
+        meta.push(match album.album_type.as_str() {
+            "single" if album.total_tracks > 3 => gettext("EP"),
+            "single" => gettext("Single"),
+            "compilation" => gettext("Compilation"),
+            _ => gettext("Album"),
+        });
+        meta.push(format::song_count(album.total_tracks));
+        meta.push(gettext("On Spotify"));
+        imp.meta.set_label(&meta.join(" · "));
+        self.fill_tracks(&[], "");
+        imp.track_objects.replace(Vec::new());
+        let waiting = adw::Spinner::builder()
+            .height_request(32)
+            .margin_top(24)
+            .build();
+        imp.tracks.append(&waiting);
+        let id = album.spotify_id.clone();
+        let artist = album.artist.clone();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            async move {
+                let tracks = GatefoldApplication::get().spotify().album_tracks(&id).await;
+                let still = panel
+                    .imp()
+                    .spotify
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|a| a.spotify_id == id);
+                if !still {
+                    return;
+                }
+                match tracks {
+                    Some(tracks) => {
+                        panel.fill_tracks(&tracks, &artist);
+                        panel.imp().track_objects.replace(tracks);
+                        panel.update_playing();
+                    }
+                    None => {
+                        panel.fill_tracks(&[], "");
+                        panel.imp().tracks.append(
+                            &gtk::Label::builder()
+                                .label(gettext("Spotify can’t be reached right now"))
+                                .css_classes(["dim-label"])
+                                .margin_top(24)
+                                .build(),
+                        );
+                    }
+                }
+            }
+        ));
+    }
+
+    /// The album's artists: links to library artists of that name.
+    fn fill_spotify_artists(&self, album: &gatefold_core::db::SpotifyAlbum) {
+        let imp = self.imp();
+        imp.artists.remove_all();
+        let library = GatefoldApplication::get().library();
+        let artists = library.artists();
+        for name in album.artist.split(", ").filter(|n| !n.is_empty()) {
+            let local = (0..artists.n_items())
+                .filter_map(|i| {
+                    artists
+                        .item(i)
+                        .and_downcast::<crate::objects::ArtistObject>()
+                })
+                .find(|a| a.artist().name.eq_ignore_ascii_case(name));
+            let widget: gtk::Widget = match local {
+                Some(artist) => gtk::Button::builder()
+                    .label(name)
+                    .action_name("win.show-artist")
+                    .action_target(&artist.artist().id.to_variant())
+                    .tooltip_text(gettext("Go to {}").replace("{}", name))
+                    .css_classes(["flat", "artist-link", "heading"])
+                    .build()
+                    .upcast(),
+                None => gtk::Label::builder()
+                    .label(name)
+                    .css_classes(["heading"])
+                    .build()
+                    .upcast(),
+            };
+            imp.artists.append(&widget);
+        }
     }
 
     fn setup_versions(&self, album: &AlbumObject, selected: usize) {
@@ -354,6 +482,16 @@ impl AlbumPanel {
 
     fn play(&self, start: Option<usize>, shuffle: bool) {
         let imp = self.imp();
+        if let Some(album) = imp.spotify.borrow().as_ref() {
+            let tracks = imp.track_objects.borrow().clone();
+            GatefoldApplication::get().player().play_tracks(
+                tracks,
+                start,
+                shuffle,
+                Some(album.name.clone()),
+            );
+            return;
+        }
         let Some(album) = self.album() else { return };
         let Some(info) = album.versions().get(*imp.version.borrow()) else {
             return;

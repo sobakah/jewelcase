@@ -53,6 +53,13 @@ mod imp {
         pub sections: TemplateChild<gtk::Box>,
         #[template_child]
         pub album_panel: TemplateChild<AlbumPanel>,
+        #[template_child]
+        pub actions: TemplateChild<adw::WrapBox>,
+        /// A page for an artist only on Spotify (§9.8).
+        pub spotify_id: RefCell<Option<String>>,
+        /// Counts fills of the sections; an older "On Spotify" answer is
+        /// dropped.
+        pub generation: Cell<u64>,
 
         pub artist_id: Cell<i64>,
         pub artist: RefCell<Option<ArtistObject>>,
@@ -164,6 +171,18 @@ mod imp {
                     }
                 ),
             );
+            // Connected or not: the "On Spotify" part comes or goes.
+            GatefoldApplication::get()
+                .spotify()
+                .connect_status_notify(glib::clone!(
+                    #[weak]
+                    obj,
+                    move |_| {
+                        if obj.spotify_artist_id().is_none() {
+                            obj.fill_sections();
+                        }
+                    }
+                ));
             self.album_panel.connect_local(
                 "close",
                 false,
@@ -253,8 +272,29 @@ impl ArtistPage {
         page
     }
 
+    /// A page for an artist on Spotify that isn't in the library (§9.8):
+    /// their albums, EPs and singles there.
+    pub fn new_spotify(spotify_id: &str) -> Self {
+        let page: Self = glib::Object::new();
+        let imp = page.imp();
+        imp.spotify_id.replace(Some(spotify_id.to_owned()));
+        imp.actions.set_visible(false);
+        imp.bio_box.set_visible(false);
+        imp.identify_banner.set_revealed(false);
+        imp.latin_name.set_visible(false);
+        // No image choices: the picture is Spotify's.
+        imp.portrait_button.set_menu_model(None::<&gio::MenuModel>);
+        imp.portrait_button.set_can_target(false);
+        page.refresh();
+        page
+    }
+
     pub fn artist_id(&self) -> i64 {
         self.imp().artist_id.get()
+    }
+
+    pub fn spotify_artist_id(&self) -> Option<String> {
+        self.imp().spotify_id.borrow().clone()
     }
 
     /// The page's album panel collapses like the library's (window breakpoints).
@@ -263,6 +303,10 @@ impl ArtistPage {
     }
 
     fn refresh(&self) {
+        if self.spotify_artist_id().is_some() {
+            self.refresh_spotify();
+            return;
+        }
         let library = GatefoldApplication::get().library();
         let Some(artist) = library.artist(self.artist_id()) else {
             // The artist left the library; the window pops the page.
@@ -417,6 +461,205 @@ impl ArtistPage {
         own_albums.extend(short);
         own_albums.extend(soundtracks);
         imp.own_albums.replace(own_albums);
+        self.fill_on_spotify();
+    }
+
+    /// The header and releases of a Spotify artist's page.
+    fn refresh_spotify(&self) {
+        let Some(id) = self.spotify_artist_id() else {
+            return;
+        };
+        let generation = self.next_generation();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            async move {
+                let spotify = GatefoldApplication::get().spotify();
+                if let Some(artist) = spotify.spotify_artist(&id).await {
+                    page.show_spotify_header(&artist);
+                }
+                let albums = spotify.discography(&id).await.unwrap_or_default();
+                if page.imp().generation.get() != generation {
+                    return;
+                }
+                page.clear_sections();
+                page.add_spotify_sections(&albums, false);
+            }
+        ));
+    }
+
+    fn show_spotify_header(&self, artist: &gatefold_core::db::SpotifyArtist) {
+        let imp = self.imp();
+        imp.name.set_label(&artist.name);
+        imp.counts.set_label(&if artist.genres.is_empty() {
+            gettext("On Spotify")
+        } else {
+            format!(
+                "{} · {}",
+                gettext("On Spotify"),
+                artist
+                    .genres
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
+        imp.portrait.set_label(&artist.name);
+        imp.portrait.set_cover(artist.cover_key().as_deref());
+        let url = format!("https://open.spotify.com/artist/{}", artist.spotify_id);
+        while let Some(child) = imp.links.first_child() {
+            imp.links.remove(&child);
+        }
+        let button = gtk::Button::builder()
+            .label(gettext("Open in Spotify"))
+            .css_classes(["pill", "small"])
+            .build();
+        button.connect_clicked(move |_| crate::spotify::open_in_browser(&url));
+        imp.links.append(&button);
+        imp.links.set_visible(true);
+        if let Some(url) = artist.image_url.clone() {
+            let portrait = imp.portrait.get();
+            let key = artist.cover_key();
+            crate::spotify::fetch_covers(vec![url], move || portrait.set_cover(key.as_deref()));
+        }
+    }
+
+    fn next_generation(&self) -> u64 {
+        let generation = self.imp().generation.get() + 1;
+        self.imp().generation.set(generation);
+        generation
+    }
+
+    fn clear_sections(&self) {
+        let imp = self.imp();
+        while let Some(child) = imp.sections.first_child() {
+            imp.sections.remove(&child);
+        }
+        imp.flows.borrow_mut().clear();
+    }
+
+    /// Below a library artist's albums: their releases on Spotify that
+    /// aren't in the library (§9.8).
+    fn fill_on_spotify(&self) {
+        let spotify = GatefoldApplication::get().spotify();
+        let Some(artist) = self.imp().artist.borrow().clone() else {
+            return;
+        };
+        let generation = self.next_generation();
+        if !spotify.is_connected() {
+            return;
+        }
+        let info = artist.artist();
+        let name = info.name.clone();
+        let known = info.meta.spotify_id.clone();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            async move {
+                let Some(id) = spotify.artist_id_for(&name, known.as_deref()).await else {
+                    return;
+                };
+                let Some(albums) = spotify.discography(&id).await else {
+                    return;
+                };
+                if page.imp().generation.get() != generation {
+                    return;
+                }
+                let library = GatefoldApplication::get().library();
+                let missing: Vec<_> = albums
+                    .into_iter()
+                    .filter(|album| library.local_album_for(album).is_none())
+                    .collect();
+                page.add_spotify_sections(&missing, true);
+            }
+        ));
+    }
+
+    /// Albums, and EPs and singles, from Spotify; with `heading`, under
+    /// "On Spotify" (on a library artist's page).
+    fn add_spotify_sections(&self, albums: &[gatefold_core::db::SpotifyAlbum], heading: bool) {
+        if albums.is_empty() {
+            return;
+        }
+        let imp = self.imp();
+        if heading {
+            imp.sections.append(
+                &gtk::Label::builder()
+                    .label(gettext("On Spotify"))
+                    .xalign(0.0)
+                    .margin_top(12)
+                    .css_classes(["title-2"])
+                    .build(),
+            );
+        }
+        let (singles, full): (Vec<_>, Vec<_>) = albums.iter().cloned().partition(|a| a.is_single());
+        self.add_spotify_section(&gettext("Albums"), full);
+        self.add_spotify_section(&gettext("EPs & Singles"), singles);
+    }
+
+    fn add_spotify_section(&self, title: &str, albums: Vec<gatefold_core::db::SpotifyAlbum>) {
+        if albums.is_empty() {
+            return;
+        }
+        let section = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .build();
+        section.append(
+            &gtk::Label::builder()
+                .label(title)
+                .xalign(0.0)
+                .css_classes(["title-4"])
+                .build(),
+        );
+        let columns = self.imp().columns.get().max(2);
+        let flow = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .homogeneous(true)
+            .min_children_per_line(columns)
+            .max_children_per_line(columns)
+            .column_spacing(18)
+            .row_spacing(18)
+            .build();
+        let mut covers = Vec::new();
+        let mut urls = Vec::new();
+        for album in albums {
+            let item = super::ShelfItem {
+                cover_key: album.cover_key(),
+                title: album.name.clone(),
+                subtitle: album.year.map(|y| y.to_string()).unwrap_or_default(),
+                artist: false,
+            };
+            let (tile, cover) = super::sized_tile(&item, 180);
+            if let Some(url) = album.image_url.clone() {
+                covers.push((url.clone(), cover, album.cover_key()));
+                urls.push(url);
+            }
+            tile.connect_clicked(glib::clone!(
+                #[weak(rename_to = page)]
+                self,
+                move |_| page.show_spotify_album(&album)
+            ));
+            flow.append(&tile);
+        }
+        crate::spotify::fetch_covers_in_batches(urls, move |ready| {
+            for (url, cover, key) in &covers {
+                if ready.contains(url) {
+                    cover.set_cover(key.as_deref());
+                }
+            }
+        });
+        section.append(&flow);
+        self.imp().sections.append(&section);
+        self.imp().flows.borrow_mut().push(flow);
+    }
+
+    fn show_spotify_album(&self, album: &gatefold_core::db::SpotifyAlbum) {
+        let imp = self.imp();
+        imp.album_panel.set_spotify_album(album);
+        imp.split_view.set_show_sidebar(true);
     }
 
     fn add_album_section(&self, title: &str, albums: &[AlbumObject]) {

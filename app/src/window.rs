@@ -78,6 +78,10 @@ mod imp {
         #[template_child]
         pub search_view: TemplateChild<SearchView>,
         #[template_child]
+        pub album_shelf: TemplateChild<crate::widgets::SpotifyShelf>,
+        #[template_child]
+        pub artist_shelf: TemplateChild<crate::widgets::SpotifyShelf>,
+        #[template_child]
         pub playlist_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub playlists_stack: TemplateChild<gtk::Stack>,
@@ -115,6 +119,7 @@ mod imp {
             AlbumPanel::ensure_type();
             PlaylistPanel::ensure_type();
             SearchView::ensure_type();
+            crate::widgets::SpotifyShelf::ensure_type();
             klass.bind_template();
 
             klass.install_action("win.open-player", None, |win, _, _| {
@@ -151,6 +156,29 @@ mod imp {
                 let bar = &win.imp().search_bar;
                 bar.set_search_mode(!bar.is_search_mode());
             });
+            // Spotify albums and artists by Spotify ID (§9.8).
+            klass.install_action(
+                "win.show-spotify-album",
+                Some(glib::VariantTy::STRING),
+                |win, _, param| {
+                    let spotify = GatefoldApplication::get().spotify();
+                    if let Some(album) = param
+                        .and_then(|p| p.get::<String>())
+                        .and_then(|id| spotify.stored_album(&id))
+                    {
+                        win.show_spotify_album(&album);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.show-spotify-artist",
+                Some(glib::VariantTy::STRING),
+                |win, _, param| {
+                    if let Some(id) = param.and_then(|p| p.get::<String>()) {
+                        win.show_spotify_artist(&id);
+                    }
+                },
+            );
             klass.install_action(
                 "win.show-album",
                 Some(glib::VariantTy::INT64),
@@ -271,6 +299,7 @@ mod imp {
 
             self.search_bar.set_key_capture_widget(Some(&*obj));
             obj.setup_search();
+            obj.setup_spotify_shelves();
 
             // Sorting only applies to the album grid.
             let sort_button = self.sort_button.get();
@@ -706,6 +735,159 @@ impl GatefoldWindow {
         imp_toast(self, &message);
     }
 
+    /// The saved albums and followed artists on Spotify that aren't in the
+    /// library: shelves above the grids (§9.8).
+    fn setup_spotify_shelves(&self) {
+        let imp = self.imp();
+        // Translators: {} is a number of albums.
+        imp.album_shelf
+            .setup(&gettext("Saved on Spotify ({})"), "show-spotify-albums");
+        // Translators: {} is a number of artists.
+        imp.artist_shelf
+            .setup(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
+        let app = GatefoldApplication::get();
+        let spotify = app.spotify();
+        spotify.connect_local(
+            "library-changed",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |_| {
+                    window.refresh_spotify_shelves();
+                    None
+                }
+            ),
+        );
+        spotify.connect_status_notify(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |_| window.refresh_spotify_shelves()
+        ));
+        app.library().connect_local(
+            "reloaded",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |_| {
+                    window.refresh_spotify_shelves();
+                    None
+                }
+            ),
+        );
+        self.refresh_spotify_shelves();
+    }
+
+    fn refresh_spotify_shelves(&self) {
+        use crate::widgets::ShelfItem;
+        let imp = self.imp();
+        let app = GatefoldApplication::get();
+        let spotify = app.spotify();
+        let library = app.library();
+        if !spotify.is_connected() {
+            imp.album_shelf.set_items(Vec::new(), |_| {});
+            imp.album_shelf.set_needs_permission(false);
+            imp.artist_shelf.set_items(Vec::new(), |_| {});
+            imp.artist_shelf.set_needs_permission(false);
+            return;
+        }
+        let needs = spotify.needs_library_permission();
+        let albums: Vec<_> = spotify
+            .saved_albums()
+            .into_iter()
+            .filter(|album| library.local_album_for(album).is_none())
+            .collect();
+        let items = albums
+            .iter()
+            .map(|album| ShelfItem {
+                cover_key: album.cover_key(),
+                title: album.name.clone(),
+                subtitle: album.artist.clone(),
+                artist: false,
+            })
+            .collect();
+        imp.album_shelf.set_items(
+            items,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |index| {
+                    if let Some(album) = albums.get(index) {
+                        window.show_spotify_album(album);
+                    }
+                }
+            ),
+        );
+        imp.album_shelf.set_needs_permission(needs);
+        // Followed artists the library doesn't have (by Spotify ID from the
+        // online lookup, or by name).
+        let local = library.artists();
+        let local: Vec<(String, Option<String>)> = (0..local.n_items())
+            .filter_map(|i| local.item(i).and_downcast::<ArtistObject>())
+            .map(|a| {
+                let info = a.artist();
+                (info.name.to_lowercase(), info.meta.spotify_id.clone())
+            })
+            .collect();
+        let artists: Vec<_> = spotify
+            .followed_artists()
+            .into_iter()
+            .filter(|artist| {
+                !local.iter().any(|(name, id)| {
+                    id.as_deref() == Some(artist.spotify_id.as_str())
+                        || *name == artist.name.to_lowercase()
+                })
+            })
+            .collect();
+        let items = artists
+            .iter()
+            .map(|artist| ShelfItem {
+                cover_key: artist.cover_key(),
+                title: artist.name.clone(),
+                subtitle: artist.genres.first().cloned().unwrap_or_default(),
+                artist: true,
+            })
+            .collect();
+        imp.artist_shelf.set_items(
+            items,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |index| {
+                    if let Some(artist) = artists.get(index) {
+                        window.show_spotify_artist(&artist.spotify_id);
+                    }
+                }
+            ),
+        );
+        imp.artist_shelf.set_needs_permission(needs);
+    }
+
+    /// A Spotify album in the album panel (§9.8).
+    pub fn show_spotify_album(&self, album: &gatefold_core::db::SpotifyAlbum) {
+        let imp = self.imp();
+        imp.bottom_sheet.set_open(false);
+        imp.search_bar.set_search_mode(false);
+        imp.stack.set_visible_child_name("albums");
+        imp.album_panel.set_spotify_album(album);
+        imp.split_view.set_show_sidebar(true);
+    }
+
+    /// A Spotify artist's page (§9.8): their albums and singles there.
+    pub fn show_spotify_artist(&self, spotify_id: &str) {
+        let imp = self.imp();
+        imp.bottom_sheet.set_open(false);
+        imp.search_bar.set_search_mode(false);
+        imp.stack.set_visible_child_name("artists");
+        let page = ArtistPage::new_spotify(spotify_id);
+        self.open_artist_page(page);
+    }
+
     /// Search results float over the library while searching (§4.1).
     fn search_changed(&self, text: &str) {
         let imp = self.imp();
@@ -841,7 +1023,11 @@ impl GatefoldWindow {
             reveal_sidebar(&imp.artist_split);
             return;
         }
-        let page = ArtistPage::new(artist_id);
+        self.open_artist_page(ArtistPage::new(artist_id));
+    }
+
+    fn open_artist_page(&self, page: ArtistPage) {
+        let imp = self.imp();
         imp.split_view
             .bind_property("collapsed", &page.split_view(), "collapsed")
             .sync_create()
@@ -1534,6 +1720,22 @@ impl GatefoldWindow {
                     {
                         let spotify = spotify.clone();
                         glib::spawn_future_local(async move { spotify.publish(id, &panel).await });
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_LATE_PANEL_ACTIONS=panel.play`: album panel
+            // actions 11 s in (after late actions opened an album).
+            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_LATE_PANEL_ACTIONS") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(11, move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let panel = window.imp().album_panel.get();
+                    for action in actions.split_whitespace() {
+                        if let Err(err) = WidgetExt::activate_action(&panel, action, None) {
+                            tracing::warn!("Screenshot panel action {action}: {err}");
+                        }
                     }
                 });
             }

@@ -467,7 +467,18 @@ Each write returns a new `snapshot_id`. OAuth scopes: `playlist-read-private`, `
 - **Editing, for now**: linked playlists take added and removed songs only; reordering and renaming them come later (the outbox already supports both).
 - **Others' playlists**: Spotify answers 403 for their entries in Development Mode, even when the list shows a song count. Gatefold asks once per snapshot and then shows them as hidden; reading them needs librespot (phase 8).
 - **Searches**: a failed search (offline, too many requests) is never taken as "not on Spotify"; it's retried later. Spotify's waits up to 30 s are waited out.
-- **Not yet**: deleting or unfollowing Spotify playlists (the follow endpoints moved to `/me/library`), uploading a changed cover to Spotify, the artist page section "On Spotify, not in your library".
+- **Not yet**: deleting or unfollowing Spotify playlists (the follow endpoints moved to `/me/library`), uploading a changed cover to Spotify.
+
+### 9.8 Saved albums, followed artists and discographies
+Spotify's albums and artists are shown **apart from the library**, never mixed into its grids, sorting or search:
+- **Albums view**: a shelf "Saved on Spotify (N)" above the album grid, collapsed by default (`show-spotify-albums`), with the saved albums that aren't in the library. It's one row that scrolls sideways: GTK's grid view has no sections, and a grid inside a box would build every tile at once, so the shelf sits above it rather than below.
+- **Artists view**: a shelf "Followed on Spotify (N)" (`show-spotify-artists`) with followed artists that aren't in the library (by the Spotify ID from the online lookup, or by name). Their page shows Spotify's picture, genres, "Open in Spotify", and their Albums and EPs & Singles there.
+- **Library artists' pages**: below their own sections, "On Spotify" lists the releases that aren't in the library. The Spotify ID comes from the online lookup (Wikidata), else a search by name.
+- **Album panel**: a Spotify album opens in the same panel. Its songs are library songs where the library has them (sure matches) and songs to stream otherwise (§9.4); play, queue and "Add to Playlist" work as usual; tag and lyrics entries give way to "Open in Spotify".
+- **The same release**: same barcode; or an artist in common and the titles agree (§9.5's bracketed names count, edition notes don't); or an artist in common, the same year and song count and a word of the title in common ("樂-STAR" is "ROCK-STAR" on Spotify). Artists' lists have no barcodes, hence the last rule.
+- **API** (Development Mode, 2026): `GET /me/albums` and `GET /me/following` still read the library (saving and following moved to `/me/library`); `GET /artists/{id}/albums` with `include_groups=album,single`; `GET /albums/{id}` per album (the batch endpoints are gone). Album labels and popularity, artist followers and popularity were removed from the answers.
+- **Requests**: saved albums and followed artists are read with each sync; a discography when its page opens, then kept for a day (migration 013); album songs for the session. That keeps Gatefold far from the per-developer request quota.
+- **Permissions**: `user-library-read` and `user-follow-read`. Logins from before ask to connect again: Spotify answers 403, and the shelves show "Connect Again".
 
 ---
 

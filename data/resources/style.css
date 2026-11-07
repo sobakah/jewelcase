@@ -281,3 +281,21 @@ button.smart-shuffle {
 .player-subtitle > link:hover {
   text-decoration-line: underline;
 }
+
+/* Spotify's albums and artists, above the library grids (§9.8). */
+.spotify-shelf {
+  margin: 6px 9px 0 9px;
+}
+
+.spotify-shelf .shelf-row {
+  padding: 0 9px 12px 9px;
+}
+
+.shelf-tile {
+  padding: 0;
+  border-radius: 12px;
+}
+
+.shelf-tile {
+  font-weight: normal;
+}

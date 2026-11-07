@@ -185,11 +185,20 @@ menu album_menu {
     item {
       label: _("_Edit Tags…");
       action: "panel.edit-tags";
+      hidden-when: "action-disabled";
     }
 
     item {
       label: _("C_hange Cover…");
       action: "panel.edit-tags";
+      hidden-when: "action-disabled";
+    }
+
+    // Spotify albums (CONCEPT.md §9.8).
+    item {
+      label: _("_Open in Spotify");
+      action: "panel.open-spotify";
+      hidden-when: "action-disabled";
     }
   }
 
@@ -197,11 +206,13 @@ menu album_menu {
     item {
       label: _("_Find Missing Lyrics");
       action: "panel.find-lyrics";
+      hidden-when: "action-disabled";
     }
 
     item {
       label: _("Check _Lyrics in lyrembed…");
       action: "panel.lyrembed";
+      hidden-when: "action-disabled";
     }
   }
 }
