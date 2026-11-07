@@ -128,6 +128,9 @@ mod imp {
         /// The lyrics pane was closed for a Spotify song without lyrics and
         /// opens again with the next library song.
         pub lyrics_suspended: Cell<bool>,
+        /// What the artist and album links under the title open.
+        pub artist_link: Cell<Option<i64>>,
+        pub album_link: Cell<Option<i64>>,
     }
 
     #[glib::object_subclass]
@@ -202,6 +205,25 @@ impl PlayerView {
         let player = GatefoldApplication::get().player();
         // The overlay sizes itself from the controls, not the backdrop.
         imp.overlay.set_measure_overlay(&*imp.toolbar, true);
+        // The artist and album under the title open their pages.
+        imp.subtitle.connect_activate_link(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, uri| {
+                let imp = view.imp();
+                let (action, id) = match uri {
+                    "artist" => ("win.show-artist", imp.artist_link.get()),
+                    "album" => ("win.show-album", imp.album_link.get()),
+                    _ => return glib::Propagation::Proceed,
+                };
+                if let Some(id) = id {
+                    let _ = view.activate_action(action, Some(&id.to_variant()));
+                }
+                glib::Propagation::Stop
+            }
+        ));
 
         player.connect_current_track_notify(glib::clone!(
             #[weak(rename_to = view)]
@@ -490,6 +512,46 @@ impl PlayerView {
         ));
     }
 
+    /// "Artist — Album" under the title; both open their page when the
+    /// song is in the library (an album, an artist with a page).
+    fn set_subtitle(&self, track: &TrackObject) {
+        let imp = self.imp();
+        let album_id = track.track().album_id;
+        let artist_id = album_id.and_then(|id| {
+            GatefoldApplication::get()
+                .library()
+                .album_artists(id)
+                .first()
+                .map(|(id, _)| *id)
+        });
+        imp.album_link.set(album_id);
+        imp.artist_link.set(artist_id);
+        let link = |text: &str, uri: &str, id: Option<i64>, tooltip: &str| {
+            let text = glib::markup_escape_text(text);
+            match id {
+                Some(_) => format!(
+                    "<a href=\"{uri}\" title=\"{}\">{text}</a>",
+                    glib::markup_escape_text(tooltip)
+                ),
+                None => text.to_string(),
+            }
+        };
+        let artist = track.artist().map(|artist| {
+            // Translators: tooltip of the artist link in the player.
+            link(&artist, "artist", artist_id, &gettext("Go to Artist"))
+        });
+        let album = track.track().album_title.as_deref().map(|album| {
+            // Translators: tooltip of the album link in the player.
+            link(album, "album", album_id, &gettext("Go to Album"))
+        });
+        let subtitle = match (artist, album) {
+            (Some(artist), Some(album)) => format!("{artist} — {album}"),
+            (Some(text), None) | (None, Some(text)) => text,
+            (None, None) => String::new(),
+        };
+        imp.subtitle.set_markup(&subtitle);
+    }
+
     fn update_track(&self, player: &Player) {
         let imp = self.imp();
         let track = player.current_track();
@@ -502,21 +564,16 @@ impl PlayerView {
             Some(track) => {
                 imp.title.set_label(&track.title());
                 imp.header_title.set_label(&track.title());
-                let artist = track.artist();
-                let album = track.track().album_title.clone();
-                let subtitle = match (artist, album) {
-                    (Some(artist), Some(album)) => format!("{artist} — {album}"),
-                    (Some(text), None) | (None, Some(text)) => text,
-                    (None, None) => String::new(),
-                };
-                imp.subtitle.set_label(&subtitle);
+                self.set_subtitle(track);
                 // Translators: accessible label of the cover; {} is a song title.
                 imp.cover
                     .set_label(&gettext("Cover of {}").replace("{}", &track.title()));
             }
             None => {
                 imp.title.set_label(&gettext("Not Playing"));
-                imp.subtitle.set_label(&gettext("Pick an album to start"));
+                imp.album_link.set(None);
+                imp.artist_link.set(None);
+                imp.subtitle.set_text(&gettext("Pick an album to start"));
             }
         }
         imp.seek.set_sensitive(track.is_some());

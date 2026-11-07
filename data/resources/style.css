@@ -270,3 +270,14 @@ button.smart-shuffle {
     0 2px 6px 1px alpha(black, 0.08),
     0 8px 28px 6px alpha(black, 0.07);
 }
+
+/* Artist and album under the player's title open their pages: in the
+   label's color (the player is tinted by the cover), underlined on hover. */
+.player-subtitle > link {
+  color: inherit;
+  text-decoration-line: none;
+}
+
+.player-subtitle > link:hover {
+  text-decoration-line: underline;
+}
