@@ -595,7 +595,9 @@ impl Spotify {
                     }
                 }
                 Err(Error::LoggedOut) => return,
-                Err(err) if err.is_temporary() => {
+                // Only Spotify refusing this change drops it; a problem
+                // with the login (e.g. renewing it failed) keeps it waiting.
+                Err(err) if err.is_temporary() || !refused_change(&err) => {
                     tracing::info!("Spotify is unreachable, changes wait: {err}");
                     if let (Some(mut db), Some(snapshot)) = (library.db(), &snapshot) {
                         let _ = db.set_snapshot(id, snapshot);
@@ -650,11 +652,25 @@ impl Spotify {
                                 client.add_items(&sid, &missing, None)?;
                             }
                         }
-                        Op::Remove { uris, .. } => {
-                            let present: Vec<String> =
-                                uris.into_iter().filter(|u| current.contains(u)).collect();
-                            if !present.is_empty() {
-                                client.remove_items(&sid, &present, None)?;
+                        // Spotify removes every copy of a song; the copies the
+                        // change kept (`restore`) are put back, also when it
+                        // was the putting back that failed.
+                        Op::Remove { uris, restore } => {
+                            let mut seen = std::collections::HashSet::new();
+                            for uri in uris.iter().filter(|u| seen.insert(u.as_str())) {
+                                let present = current.iter().filter(|u| *u == uri).count();
+                                let keep = restore.iter().filter(|(u, _)| u == uri).count();
+                                let one = std::slice::from_ref(uri);
+                                if present > keep {
+                                    client.remove_items(&sid, one, None)?;
+                                    for _ in 0..keep {
+                                        client.add_items(&sid, one, None)?;
+                                    }
+                                } else {
+                                    for _ in present..keep {
+                                        client.add_items(&sid, one, None)?;
+                                    }
+                                }
                             }
                         }
                         Op::Rename { name } => client.rename_playlist(&sid, &name)?,
@@ -1133,6 +1149,23 @@ impl Spotify {
     }
 }
 
+/// Spotify said no to the change itself (not to the login, not busy).
+fn refused_change(err: &Error) -> bool {
+    matches!(
+        err,
+        Error::Status {
+            status: 400..=499,
+            ..
+        }
+    ) && !matches!(
+        err,
+        Error::Status {
+            status: 401 | 429,
+            ..
+        }
+    )
+}
+
 /// Why Spotify couldn't be searched, for the user.
 pub fn search_error(err: &Error) -> String {
     match err {
@@ -1226,6 +1259,21 @@ fn boxed_list() -> gtk::ListBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_spotify_refusing_a_change_drops_it() {
+        let status = |status| Error::Status {
+            status,
+            message: String::new(),
+            reason: None,
+        };
+        assert!(refused_change(&status(400)));
+        assert!(refused_change(&status(403)));
+        assert!(!refused_change(&status(401)));
+        assert!(!refused_change(&status(429)));
+        assert!(!refused_change(&status(503)));
+        assert!(!refused_change(&Error::Auth("server_error".into())));
+    }
 
     #[test]
     fn ops_round_trip() {

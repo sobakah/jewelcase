@@ -134,6 +134,13 @@ fn token_answer(mut response: ureq::http::Response<ureq::Body>) -> Result<Value>
         200 => Ok(value),
         // invalid_grant: the refresh token was revoked or expired.
         400 if value["error"].as_str() == Some("invalid_grant") => Err(Error::LoggedOut),
+        // The login server is busy or down: try again later, like the API.
+        429 => Err(Error::RateLimited(std::time::Duration::from_secs(30))),
+        500.. => Err(Error::Status {
+            status,
+            message: "the Spotify login server isn't available".into(),
+            reason: None,
+        }),
         _ => Err(Error::Auth(
             value["error_description"]
                 .as_str()
