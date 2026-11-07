@@ -45,25 +45,27 @@ mod imp {
             self.sections.set_orientation(gtk::Orientation::Vertical);
             self.sections.set_spacing(24);
             self.sections.set_margin_top(18);
-            self.sections.set_margin_bottom(24);
-            let clamp = adw::Clamp::builder()
-                .maximum_size(720)
-                .css_classes(["bottom-room"])
-                .margin_start(12)
-                .margin_end(12)
-                .child(&self.sections)
-                .build();
+            self.sections.set_margin_bottom(18);
+            self.sections.set_margin_start(18);
+            self.sections.set_margin_end(18);
+            // A card over the library (window.blp): as tall as the results,
+            // scrolling once it reaches the window's bottom.
             let scroller = gtk::ScrolledWindow::builder()
                 .hscrollbar_policy(gtk::PolicyType::Never)
-                .child(&clamp)
+                .propagate_natural_height(true)
+                .child(&self.sections)
                 .build();
             self.empty.set_icon_name(Some("edit-find-symbolic"));
             self.empty.set_title(&gettext("No Results"));
+            self.empty.add_css_class("compact");
+            self.stack.set_vhomogeneous(false);
+            self.stack.set_interpolate_size(true);
             self.stack.add_named(&scroller, Some("results"));
             self.stack.add_named(&self.empty, Some("empty"));
-            self.obj().set_child(Some(&self.stack));
-            // Spotify connected while a search shows: add its results.
             let obj = self.obj();
+            obj.set_overflow(gtk::Overflow::Hidden);
+            obj.set_child(Some(&self.stack));
+            // Spotify connected while a search shows: add its results.
             GatefoldApplication::get()
                 .spotify()
                 .connect_status_notify(glib::clone!(

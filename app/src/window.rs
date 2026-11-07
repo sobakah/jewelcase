@@ -70,7 +70,11 @@ mod imp {
         #[template_child]
         pub artist_grid: TemplateChild<gtk::GridView>,
         #[template_child]
-        pub main_stack: TemplateChild<gtk::Stack>,
+        pub library_overlay: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub search_dim: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub search_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub search_view: TemplateChild<SearchView>,
         #[template_child]
@@ -266,6 +270,7 @@ mod imp {
             obj.setup_tools();
 
             self.search_bar.set_key_capture_widget(Some(&*obj));
+            obj.setup_search();
 
             // Sorting only applies to the album grid.
             let sort_button = self.sort_button.get();
@@ -701,16 +706,113 @@ impl GatefoldWindow {
         imp_toast(self, &message);
     }
 
-    /// Search results replace the library views while searching (§4.1).
+    /// Search results float over the library while searching (§4.1).
     fn search_changed(&self, text: &str) {
         let imp = self.imp();
         let query = text.trim();
-        if query.is_empty() {
-            imp.main_stack.set_visible_child_name("library");
+        if query.is_empty() || !imp.search_bar.is_search_mode() {
+            self.show_search_results(false);
         } else {
             imp.search_view.search(query);
-            imp.main_stack.set_visible_child_name("search");
+            self.show_search_results(true);
         }
+    }
+
+    fn show_search_results(&self, show: bool) {
+        let imp = self.imp();
+        for revealer in [&*imp.search_dim, &*imp.search_revealer] {
+            if show {
+                revealer.set_visible(true);
+            }
+            revealer.set_reveal_child(show);
+        }
+    }
+
+    /// The search field takes the typing as soon as search opens; Escape,
+    /// the search button or a click beside the results closes it, as does
+    /// opening a result.
+    fn setup_search(&self) {
+        let imp = self.imp();
+        imp.search_bar.connect_entry(&*imp.search_entry);
+        imp.search_bar
+            .connect_search_mode_enabled_notify(glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |bar| {
+                    if bar.is_search_mode() {
+                        window.imp().search_entry.grab_focus();
+                    }
+                    window.search_changed(&window.imp().search_entry.text());
+                }
+            ));
+        // Hidden once faded out, so they don't catch clicks.
+        for revealer in [&*imp.search_dim, &*imp.search_revealer] {
+            revealer.connect_child_revealed_notify(|revealer| {
+                if !revealer.reveals_child() && !revealer.is_child_revealed() {
+                    revealer.set_visible(false);
+                }
+            });
+        }
+        let click = gtk::GestureClick::new();
+        click.set_button(0);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        click.connect_pressed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |gesture, _, x, y| {
+                let imp = window.imp();
+                if !imp.search_revealer.reveals_child() {
+                    return;
+                }
+                let card = imp.search_view.upcast_ref::<gtk::Widget>();
+                let on_card = gesture
+                    .widget()
+                    .and_then(|overlay| overlay.pick(x, y, gtk::PickFlags::DEFAULT))
+                    .is_some_and(|picked| &picked == card || picked.is_ancestor(card));
+                if !on_card {
+                    imp.search_bar.set_search_mode(false);
+                }
+            }
+        ));
+        imp.library_overlay.add_controller(click);
+        // Escape in the results too, not only in the field.
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, _| {
+                if key == gtk::gdk::Key::Escape {
+                    window.imp().search_bar.set_search_mode(false);
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            }
+        ));
+        imp.search_revealer.add_controller(keys);
+        // Down from the field into the results.
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, _| {
+                let imp = window.imp();
+                if key == gtk::gdk::Key::Down
+                    && imp.search_revealer.reveals_child()
+                    && imp.search_view.child_focus(gtk::DirectionType::TabForward)
+                {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            }
+        ));
+        imp.search_entry.add_controller(keys);
     }
 
     fn update_artists_page(&self) {
@@ -1241,15 +1343,7 @@ impl GatefoldWindow {
             };
             for action in actions.split_whitespace() {
                 let (name, target) = match action.split_once("::") {
-                    // GVariant text ("true", "42"), else a plain string.
-                    // Integers are IDs, which the actions take as int64.
-                    Some((name, target)) => (
-                        name,
-                        Some(match glib::Variant::parse(None, target) {
-                            Ok(v) => v.get::<i32>().map_or(v, |n| i64::from(n).to_variant()),
-                            Err(_) => target.to_variant(),
-                        }),
-                    ),
+                    Some((name, target)) => (name, Some(screenshot_target(target))),
                     None => (action, None),
                 };
                 if let Err(err) = WidgetExt::activate_action(&window, name, target.as_ref()) {
@@ -1453,7 +1547,7 @@ impl GatefoldWindow {
                     };
                     for action in actions.split_whitespace() {
                         let (name, target) = match action.split_once("::") {
-                            Some((name, target)) => (name, glib::Variant::parse(None, target).ok()),
+                            Some((name, target)) => (name, Some(screenshot_target(target))),
                             None => (action, None),
                         };
                         if let Err(err) = WidgetExt::activate_action(&window, name, target.as_ref())
@@ -1576,4 +1670,13 @@ fn reveal_sidebar(split: &adw::OverlaySplitView) {
         split.set_show_sidebar(true);
         glib::ControlFlow::Break
     });
+}
+
+/// A screenshot action's target: GVariant text ("true", "42"), else a
+/// plain string. Integers are IDs, which the actions take as int64.
+fn screenshot_target(target: &str) -> glib::Variant {
+    match glib::Variant::parse(None, target) {
+        Ok(v) => v.get::<i32>().map_or(v, |n| i64::from(n).to_variant()),
+        Err(_) => target.to_variant(),
+    }
 }

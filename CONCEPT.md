@@ -176,7 +176,7 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 - **Narrow windows** (`AdwBreakpoint` < ~700 px): the side panel turns into an overlay sheet that covers the grid, and the mini bar stays visible.
 - **Artists**: grid of circular portraits (`AdwAvatar`-style, with the actual image) and names, using only album artists. Clicking one pushes the **artist page** onto an `AdwNavigationView`. This is the **only** real page navigation in the app.
 - **Playlists**: grid of playlist covers (custom image or an automatic 2×2 cover mosaic). Clicking opens the same detail side panel with an editable track order (drag & drop, remove, rename).
-- **Search**: a single search field (`GtkSearchBar`) backed by SQLite FTS5. Results are grouped into Artists / Albums / Songs / Playlists in a popover-like list.
+- **Search**: a single search field (`GtkSearchBar`) backed by SQLite FTS5. Results are grouped into Artists / Albums / Songs / Playlists in a popover-like card that floats over the current view. The field takes typing as soon as search opens; Escape, the search button, a click beside the card or opening a result closes it.
 
 ### 4.2 Artist page
 

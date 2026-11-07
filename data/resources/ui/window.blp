@@ -202,203 +202,122 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           };
         }
 
-        // The library views, or search results while searching.
-        content: Gtk.Stack main_stack {
-          transition-type: crossfade;
+        // The library views; search results float over them (§4.1).
+        content: Gtk.Overlay library_overlay {
+          child: Adw.ViewStack stack {
+            Adw.ViewStackPage {
+              name: "albums";
+              title: _("Albums");
+              icon-name: "media-optical-symbolic";
 
-          Gtk.StackPage {
-            name: "library";
+              child: Gtk.Stack albums_stack {
+                transition-type: crossfade;
 
-            child: Adw.ViewStack stack {
-              Adw.ViewStackPage {
-                name: "albums";
-                title: _("Albums");
-                icon-name: "media-optical-symbolic";
+                Gtk.StackPage {
+                  name: "empty";
 
-                child: Gtk.Stack albums_stack {
-                  transition-type: crossfade;
+                  child: Adw.StatusPage {
+                    icon-name: "folder-music-symbolic";
+                    title: _("No Albums Yet");
+                    description: _("Gatefold shows the albums in your music folders.");
 
-                  Gtk.StackPage {
-                    name: "empty";
+                    child: Gtk.Button {
+                      halign: center;
+                      label: _("_Choose Music Folders…");
+                      use-underline: true;
+                      action-name: "app.preferences";
 
-                    child: Adw.StatusPage {
-                      icon-name: "folder-music-symbolic";
-                      title: _("No Albums Yet");
-                      description: _("Gatefold shows the albums in your music folders.");
+                      styles [
+                        "pill",
+                      ]
+                    };
+                  };
+                }
 
-                      child: Gtk.Button {
-                        halign: center;
-                        label: _("_Choose Music Folders…");
-                        use-underline: true;
-                        action-name: "app.preferences";
+                Gtk.StackPage {
+                  name: "scanning";
+
+                  child: Adw.StatusPage {
+                    title: _("Looking for Music…");
+                    description: _("Albums show up here as soon as they're found.");
+
+                    child: Adw.Spinner {
+                      height-request: 48;
+                      width-request: 48;
+                    };
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "albums";
+
+                  child: Adw.OverlaySplitView split_view {
+                    sidebar-position: end;
+                    show-sidebar: false;
+                    min-sidebar-width: 320;
+                    max-sidebar-width: 440;
+                    sidebar-width-fraction: 0.38;
+
+                    content: Gtk.ScrolledWindow {
+                      hscrollbar-policy: never;
+
+                      child: Gtk.GridView album_grid {
+                        max-columns: 12;
+                        min-columns: 2;
+                        single-click-activate: true;
 
                         styles [
-                          "pill",
+                          "album-grid",
                         ]
                       };
                     };
-                  }
 
-                  Gtk.StackPage {
-                    name: "scanning";
-
-                    child: Adw.StatusPage {
-                      title: _("Looking for Music…");
-                      description: _("Albums show up here as soon as they're found.");
-
-                      child: Adw.Spinner {
-                        height-request: 48;
-                        width-request: 48;
-                      };
-                    };
-                  }
-
-                  Gtk.StackPage {
-                    name: "albums";
-
-                    child: Adw.OverlaySplitView split_view {
-                      sidebar-position: end;
-                      show-sidebar: false;
-                      min-sidebar-width: 320;
-                      max-sidebar-width: 440;
-                      sidebar-width-fraction: 0.38;
-
-                      content: Gtk.ScrolledWindow {
-                        hscrollbar-policy: never;
-
-                        child: Gtk.GridView album_grid {
-                          max-columns: 12;
-                          min-columns: 2;
-                          single-click-activate: true;
-
-                          styles [
-                            "album-grid",
-                          ]
-                        };
-                      };
-
-                      sidebar: $GatefoldAlbumPanel album_panel {};
-                    };
-                  }
-                };
-              }
-
-              Adw.ViewStackPage {
-                name: "artists";
-                title: _("Artists");
-                icon-name: "avatar-default-symbolic";
-                // Artist pages open over most of the grid (CONCEPT.md §4.2).
-                child: Adw.OverlaySplitView artist_split {
-                  collapsed: true;
-                  sidebar-position: end;
-                  show-sidebar: false;
-                  min-sidebar-width: 360;
-                  max-sidebar-width: 968;
-
-                  styles [
-                    "artist-overlay",
-                  ]
-
-                  sidebar: Adw.Bin artist_holder {};
-
-                  content: Gtk.Stack artists_stack {
-                    transition-type: crossfade;
-
-                    Gtk.StackPage {
-                      name: "ask";
-
-                      child: Adw.StatusPage {
-                        icon-name: "avatar-default-symbolic";
-                        title: _("Show Artist Photos and Links?");
-                        description: _(
-                          "Gatefold can look up artists online: MusicBrainz identifies them, Wikidata, Wikipedia and Wikimedia Commons add links, a short biography and a photo, and fanart.tv adds photos if you enter an API key in Preferences. Only artist names and MusicBrainz IDs are sent. You can change this any time in Preferences."
-                        );
-
-                        child: Gtk.Box {
-                          halign: center;
-                          spacing: 12;
-
-                          Gtk.Button {
-                            label: _("_Not Now");
-                            use-underline: true;
-                            action-name: "win.online-metadata";
-                            action-target: "false";
-
-                            styles [
-                              "pill",
-                            ]
-                          }
-
-                          Gtk.Button {
-                            label: _("_Look Up Artists");
-                            use-underline: true;
-                            action-name: "win.online-metadata";
-                            action-target: "true";
-
-                            styles [
-                              "pill",
-                              "suggested-action",
-                            ]
-                          }
-                        };
-                      };
-                    }
-
-                    Gtk.StackPage {
-                      name: "empty";
-
-                      child: Adw.StatusPage {
-                        icon-name: "avatar-default-symbolic";
-                        title: _("No Artists Yet");
-                        description: _("Album artists from your library will show up here.");
-                      };
-                    }
-
-                    Gtk.StackPage {
-                      name: "artists";
-
-                      child: Gtk.ScrolledWindow {
-                        hscrollbar-policy: never;
-
-                        child: Gtk.GridView artist_grid {
-                          max-columns: 12;
-                          min-columns: 2;
-                          single-click-activate: true;
-
-                          styles [
-                            "artist-grid",
-                          ]
-                        };
-                      };
-                    }
+                    sidebar: $GatefoldAlbumPanel album_panel {};
                   };
-                };
-              }
+                }
+              };
+            }
 
-              Adw.ViewStackPage {
-                name: "playlists";
-                title: _("Playlists");
-                icon-name: "view-list-bullet-symbolic";
+            Adw.ViewStackPage {
+              name: "artists";
+              title: _("Artists");
+              icon-name: "avatar-default-symbolic";
+              // Artist pages open over most of the grid (CONCEPT.md §4.2).
+              child: Adw.OverlaySplitView artist_split {
+                collapsed: true;
+                sidebar-position: end;
+                show-sidebar: false;
+                min-sidebar-width: 360;
+                max-sidebar-width: 968;
 
-                child: Gtk.Stack playlists_stack {
+                styles [
+                  "artist-overlay",
+                ]
+
+                sidebar: Adw.Bin artist_holder {};
+
+                content: Gtk.Stack artists_stack {
                   transition-type: crossfade;
 
                   Gtk.StackPage {
-                    name: "empty";
+                    name: "ask";
 
                     child: Adw.StatusPage {
-                      icon-name: "view-list-bullet-symbolic";
-                      title: _("No Playlists Yet");
-                      description: _("Create a playlist, or import an M3U or XSPF file.");
+                      icon-name: "avatar-default-symbolic";
+                      title: _("Show Artist Photos and Links?");
+                      description: _(
+                        "Gatefold can look up artists online: MusicBrainz identifies them, Wikidata, Wikipedia and Wikimedia Commons add links, a short biography and a photo, and fanart.tv adds photos if you enter an API key in Preferences. Only artist names and MusicBrainz IDs are sent. You can change this any time in Preferences."
+                      );
 
                       child: Gtk.Box {
                         halign: center;
                         spacing: 12;
 
                         Gtk.Button {
-                          label: _("_Import…");
+                          label: _("_Not Now");
                           use-underline: true;
-                          action-name: "win.import-playlist";
+                          action-name: "win.online-metadata";
+                          action-target: "false";
 
                           styles [
                             "pill",
@@ -406,9 +325,10 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                         }
 
                         Gtk.Button {
-                          label: _("_New Playlist");
+                          label: _("_Look Up Artists");
                           use-underline: true;
-                          action-name: "win.new-playlist";
+                          action-name: "win.online-metadata";
+                          action-target: "true";
 
                           styles [
                             "pill",
@@ -420,26 +340,135 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                   }
 
                   Gtk.StackPage {
-                    name: "playlists";
+                    name: "empty";
 
-                    child: Adw.OverlaySplitView playlist_split {
-                      sidebar-position: end;
-                      show-sidebar: false;
-                      min-sidebar-width: 320;
-                      max-sidebar-width: 440;
-                      sidebar-width-fraction: 0.38;
+                    child: Adw.StatusPage {
+                      icon-name: "avatar-default-symbolic";
+                      title: _("No Artists Yet");
+                      description: _("Album artists from your library will show up here.");
+                    };
+                  }
 
-                      content: Gtk.ScrolledWindow {
-                        hscrollbar-policy: never;
+                  Gtk.StackPage {
+                    name: "artists";
 
-                        child: Gtk.Box {
-                          orientation: vertical;
+                    child: Gtk.ScrolledWindow {
+                      hscrollbar-policy: never;
+
+                      child: Gtk.GridView artist_grid {
+                        max-columns: 12;
+                        min-columns: 2;
+                        single-click-activate: true;
+
+                        styles [
+                          "artist-grid",
+                        ]
+                      };
+                    };
+                  }
+                };
+              };
+            }
+
+            Adw.ViewStackPage {
+              name: "playlists";
+              title: _("Playlists");
+              icon-name: "view-list-bullet-symbolic";
+
+              child: Gtk.Stack playlists_stack {
+                transition-type: crossfade;
+
+                Gtk.StackPage {
+                  name: "empty";
+
+                  child: Adw.StatusPage {
+                    icon-name: "view-list-bullet-symbolic";
+                    title: _("No Playlists Yet");
+                    description: _("Create a playlist, or import an M3U or XSPF file.");
+
+                    child: Gtk.Box {
+                      halign: center;
+                      spacing: 12;
+
+                      Gtk.Button {
+                        label: _("_Import…");
+                        use-underline: true;
+                        action-name: "win.import-playlist";
+
+                        styles [
+                          "pill",
+                        ]
+                      }
+
+                      Gtk.Button {
+                        label: _("_New Playlist");
+                        use-underline: true;
+                        action-name: "win.new-playlist";
+
+                        styles [
+                          "pill",
+                          "suggested-action",
+                        ]
+                      }
+                    };
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "playlists";
+
+                  child: Adw.OverlaySplitView playlist_split {
+                    sidebar-position: end;
+                    show-sidebar: false;
+                    min-sidebar-width: 320;
+                    max-sidebar-width: 440;
+                    sidebar-width-fraction: 0.38;
+
+                    content: Gtk.ScrolledWindow {
+                      hscrollbar-policy: never;
+
+                      child: Gtk.Box {
+                        orientation: vertical;
+
+                        styles [
+                          "album-grid",
+                        ]
+
+                        Gtk.FlowBox playlist_grid {
+                          max-children-per-line: 12;
+                          min-children-per-line: 2;
+                          homogeneous: true;
+                          selection-mode: none;
+                          activate-on-single-click: true;
+                          valign: start;
 
                           styles [
-                            "album-grid",
+                            "playlist-flow",
                           ]
+                        }
 
-                          Gtk.FlowBox playlist_grid {
+                        // Others' Spotify playlists: Spotify doesn't show
+                        // their songs (CONCEPT.md §9.5).
+                        Gtk.Button followed_toggle {
+                          halign: start;
+                          margin-start: 9;
+                          margin-top: 18;
+                          visible: false;
+
+                          child: Adw.ButtonContent followed_content {
+                            icon-name: "pan-end-symbolic";
+                          };
+
+                          styles [
+                            "flat",
+                            "heading",
+                          ]
+                        }
+
+                        Gtk.Revealer followed_revealer {
+                          transition-type: slide_down;
+
+                          child: Gtk.FlowBox followed_grid {
                             max-children-per-line: 12;
                             min-children-per-line: 2;
                             homogeneous: true;
@@ -450,57 +479,51 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                             styles [
                               "playlist-flow",
                             ]
-                          }
-
-                          // Others' Spotify playlists: Spotify doesn't show
-                          // their songs (CONCEPT.md §9.5).
-                          Gtk.Button followed_toggle {
-                            halign: start;
-                            margin-start: 9;
-                            margin-top: 18;
-                            visible: false;
-
-                            child: Adw.ButtonContent followed_content {
-                              icon-name: "pan-end-symbolic";
-                            };
-
-                            styles [
-                              "flat",
-                              "heading",
-                            ]
-                          }
-
-                          Gtk.Revealer followed_revealer {
-                            transition-type: slide_down;
-
-                            child: Gtk.FlowBox followed_grid {
-                              max-children-per-line: 12;
-                              min-children-per-line: 2;
-                              homogeneous: true;
-                              selection-mode: none;
-                              activate-on-single-click: true;
-                              valign: start;
-
-                              styles [
-                                "playlist-flow",
-                              ]
-                            };
-                          }
-                        };
+                          };
+                        }
                       };
-
-                      sidebar: $GatefoldPlaylistPanel playlist_panel {};
                     };
-                  }
-                };
-              }
+
+                    sidebar: $GatefoldPlaylistPanel playlist_panel {};
+                  };
+                }
+              };
+            }
+          };
+
+          // Dims the view while searching; a click on it closes the search.
+
+          [overlay]
+          Gtk.Revealer search_dim {
+            transition-type: crossfade;
+            visible: false;
+
+            child: Gtk.Box {
+              styles [
+                "search-dim",
+              ]
             };
           }
 
-          Gtk.StackPage {
-            name: "search";
+          [overlay]
+          Gtk.Revealer search_revealer {
+            transition-type: crossfade;
+            valign: start;
+            visible: false;
 
-            child: $GatefoldSearchView search_view {};
+            child: Adw.Clamp {
+              maximum-size: 720;
+
+              styles [
+                "search-clamp",
+              ]
+
+              child: $GatefoldSearchView search_view {
+                styles [
+                  "search-card",
+                ]
+              };
+            };
           }
         };
 
@@ -529,7 +552,6 @@ menu playlist_menu {
       action: "win.import-playlist";
     }
   }
-
 }
 
 menu sort_menu {

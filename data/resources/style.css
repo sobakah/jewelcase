@@ -247,3 +247,26 @@
 button.smart-shuffle {
   color: var(--accent-color);
 }
+
+/* Search results float over the library (CONCEPT.md §4.1). */
+.search-dim {
+  background-color: alpha(black, 0.12);
+}
+
+.search-clamp {
+  margin: 6px 12px 12px 12px;
+}
+
+/* Clear of the floating mini player. */
+.floating-player .search-clamp {
+  margin-bottom: 128px;
+}
+
+.search-card {
+  background-color: var(--window-bg-color);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px alpha(black, 0.07),
+    0 2px 6px 1px alpha(black, 0.08),
+    0 8px 28px 6px alpha(black, 0.07);
+}
