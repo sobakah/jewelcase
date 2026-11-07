@@ -75,8 +75,10 @@ library, in Gatefold's queue. Your own files always play from the library.
 
 - **Spotify Soloist** (default): Spotify's official headless client. Install it from Spotify's
   [downloads page](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates),
-  or let [soloistd](https://github.com/MopigamesYT/soloistd) install and update it (set its
-  `websocket` to e.g. `127.0.0.1:9090`; Gatefold then uses it and needs nothing else). Without
+  or let [soloistd](https://github.com/MopigamesYT/soloistd) install and update it; Gatefold then
+  uses it and needs nothing else. Preferences → Spotify → soloistd controls the service (start,
+  stop, restart), its settings (Gatefold's access, device name, PipeWire output, volume at start,
+  API key), updates Soloist, links it again and shows its log. Without
   soloistd, Gatefold starts Soloist itself with your Soloist API key. Link it once by choosing it
   in the Spotify app's device list. Builds expire after 90 days. Spotify's terms don't clearly
   cover controlling it from another app.

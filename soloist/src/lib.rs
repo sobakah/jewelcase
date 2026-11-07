@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+
+pub mod soloistd;
 use tungstenite::{Message, WebSocket};
 
 /// Where users get Soloist and their API key.
@@ -646,17 +648,8 @@ pub fn soloistd_websocket(config_json: &str) -> Option<(String, u16)> {
     Some((local_only(addr), port.parse().ok()?))
 }
 
-/// soloistd's config.json (`GATEFOLD_SOLOISTD_CONFIG` for tests, which
-/// must never reach the user's own).
 fn soloistd_config() -> PathBuf {
-    if let Some(path) = std::env::var_os("GATEFOLD_SOLOISTD_CONFIG") {
-        return PathBuf::from(path);
-    }
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_default()
-        .join("soloistd/config.json")
+    soloistd::config_path()
 }
 
 /// soloistd is set up (it manages Soloist's download and updates).

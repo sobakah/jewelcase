@@ -128,6 +128,25 @@ pub fn page() -> adw::PreferencesPage {
     playlists.add(&sync);
     page.add(&playlists);
     page.add(&streaming_group(&spotify));
+    // soloistd: only with Soloist as the way to stream.
+    let soloistd = super::soloistd_prefs::group(&spotify);
+    let show_soloistd = glib::clone!(
+        #[weak]
+        soloistd,
+        move |spotify: &Spotify| {
+            soloistd.set_visible(spotify.stream_backend() == super::stream::Backend::Soloist);
+        }
+    );
+    show_soloistd(&spotify);
+    settings.connect_changed(
+        Some("spotify-stream-backend"),
+        glib::clone!(
+            #[weak]
+            spotify,
+            move |_, _| show_soloistd(&spotify)
+        ),
+    );
+    page.add(&soloistd);
 
     let update = glib::clone!(
         #[weak]

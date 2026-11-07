@@ -9,6 +9,7 @@ mod keyring;
 pub mod preferences;
 mod remote;
 mod soloist;
+mod soloistd_prefs;
 mod stream;
 mod sync;
 
