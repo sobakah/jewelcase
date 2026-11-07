@@ -51,14 +51,17 @@ pub fn spotify_title(title: &str, from_spotify: bool) -> gtk::Widget {
         return label.upcast();
     }
     let line = gtk::Box::builder().spacing(6).build();
-    line.append(
-        &gtk::Image::builder()
-            .icon_name("gatefold-spotify-symbolic")
-            .pixel_size(12)
-            .valign(gtk::Align::Center)
-            .tooltip_text(gettextrs::gettext("Plays from Spotify"))
-            .build(),
-    );
+    line.append(&spotify_icon());
     line.append(&label);
     line.upcast()
+}
+
+/// The small Spotify icon for songs that play from Spotify.
+pub fn spotify_icon() -> gtk::Image {
+    gtk::Image::builder()
+        .icon_name("gatefold-spotify-symbolic")
+        .pixel_size(12)
+        .valign(gtk::Align::Center)
+        .tooltip_text(gettextrs::gettext("Plays from Spotify"))
+        .build()
 }

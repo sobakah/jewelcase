@@ -282,11 +282,23 @@ impl ArtistPage {
         imp.bio_box.set_visible(false);
         imp.identify_banner.set_revealed(false);
         imp.latin_name.set_visible(false);
-        // No image choices: the picture is Spotify's. (Without its menu
-        // the button would be insensitive, and the picture dimmed.)
+        // Nothing of the library's to change or play: the page is
+        // Spotify's (the picture too). The actions go, the picture button
+        // stays (without its menu it would be dimmed) but takes no input.
+        for action in [
+            "artist.play",
+            "artist.shuffle",
+            "artist.choose-image",
+            "artist.choose-online",
+            "artist.reset-portrait",
+            "artist.identify",
+            "artist.edit-tags",
+            "artist.lookup",
+        ] {
+            page.action_set_enabled(action, false);
+        }
         imp.portrait_button.set_can_target(false);
-        imp.portrait_button.set_focusable(false);
-        imp.portrait_button.set_tooltip_text(None);
+        imp.portrait_button.set_can_focus(false);
         page.refresh();
         page
     }

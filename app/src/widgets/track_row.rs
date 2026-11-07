@@ -187,7 +187,10 @@ impl TrackRow {
         line.append(&duration);
         line.append(&add_to_queue);
         line.append(&add_to_playlist);
-        line.append(&expand);
+        // Spotify songs have no file: no details or tag editing.
+        if !track.is_stand_in() {
+            line.append(&expand);
+        }
 
         imp.revealer
             .set_transition_type(gtk::RevealerTransitionType::SlideDown);
