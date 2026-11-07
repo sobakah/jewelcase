@@ -30,6 +30,16 @@ const HISTORY_MIN_MS: u64 = 30_000;
 /// After this many streamed songs fail in a row, playback stops.
 const STREAM_FAILURES_TO_STOP: u32 = 3;
 
+/// A crossfade in progress.
+pub struct Fade {
+    /// The engine fading out.
+    old: usize,
+    started: std::time::Instant,
+    length_ms: u64,
+    /// The step timer, until it ends itself.
+    timer: Option<glib::SourceId>,
+}
+
 /// Songs handed to a Spotify device when something is started remotely.
 pub const REMOTE_HAND_OVER: usize = 20;
 
@@ -85,7 +95,12 @@ mod imp {
         /// What the remote device plays next, for the queue view.
         pub remote_queue: OnceCell<gio::ListStore>,
 
-        pub engine: OnceCell<playback::Player>,
+        /// Two GStreamer engines: one plays, the other takes over for a
+        /// crossfade.
+        pub engines: OnceCell<Vec<playback::Player>>,
+        pub active: Cell<usize>,
+        /// A crossfade in progress: the engine fading out, and when.
+        pub fade: RefCell<Option<Fade>>,
         pub library: OnceCell<Library>,
         pub settings: OnceCell<gio::Settings>,
         pub actions: gio::SimpleActionGroup,
@@ -155,6 +170,15 @@ impl Player {
         imp.library.set(library.clone()).expect("set once");
 
         let settings = gio::Settings::new(APP_ID);
+        // Crossfade on or off changes how the next song is handed over.
+        settings.connect_changed(
+            Some("crossfade"),
+            glib::clone!(
+                #[weak]
+                player,
+                move |_, _| player.update_next()
+            ),
+        );
         for key in ["replaygain", "replaygain-preamp"] {
             settings.connect_changed(
                 Some(key),
@@ -200,21 +224,30 @@ impl Player {
         }
         imp.settings.set(settings).expect("set once");
 
-        match playback::Player::new() {
-            Ok((engine, events)) => {
-                engine.set_volume(player.settings().double("volume"));
-                imp.engine.set(engine).ok().expect("set once");
-                glib::spawn_future_local(glib::clone!(
-                    #[weak]
-                    player,
-                    async move {
-                        while let Ok(event) = events.recv().await {
-                            player.handle_event(event);
+        let mut engines = Vec::new();
+        for index in 0..2 {
+            match playback::Player::new() {
+                Ok((engine, events)) => {
+                    engine.set_volume(player.settings().double("volume"));
+                    engines.push(engine);
+                    glib::spawn_future_local(glib::clone!(
+                        #[weak]
+                        player,
+                        async move {
+                            while let Ok(event) = events.recv().await {
+                                player.engine_event(index, event);
+                            }
                         }
-                    }
-                ));
+                    ));
+                }
+                Err(err) => {
+                    tracing::error!("Playback is unavailable: {err}");
+                    break;
+                }
             }
-            Err(err) => tracing::error!("Playback is unavailable: {err}"),
+        }
+        if !engines.is_empty() {
+            imp.engines.set(engines).ok().expect("set once");
         }
         player.setup_actions();
         player.apply_replaygain();
@@ -229,8 +262,28 @@ impl Player {
         self.imp().library.get().expect("set in new()")
     }
 
+    /// The engine that plays now.
     fn engine(&self) -> Option<&playback::Player> {
-        self.imp().engine.get()
+        self.engine_at(self.imp().active.get())
+    }
+
+    fn engine_at(&self, index: usize) -> Option<&playback::Player> {
+        self.imp().engines.get()?.get(index)
+    }
+
+    fn all_engines(&self) -> &[playback::Player] {
+        self.imp().engines.get().map_or(&[], Vec::as_slice)
+    }
+
+    /// An engine's event: its own bookkeeping, then the player's — only for
+    /// the engine that plays (one fading out has ended already).
+    fn engine_event(&self, index: usize, event: PlayerEvent) {
+        if let Some(engine) = self.engine_at(index) {
+            engine.handle_event(&event);
+        }
+        if index == self.imp().active.get() {
+            self.handle_event(event);
+        }
     }
 
     pub fn actions(&self) -> &gio::SimpleActionGroup {
@@ -557,6 +610,7 @@ impl Player {
         if self.forward(RemoteCommand::PlayPause) {
             return;
         }
+        self.finish_crossfade();
         if self.imp().streaming.get() {
             let spotify = self.spotify();
             match self.imp().state.get() {
@@ -599,6 +653,7 @@ impl Player {
     }
 
     pub fn stop(&self) {
+        self.finish_crossfade();
         if let Some(engine) = self.engine() {
             engine.stop();
         }
@@ -613,6 +668,7 @@ impl Player {
         if self.forward(RemoteCommand::Next) {
             return;
         }
+        self.finish_crossfade();
         let advanced = self.imp().queue.borrow_mut().advance(false).is_some();
         if advanced {
             self.load_current(self.imp().state.get() == State::Playing, 0);
@@ -624,6 +680,7 @@ impl Player {
         if self.forward(RemoteCommand::Previous) {
             return;
         }
+        self.finish_crossfade();
         if self.position() > RESTART_THRESHOLD_MS {
             self.seek(0);
             return;
@@ -647,6 +704,7 @@ impl Player {
             self.emit_by_name::<()>("seeked", &[]);
             return;
         }
+        self.finish_crossfade();
         if self.imp().streaming.get() {
             if self.imp().state.get() != State::Stopped {
                 self.spotify().stream_seek(ms);
@@ -696,16 +754,20 @@ impl Player {
         self.set_repeat(repeat);
     }
 
+    /// The chosen volume (the engines may be mid-crossfade).
     pub fn volume(&self) -> f64 {
-        self.engine().map_or(1.0, playback::Player::volume)
+        self.settings().double("volume")
     }
 
     pub fn set_volume(&self, volume: f64) {
         if self.forward(RemoteCommand::Volume(volume.clamp(0.0, 1.0))) {
             return;
         }
-        if let Some(engine) = self.engine() {
-            engine.set_volume(volume);
+        // Mid-crossfade, the fade picks the new volume up.
+        if self.imp().fade.borrow().is_none() {
+            for engine in self.all_engines() {
+                engine.set_volume(volume);
+            }
         }
         if self.imp().streaming.get() {
             self.spotify().stream_volume(volume);
@@ -918,6 +980,7 @@ impl Player {
             return;
         }
         let imp = self.imp();
+        self.finish_crossfade();
         imp.pending_next.set(None);
         let current = imp.queue.borrow().current().copied();
         let track = current.and_then(|item| self.track(item.track_id));
@@ -945,6 +1008,152 @@ impl Player {
         self.set_state(if play { State::Playing } else { State::Paused });
         self.emit_by_name::<()>("seeked", &[]);
         self.update_next();
+    }
+
+    // Crossfade -------------------------------------------------------
+
+    /// Seconds of crossfade (Preferences); 0 is off.
+    fn crossfade_ms(&self) -> u64 {
+        u64::try_from(self.settings().int("crossfade")).unwrap_or(0) * 1000
+    }
+
+    /// The change to `next` fades: both songs are files, crossfade is on,
+    /// not Repeat One, and (unless chosen) not the next song of an album
+    /// playing in order.
+    fn crossfades_into(&self, next: &TrackObject) -> bool {
+        let length = self.crossfade_ms();
+        if length == 0 || next.is_stand_in() || self.imp().streaming.get() || self.is_remote() {
+            return false;
+        }
+        let Some(current) = self.current_track() else {
+            return false;
+        };
+        if current.is_stand_in() || self.repeat() == RepeatMode::One.as_str() {
+            return false;
+        }
+        // Too short to fade both ends.
+        if current.duration_ms() < length * 2 + 1000 || next.duration_ms() < length * 2 + 1000 {
+            return false;
+        }
+        let same_album =
+            current.track().album_id.is_some() && current.track().album_id == next.track().album_id;
+        !(same_album
+            && !self.imp().queue.borrow().is_shuffled()
+            && !self.settings().boolean("crossfade-albums"))
+    }
+
+    /// While playing: near the end, the next song starts on the other
+    /// engine and the two fade into each other.
+    fn maybe_crossfade(&self, position: u64) {
+        let imp = self.imp();
+        let length = self.crossfade_ms();
+        if length == 0 || imp.fade.borrow().is_some() || imp.state.get() != State::Playing {
+            return;
+        }
+        let duration = self.duration();
+        if duration == 0 || duration.saturating_sub(position) > length {
+            return;
+        }
+        let next = {
+            let queue = imp.queue.borrow();
+            queue.peek_next(true).map(|i| queue.items()[i])
+        };
+        let Some(next) = next else { return };
+        let Some(track) = self.track(next.track_id) else {
+            return;
+        };
+        if !self.crossfades_into(&track) {
+            return;
+        }
+        let Some(uri) = playback::file_uri(&track.track().record.path) else {
+            return;
+        };
+        let old = imp.active.get();
+        let new = 1 - old;
+        let Some(engine) = self.engine_at(new) else {
+            return;
+        };
+        tracing::debug!("Crossfade into “{}” ({length} ms)", track.title());
+        // The next song is now the current one.
+        imp.queue.borrow_mut().advance(true);
+        imp.pending_next.set(None);
+        if let Some(previous) = self.engine_at(old) {
+            previous.set_next(None);
+        }
+        imp.active.set(new);
+        engine.set_volume(0.0);
+        engine.load(&uri, 0, true);
+        self.set_current_track(Some(track));
+        self.set_position(0);
+        self.emit_by_name::<()>("seeked", &[]);
+        let timer = glib::timeout_add_local(
+            Duration::from_millis(40),
+            glib::clone!(
+                #[weak(rename_to = player)]
+                self,
+                #[upgrade_or]
+                glib::ControlFlow::Break,
+                move || player.crossfade_step()
+            ),
+        );
+        imp.fade.replace(Some(Fade {
+            old,
+            started: std::time::Instant::now(),
+            length_ms: length,
+            timer: Some(timer),
+        }));
+        self.queue_changed();
+    }
+
+    /// One step of the fade: equal power, so the middle doesn't dip.
+    fn crossfade_step(&self) -> glib::ControlFlow {
+        let imp = self.imp();
+        let (old, progress) = {
+            let fade = imp.fade.borrow();
+            let Some(fade) = fade.as_ref() else {
+                return glib::ControlFlow::Break;
+            };
+            (
+                fade.old,
+                fade.started.elapsed().as_millis() as f64 / fade.length_ms.max(1) as f64,
+            )
+        };
+        if progress >= 1.0 {
+            // The timer ends itself: don't remove it again.
+            if let Some(fade) = imp.fade.borrow_mut().as_mut() {
+                fade.timer = None;
+            }
+            self.finish_crossfade();
+            return glib::ControlFlow::Break;
+        }
+        let volume = self.volume();
+        let angle = progress * std::f64::consts::FRAC_PI_2;
+        if let Some(engine) = self.engine() {
+            engine.set_volume(volume * angle.sin());
+        }
+        if let Some(engine) = self.engine_at(old) {
+            engine.set_volume(volume * angle.cos());
+        }
+        glib::ControlFlow::Continue
+    }
+
+    /// Ends a crossfade now (it finished, or the user did something): the
+    /// old song stops, the new one plays at full volume.
+    fn finish_crossfade(&self) {
+        let Some(fade) = self.imp().fade.take() else {
+            return;
+        };
+        if let Some(timer) = fade.timer {
+            timer.remove();
+        }
+        let volume = self.volume();
+        if let Some(engine) = self.engine_at(fade.old) {
+            engine.stop();
+            engine.set_volume(volume);
+        }
+        if let Some(engine) = self.engine() {
+            engine.set_volume(volume);
+        }
     }
 
     // Streaming (§9.4) --------------------------------------------------
@@ -1205,6 +1414,13 @@ impl Player {
             engine.set_next(None);
             return;
         }
+        // A crossfade takes over this change instead of gapless playback.
+        if let Some((track, _)) = &next
+            && self.crossfades_into(track)
+        {
+            engine.set_next(None);
+            return;
+        }
         let next = next
             .and_then(|(track, uid)| Some((playback::file_uri(&track.track().record.path)?, uid)));
         engine.set_next(next);
@@ -1212,9 +1428,6 @@ impl Player {
 
     fn handle_event(&self, event: PlayerEvent) {
         let imp = self.imp();
-        if let Some(engine) = self.engine() {
-            engine.handle_event(&event);
-        }
         match event {
             PlayerEvent::NextQueued(uid) => imp.pending_next.set(Some(uid)),
             PlayerEvent::StreamStarted => {
@@ -1269,17 +1482,19 @@ impl Player {
     }
 
     fn apply_replaygain(&self) {
-        let Some(engine) = self.engine() else { return };
         let mode = self.settings().string("replaygain");
-        engine.set_replaygain(mode != "off");
-        engine.set_preamp(self.settings().double("replaygain-preamp"));
         let album = match mode.as_str() {
             "album" => true,
             "track" => false,
             // Album gain while an album plays in order, track gain in shuffle.
             _ => !self.imp().queue.borrow().is_shuffled(),
         };
-        engine.set_album_gain(album);
+        let preamp = self.settings().double("replaygain-preamp");
+        for engine in self.all_engines() {
+            engine.set_replaygain(mode != "off");
+            engine.set_preamp(preamp);
+            engine.set_album_gain(album);
+        }
     }
 
     fn set_current_track(&self, track: Option<TrackObject>) {
@@ -1321,6 +1536,7 @@ impl Player {
                     move || {
                         if let Some(ms) = player.engine_position() {
                             player.set_position(ms);
+                            player.maybe_crossfade(ms);
                         }
                         glib::ControlFlow::Continue
                     }

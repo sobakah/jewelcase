@@ -1285,6 +1285,17 @@ impl GatefoldWindow {
                     GatefoldApplication::get()
                         .player()
                         .play_album(album.album().id, None, false);
+                    // `GATEFOLD_SCREENSHOT_SEEK_END=5000`: 2 s later, jump to
+                    // that long before the end (crossfade tests).
+                    if let Some(before) = std::env::var("GATEFOLD_SCREENSHOT_SEEK_END")
+                        .ok()
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
+                        glib::timeout_add_seconds_local_once(2, move || {
+                            let player = GatefoldApplication::get().player();
+                            player.seek(player.duration().saturating_sub(before));
+                        });
+                    }
                 }
                 // e.g. `panel.lyrembed`: actions of the album panel.
                 let panel_actions =

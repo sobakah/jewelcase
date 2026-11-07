@@ -113,6 +113,30 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     }
 
     Adw.PreferencesGroup {
+      title: _("Crossfade");
+      description: _("Songs fade into each other instead of following gaplessly. Only between your files, not Spotify songs.");
+
+      Adw.SpinRow crossfade_row {
+        title: _("_Crossfade");
+        subtitle: _("Seconds; 0 is off");
+        use-underline: true;
+
+        adjustment: Gtk.Adjustment {
+          lower: 0;
+          upper: 12;
+          step-increment: 1;
+          page-increment: 3;
+        };
+      }
+
+      Adw.SwitchRow crossfade_albums_row {
+        title: _("Also Within _Albums");
+        subtitle: _("Off: an album playing in order stays gapless");
+        use-underline: true;
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: _("Lyrics");
 
       Adw.ComboRow lyrics_layout_row {

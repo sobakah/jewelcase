@@ -633,6 +633,10 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 - **Covers**: Spotify images at their largest (640 px).
 - Not planned: gapless between local and streamed songs (two players), and reading followed playlists' songs (only librespot could).
 
+### Playback additions (after phase 8)
+- **Loudness**: a ReplayGain pre-amp (default +4 dB: ReplayGain's −18 LUFS reference up to Spotify's and most players' −14 LUFS); songs without tags stay as they are, `rglimiter` prevents clipping. Spotify songs in Soloist then need no offset (default 0 dB).
+- **Crossfade** (0–12 s, off by default): two GStreamer engines; near the end of a song the next one starts on the other engine and they fade with an equal-power curve; the player follows the new engine, events of the fading one are ignored, any transport action ends the fade. Not for Spotify songs (Soloist plays itself), Repeat One or very short songs, and, unless chosen, not within an album playing in order (stays gapless).
+
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
 - **Lyrics for Spotify-only songs** from LRCLIB (free public lyrics database, by title, artist and length): shown only, never embedded. In remote mode the Lyrics pane is off for such songs until then (§9.7).

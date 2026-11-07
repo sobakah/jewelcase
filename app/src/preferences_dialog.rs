@@ -32,6 +32,10 @@ mod imp {
         #[template_child]
         pub preamp_row: TemplateChild<adw::SpinRow>,
         #[template_child]
+        pub crossfade_row: TemplateChild<adw::SpinRow>,
+        #[template_child]
+        pub crossfade_albums_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
@@ -163,6 +167,17 @@ mod imp {
                 .build();
             settings
                 .bind("replaygain-preamp", &*self.preamp_row, "value")
+                .build();
+            settings
+                .bind("crossfade", &*self.crossfade_row, "value")
+                .build();
+            settings
+                .bind("crossfade-albums", &*self.crossfade_albums_row, "active")
+                .build();
+            self.crossfade_row
+                .bind_property("value", &*self.crossfade_albums_row, "sensitive")
+                .transform_to(|_, value: f64| Some(value > 0.0))
+                .sync_create()
                 .build();
             // No pre-amp without ReplayGain.
             self.replaygain_row
