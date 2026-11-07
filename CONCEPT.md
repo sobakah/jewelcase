@@ -616,6 +616,15 @@ For now the app is built as an **RPM for Fedora 45 and installed locally**. Ther
 
 The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase 4 works without them, except automatic romanization.
 
+### Optional future features (not scheduled)
+Ideas that came up along the way, to pick from once the roadmap is done:
+- **Lyrics for Spotify-only songs** from LRCLIB (free public lyrics database, by title, artist and length): shown only, never embedded. In remote mode the Lyrics pane is off for such songs until then (§9.7).
+- **Reordering and renaming Spotify playlists** from Gatefold. The outbox supports both, but they're switched off until the rest of the app is stable (§9.7).
+- **MusicBrainz ISRC lookup** for files without an ISRC, to match Spotify entries more reliably (§9.5, step 2).
+- **Unfollowing or deleting Spotify playlists** (`/me/library`) and **uploading a changed cover** to Spotify.
+- **"On Spotify, not in your library"** on the artist page (§9.3).
+- **ListenBrainz similar artists** for smart shuffle's "same artist" criterion (§7).
+
 ---
 
 ## 14. Open Questions
