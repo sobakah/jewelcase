@@ -37,6 +37,8 @@ const MAX_JSON_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_ITEMS_PER_CALL: usize = 100;
 /// Since 2026, a search returns at most 10 results (§9.1).
 pub const MAX_SEARCH_RESULTS: u32 = 10;
+/// The page size every list accepts.
+const SMALL_PAGE: &str = "10";
 /// Between the pages of a long list.
 const PAGE_PAUSE: Duration = Duration::from_millis(100);
 /// Rate limits up to this long are waited out; longer ones are errors.
@@ -296,10 +298,34 @@ impl Client {
             .ok_or(Error::Format("empty answer"))
     }
 
+    /// The first page of a list; when Spotify refuses the page size (it
+    /// lowered several to at most 10 for Development Mode apps in 2026,
+    /// e.g. an artist's albums), again with 10.
+    fn get_first_page(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
+        match self.get(path, query) {
+            Err(Error::Status { status: 400, .. })
+                if query.iter().any(|(k, v)| *k == "limit" && v != SMALL_PAGE) =>
+            {
+                let smaller: Vec<(&str, String)> = query
+                    .iter()
+                    .map(|(k, v)| {
+                        if *k == "limit" {
+                            (*k, SMALL_PAGE.to_owned())
+                        } else {
+                            (*k, v.clone())
+                        }
+                    })
+                    .collect();
+                self.get(path, &smaller)
+            }
+            result => result,
+        }
+    }
+
     /// All pages of a paged list (`items` + `next`).
     fn get_all(&self, path: &str, query: &[(&str, String)]) -> Result<Vec<Value>> {
         let mut items = Vec::new();
-        let mut page = self.get(path, query)?;
+        let mut page = self.get_first_page(path, query)?;
         loop {
             if let Some(list) = page["items"].as_array() {
                 items.extend(list.iter().cloned());
@@ -604,7 +630,7 @@ impl Client {
     /// The artists the user follows (`user-follow-read`). Paged by cursor.
     pub fn followed_artists(&self) -> Result<Vec<Artist>> {
         let mut artists = Vec::new();
-        let mut page = self.get(
+        let mut page = self.get_first_page(
             "/me/following",
             &[("type", "artist".into()), ("limit", "50".into())],
         )?;

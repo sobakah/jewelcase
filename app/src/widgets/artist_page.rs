@@ -478,12 +478,30 @@ impl ArtistPage {
                 if let Some(artist) = spotify.spotify_artist(&id).await {
                     page.show_spotify_header(&artist);
                 }
-                let albums = spotify.discography(&id).await.unwrap_or_default();
+                let albums = spotify.discography(&id).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
                 page.clear_sections();
-                page.add_spotify_sections(&albums, false);
+                let note = match &albums {
+                    None => Some(gettext(
+                        "Spotify can’t show this artist’s releases right now",
+                    )),
+                    Some(albums) if albums.is_empty() => {
+                        Some(gettext("No albums, EPs or singles on Spotify"))
+                    }
+                    Some(_) => None,
+                };
+                if let Some(note) = note {
+                    page.imp().sections.append(
+                        &gtk::Label::builder()
+                            .label(note)
+                            .xalign(0.0)
+                            .css_classes(["dim-label"])
+                            .build(),
+                    );
+                }
+                page.add_spotify_sections(albums.as_deref().unwrap_or_default(), false);
             }
         ));
     }
