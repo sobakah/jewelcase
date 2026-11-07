@@ -204,7 +204,10 @@ pub enum Event {
         position: Option<Position>,
         volume: Option<u8>,
         is_active: Option<bool>,
+        options: Option<Options>,
     },
+    /// Shuffle or repeat changed (in Gatefold or the Spotify app).
+    Options(Options),
     /// Soloist became (or stopped being) the active Connect device.
     Device {
         is_active: bool,
@@ -242,7 +245,9 @@ impl Event {
                 position: Position::parse(&value["position"]),
                 volume: volume(&value["volume"]),
                 is_active: value["is_active"].as_bool(),
+                options: Options::parse(&value["options"]),
             },
+            "options_changed" => Self::Options(Options::parse(&value["options"])?),
             "device_changed" => Self::Device {
                 is_active: value["is_active"].as_bool().unwrap_or(false),
             },
@@ -268,11 +273,35 @@ impl Event {
 }
 
 /// Repeat as Soloist knows it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Repeat {
+    #[default]
     Off,
     Context,
     Track,
+}
+
+/// Shuffle and repeat, as Soloist reports them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Options {
+    pub shuffle: bool,
+    pub repeat: Repeat,
+}
+
+impl Options {
+    fn parse(value: &Value) -> Option<Self> {
+        if !value.is_object() {
+            return None;
+        }
+        Some(Self {
+            shuffle: value["shuffle"].as_bool().unwrap_or(false),
+            repeat: match value["repeat"].as_str() {
+                Some("context") => Repeat::Context,
+                Some("track") => Repeat::Track,
+                _ => Repeat::Off,
+            },
+        })
+    }
 }
 
 /// A running Soloist.
@@ -689,6 +718,7 @@ mod tests {
             position: Some(position),
             volume,
             is_active,
+            ..
         }) = Event::parse(snapshot)
         else {
             panic!("not a snapshot");
@@ -702,6 +732,15 @@ mod tests {
         assert_eq!(position.position_ms, 45_000);
         assert_eq!(volume, Some(65));
         assert_eq!(is_active, Some(true));
+        assert_eq!(
+            Event::parse(
+                r#"{"type":"options_changed","options":{"shuffle":true,"repeat":"track","playback_speed":1.0}}"#
+            ),
+            Some(Event::Options(Options {
+                shuffle: true,
+                repeat: Repeat::Track
+            }))
+        );
         assert_eq!(
             Event::parse(r#"{"type":"device_changed","is_active":false,"device_name":"G"}"#),
             Some(Event::Device { is_active: false })

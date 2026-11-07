@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use gatefold_core::queue::RepeatMode;
-use gatefold_soloist::{Config, Event, Item, Position, Repeat, Soloist, Status};
+use gatefold_soloist::{Config, Event, Item, Options, Position, Repeat, Soloist, Status};
 use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
@@ -58,6 +58,8 @@ pub struct SoloistState {
     /// What Soloist plays, as it reports it.
     current: Option<Item>,
     status: Option<Status>,
+    /// Soloist's shuffle and repeat (shown in receiver mode).
+    options: Options,
     upcoming: Vec<Item>,
     /// Showing what Soloist plays for someone else (started from the
     /// Spotify app, or a followed playlist): the receiver (§9.4).
@@ -277,16 +279,26 @@ impl Spotify {
             Event::Device { is_active } => {
                 self.imp().stream.borrow_mut().soloist.is_active = is_active;
             }
+            Event::Options(options) => {
+                self.imp().stream.borrow_mut().soloist.options = options;
+                if self.soloist_receiving() {
+                    self.receiver_show(false);
+                }
+            }
             Event::Playback {
                 status,
                 item,
                 position,
                 is_active,
+                options,
                 ..
             } => {
                 {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
+                    if let Some(options) = options {
+                        state.options = options;
+                    }
                     if let Some(is_active) = is_active {
                         state.is_active = is_active;
                     }
@@ -788,6 +800,7 @@ impl Spotify {
                 spotify.receiver_command(command);
             }
         });
+        player.set_remote_receiver(true);
         if let Some(soloist) = self.soloist() {
             soloist.request_queue(20);
         }
@@ -810,13 +823,14 @@ impl Spotify {
     /// Shows Soloist's song (as the library song when it matches), its
     /// position and, with `queue`, what comes next.
     fn receiver_show(&self, queue: bool) {
-        let (current, status, position, upcoming) = {
+        let (current, status, position, upcoming, options) = {
             let state = &self.imp().stream.borrow().soloist;
             (
                 state.current.clone(),
                 state.status,
                 state.position,
                 state.upcoming.clone(),
+                state.options,
             )
         };
         glib::spawn_future_local(glib::clone!(
@@ -835,8 +849,12 @@ impl Spotify {
                     track.clone(),
                     status == Some(Status::Playing),
                     position.map_or(0, |p| p.now()),
-                    false,
-                    RepeatMode::Off,
+                    options.shuffle,
+                    match options.repeat {
+                        Repeat::Off => RepeatMode::Off,
+                        Repeat::Context => RepeatMode::All,
+                        Repeat::Track => RepeatMode::One,
+                    },
                 );
                 if queue {
                     let next: Vec<gatefold_spotify::Track> =
@@ -866,12 +884,22 @@ impl Spotify {
             RemoteCommand::Volume(volume) => {
                 soloist.set_volume((volume.clamp(0.0, 1.0) * 100.0).round() as u8);
             }
-            RemoteCommand::Shuffle(on) => soloist.set_shuffle(on),
-            RemoteCommand::Repeat(mode) => soloist.set_repeat(match mode {
-                RepeatMode::Off => Repeat::Off,
-                RepeatMode::All => Repeat::Context,
-                RepeatMode::One => Repeat::Track,
-            }),
+            // Shown right away; Soloist confirms with options_changed.
+            RemoteCommand::Shuffle(on) => {
+                soloist.set_shuffle(on);
+                self.imp().stream.borrow_mut().soloist.options.shuffle = on;
+                self.receiver_show(false);
+            }
+            RemoteCommand::Repeat(mode) => {
+                let repeat = match mode {
+                    RepeatMode::Off => Repeat::Off,
+                    RepeatMode::All => Repeat::Context,
+                    RepeatMode::One => Repeat::Track,
+                };
+                soloist.set_repeat(repeat);
+                self.imp().stream.borrow_mut().soloist.options.repeat = repeat;
+                self.receiver_show(false);
+            }
             RemoteCommand::Queue(ids) => {
                 glib::spawn_future_local(glib::clone!(
                     #[weak(rename_to = spotify)]

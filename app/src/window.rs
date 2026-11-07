@@ -1443,6 +1443,26 @@ impl GatefoldWindow {
                     }
                 });
             }
+            // `GATEFOLD_SCREENSHOT_LATE_ACTIONS=player.shuffle::true`: window
+            // actions 8 s in (after playback started).
+            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_LATE_ACTIONS") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(8, move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    for action in actions.split_whitespace() {
+                        let (name, target) = match action.split_once("::") {
+                            Some((name, target)) => (name, glib::Variant::parse(None, target).ok()),
+                            None => (action, None),
+                        };
+                        if let Err(err) = WidgetExt::activate_action(&window, name, target.as_ref())
+                        {
+                            tracing::warn!("Screenshot action {name}: {err}");
+                        }
+                    }
+                });
+            }
             // `GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS=playlist.play`: actions of
             // the playlist panel, 4 s in.
             if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS") {

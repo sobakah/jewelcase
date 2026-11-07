@@ -255,6 +255,7 @@ impl QueueView {
                 let imp = view.imp();
                 let remote = player.remote_device();
                 title.set_label(&match &remote {
+                    Some(_) if player.remote_receiver() => gettext("Spotify Queue (Soloist)"),
                     // Translators: {} is a Spotify device, e.g. "Kitchen".
                     Some(device) => gettext("Queue on {}").replace("{}", device),
                     None => gettext("Queue"),
@@ -274,6 +275,8 @@ impl QueueView {
             }
         );
         switch(&player);
+        let on_receiver = switch.clone();
+        player.connect_remote_receiver_notify(move |player| on_receiver(player));
         player.connect_remote_device_notify(move |player| switch(player));
         imp.scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
         imp.scroller.set_vexpand(true);

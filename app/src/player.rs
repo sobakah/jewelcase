@@ -81,6 +81,10 @@ mod imp {
         /// The Spotify device being controlled (remote mode, §9.3).
         #[property(get, nullable)]
         pub remote_device: RefCell<Option<String>>,
+        /// Remote mode for Soloist playing on this computer (started from
+        /// the Spotify app or a followed playlist), not another device.
+        #[property(get)]
+        pub remote_receiver: Cell<bool>,
         /// Where transport commands go in remote mode.
         pub remote: RefCell<Option<RemoteHandler>>,
         /// The current song plays from the Spotify stream (§9.4).
@@ -815,6 +819,12 @@ impl Player {
         self.update_actions();
     }
 
+    pub fn set_remote_receiver(&self, receiver: bool) {
+        if self.imp().remote_receiver.replace(receiver) != receiver {
+            self.notify_remote_receiver();
+        }
+    }
+
     pub fn set_remote_device(&self, device: Option<&str>) {
         let imp = self.imp();
         if imp.remote_device.borrow().as_deref() != device {
@@ -927,6 +937,7 @@ impl Player {
         }
         imp.remote_clock.set(None);
         self.remote_queue().remove_all();
+        self.set_remote_receiver(false);
         self.set_remote_device(None);
         let current = imp.queue.borrow().current().copied();
         let track = current.and_then(|item| self.track(item.track_id));

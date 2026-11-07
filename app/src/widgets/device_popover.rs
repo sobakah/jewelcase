@@ -29,9 +29,20 @@ pub fn setup(button: &gtk::MenuButton, popover: &gtk::Popover, banner: &adw::Ban
         button,
         move |player: &crate::player::Player| {
             match player.remote_device() {
+                // Soloist plays here, for the Spotify app or a followed
+                // playlist: say so, and how to get back.
+                Some(_) if player.remote_receiver() => {
+                    banner.set_title(&gettext(
+                        "Spotify plays this through Soloist; the controls steer Spotify",
+                    ));
+                    banner.set_button_label(Some(&gettext("_Back to My Queue")));
+                    banner.set_revealed(true);
+                    button.remove_css_class("accent");
+                }
                 Some(device) => {
                     // Translators: {} is a device name, e.g. "Kitchen".
                     banner.set_title(&gettext("Playing on {}").replace("{}", &device));
+                    banner.set_button_label(Some(&gettext("Play _Here")));
                     banner.set_revealed(true);
                     button.add_css_class("accent");
                 }
@@ -43,6 +54,8 @@ pub fn setup(button: &gtk::MenuButton, popover: &gtk::Popover, banner: &adw::Ban
         }
     );
     update_banner(&player);
+    let on_receiver = update_banner.clone();
+    player.connect_remote_receiver_notify(move |player| on_receiver(player));
     player.connect_remote_device_notify(move |player| update_banner(player));
     banner.connect_button_clicked(|_| continue_here());
 
@@ -53,6 +66,11 @@ pub fn setup(button: &gtk::MenuButton, popover: &gtk::Popover, banner: &adw::Ban
 fn continue_here() {
     let app = GatefoldApplication::get();
     let player = app.player();
+    // From Soloist's playback back to Gatefold's own queue, paused.
+    if player.remote_receiver() {
+        app.spotify().play_here(true);
+        return;
+    }
     let track = player.current_track().filter(|t| t.id() > 0);
     let (position, was_playing) = (player.position(), player.playing());
     app.spotify().play_here(true);

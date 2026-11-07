@@ -31,8 +31,10 @@ mod imp {
             };
             Self {
                 cover: glib::Object::builder()
+                    // Flow boxes fit tiles by their natural size (the album
+                    // grid by the minimum): small, so both look alike.
                     .property("min-size", 120)
-                    .property("natural-size", 180)
+                    .property("natural-size", 128)
                     .build(),
                 name: label(&["album-title"]),
                 count: label(&["dim-label"]),
