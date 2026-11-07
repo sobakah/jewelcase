@@ -348,7 +348,7 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 5. **Wikidata `P18`** → Wikimedia Commons image (freely licensed; attribution shown in a tooltip).
 6. Fallback: generated initials avatar tinted with the color of their most common album cover.
 
-fanart.tv was dropped in 0.2: it needed a key and, being volunteer-made, rarely had more than Commons for this library. Lookups done before Spotify and Deezer were sources are repeated once.
+fanart.tv was dropped in 0.2: it needed a key and, being volunteer-made, rarely had more than Commons for this library. Lookups done before Spotify and Deezer were sources are repeated once (database migration 019).
 
 If tags have no MBIDs, the app searches MusicBrainz by name and album titles and auto-accepts only a high-confidence match. Otherwise the artist shows a small "Identify artist…" prompt where the user picks the right match.
 

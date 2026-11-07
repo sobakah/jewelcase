@@ -23,10 +23,6 @@ use crate::config;
 pub const REFRESH_DONE: i64 = 30 * 24 * 3600;
 /// Failed or unclear lookups are retried after this long.
 pub const REFRESH_FAILED: i64 = 7 * 24 * 3600;
-/// Lookups from before Spotify and Deezer were portrait sources
-/// (2026-11-08) are done again, for their better portraits.
-pub const PORTRAIT_SOURCES_SINCE: i64 = 1_794_096_000;
-
 /// A lookup whose Spotify part couldn't be done (too many requests,
 /// offline) is repeated after this long.
 pub const SPOTIFY_LATER: i64 = 24 * 3600;
