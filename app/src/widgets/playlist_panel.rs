@@ -25,7 +25,13 @@ mod imp {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
-        pub name: TemplateChild<gtk::EditableLabel>,
+        pub name: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub name_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub name_entry: TemplateChild<gtk::Entry>,
+        /// The name may be edited here (own playlists, not linked).
+        pub renamable: std::cell::Cell<bool>,
         #[template_child]
         pub add_search: TemplateChild<gtk::SearchEntry>,
         #[template_child]
@@ -136,16 +142,42 @@ mod imp {
                 obj,
                 move |_, row| obj.activate_entry(row.index() as usize)
             ));
-            // Renaming: commit when editing ends (Enter or focus leaves).
-            self.name.connect_editing_notify(glib::clone!(
+            // Renaming by clicking the name.
+            let click = gtk::GestureClick::new();
+            click.connect_released(glib::clone!(
                 #[weak]
                 obj,
-                move |label| {
-                    if !label.is_editing() {
-                        obj.commit_name();
+                move |_, _, _, _| obj.start_renaming()
+            ));
+            self.name.add_controller(click);
+            self.name_entry.connect_activate(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.finish_renaming(true)
+            ));
+            let focus = gtk::EventControllerFocus::new();
+            focus.connect_leave(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.finish_renaming(true)
+            ));
+            self.name_entry.add_controller(focus);
+            let keys = gtk::EventControllerKey::new();
+            keys.connect_key_pressed(glib::clone!(
+                #[weak]
+                obj,
+                #[upgrade_or]
+                glib::Propagation::Proceed,
+                move |_, key, _, _| {
+                    if key == gtk::gdk::Key::Escape {
+                        obj.finish_renaming(false);
+                        glib::Propagation::Stop
+                    } else {
+                        glib::Propagation::Proceed
                     }
                 }
             ));
+            self.name_entry.add_controller(keys);
             self.add_search.connect_search_changed(glib::clone!(
                 #[weak]
                 obj,
@@ -251,16 +283,36 @@ impl PlaylistPanel {
         self.imp().add_search.set_text(text);
     }
 
-    fn commit_name(&self) {
+    fn is_renaming(&self) -> bool {
+        self.imp().name_stack.visible_child_name().as_deref() == Some("entry")
+    }
+
+    /// The name turns into a text field.
+    fn start_renaming(&self) {
         let imp = self.imp();
+        if !imp.renamable.get() || self.is_renaming() {
+            return;
+        }
+        imp.name_entry.set_text(&imp.name.text());
+        imp.name_stack.set_visible_child_name("entry");
+        imp.name_entry.grab_focus();
+    }
+
+    /// Back to the name; `save`: rename to what was typed.
+    fn finish_renaming(&self, save: bool) {
+        let imp = self.imp();
+        if !self.is_renaming() {
+            return;
+        }
+        imp.name_stack.set_visible_child_name("label");
         let Some(playlist) = imp.playlist.borrow().clone() else {
             return;
         };
-        let name = imp.name.text().trim().to_owned();
-        if name.is_empty() || name == playlist.playlist().name {
-            imp.name.set_text(&playlist.playlist().name);
+        let name = imp.name_entry.text().trim().to_owned();
+        if !save || name.is_empty() || name == playlist.playlist().name {
             return;
         }
+        imp.name.set_text(&name);
         GatefoldApplication::get()
             .library()
             .rename_playlist(playlist.id(), &name);
@@ -337,7 +389,7 @@ impl PlaylistPanel {
         };
         let info = playlist.playlist();
         imp.cover.set_cover(playlist.cover_key().as_deref());
-        if !imp.name.is_editing() {
+        if !self.is_renaming() {
             imp.name.set_text(&info.name);
         }
         imp.meta.set_label(&format!(
@@ -367,7 +419,11 @@ impl PlaylistPanel {
         let mirror = info.source == "spotify";
         // Linked to Spotify: only adding and removing songs for now.
         let renamable = editable && !linked;
-        imp.name.set_editable(renamable);
+        imp.renamable.set(renamable);
+        imp.name.set_cursor_from_name(renamable.then_some("text"));
+        if !renamable {
+            self.finish_renaming(false);
+        }
         imp.name
             .set_tooltip_text(renamable.then(|| gettext("Rename")).as_deref());
         imp.add_search.set_visible(editable);

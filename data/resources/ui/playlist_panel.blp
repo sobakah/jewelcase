@@ -54,14 +54,45 @@ template $GatefoldPlaylistPanel: Adw.Bin {
             };
           }
 
-          // Click the name to rename the playlist.
-          Gtk.EditableLabel name {
-            tooltip-text: _("Rename");
+          // The name wraps (a long one mustn't widen the panel); click it
+          // to rename: the text field shows, Enter or clicking away saves,
+          // Escape cancels.
+          Gtk.Stack name_stack {
+            hhomogeneous: false;
+            vhomogeneous: false;
+            interpolate-size: true;
 
-            styles [
-              "title-2",
-              "playlist-name",
-            ]
+            Gtk.StackPage {
+              name: "label";
+
+              child: Gtk.Label name {
+                wrap: true;
+                wrap-mode: word_char;
+                xalign: 0;
+                width-chars: 1;
+                max-width-chars: 1;
+                hexpand: true;
+                tooltip-text: _("Rename");
+
+                styles [
+                  "title-2",
+                  "playlist-name",
+                ]
+              };
+            }
+
+            Gtk.StackPage {
+              name: "entry";
+
+              child: Gtk.Entry name_entry {
+                width-chars: 1;
+                hexpand: true;
+
+                styles [
+                  "title-2",
+                ]
+              };
+            }
           }
 
           Gtk.Label meta {
