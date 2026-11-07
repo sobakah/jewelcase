@@ -625,6 +625,21 @@ impl Library {
         read_only
     }
 
+    /// Playlists linked to Spotify only take added and removed songs for
+    /// now; reordering and renaming come later.
+    fn refuse_linked(&self, id: i64) -> bool {
+        let linked = self.spotify_link(id).is_some();
+        if linked {
+            self.emit_by_name::<()>(
+                "message",
+                &[&gettext(
+                    "Spotify playlists can't be reordered or renamed here yet",
+                )],
+            );
+        }
+        linked
+    }
+
     fn queue_spotify_op(&self, id: i64, op: crate::spotify::Op) {
         if let Some(mut db) = self.db()
             && let Err(err) = db.queue_spotify_op(id, &op.to_json(), metadata::now())
@@ -656,7 +671,7 @@ impl Library {
     }
 
     pub fn rename_playlist(&self, id: i64, name: &str) {
-        if self.refuse_read_only(id) {
+        if self.refuse_read_only(id) || self.refuse_linked(id) {
             self.reload_playlists();
             return;
         }
@@ -705,7 +720,7 @@ impl Library {
     }
 
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
-        if self.refuse_read_only(id) {
+        if self.refuse_read_only(id) || self.refuse_linked(id) {
             self.reload_playlists();
             return;
         }

@@ -463,6 +463,9 @@ Each write returns a new `snapshot_id`. OAuth scopes: `playlist-read-private`, `
 - **Reading**: the 2026 `/items` endpoints (`item` instead of `track` per row, `items` instead of `tracks` in playlist objects); both shapes are accepted.
 - **Matching**: implemented as described (ISRC, then title + artist + duration with version notes; likely matches are offered as "Play … from your library? Yes / No", both directions). The MusicBrainz ISRC lookup (step 2) isn't implemented yet.
 - **Remote mode**: "Play On…" moves playback to a device, taking the current song along when Spotify has it (the following songs go into the device's queue). The player shows the device's song, as the library song when it matches (cover, lyrics). Playing anything locally ends remote mode and pauses the device. Spotify playlists started in remote mode play on the device.
+- **Editing, for now**: linked playlists take added and removed songs only; reordering and renaming them come later (the outbox already supports both).
+- **Others' playlists**: Spotify answers 403 for their entries in Development Mode, even when the list shows a song count. Gatefold asks once per snapshot and then shows them as hidden; reading them needs librespot (phase 8).
+- **Searches**: a failed search (offline, too many requests) is never taken as "not on Spotify"; it's retried later. Spotify's waits up to 30 s are waited out.
 - **Not yet**: deleting or unfollowing Spotify playlists (the follow endpoints moved to `/me/library`), uploading a changed cover to Spotify, the artist page section "On Spotify, not in your library".
 
 ---

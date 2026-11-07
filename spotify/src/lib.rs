@@ -35,6 +35,8 @@ const MAX_JSON_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_ITEMS_PER_CALL: usize = 100;
 /// Since 2026, a search returns at most 10 results (§9.1).
 pub const MAX_SEARCH_RESULTS: u32 = 10;
+/// Between the pages of a long list.
+const PAGE_PAUSE: Duration = Duration::from_millis(100);
 /// Rate limits up to this long are waited out; longer ones are errors.
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
 
@@ -291,7 +293,11 @@ impl Client {
                 items.extend(list.iter().cloned());
             }
             match page["next"].as_str() {
-                Some(next) if !next.is_empty() => page = self.get(next, &[])?,
+                Some(next) if !next.is_empty() => {
+                    // Long playlists: gently, Spotify limits requests.
+                    std::thread::sleep(PAGE_PAUSE);
+                    page = self.get(next, &[])?;
+                }
                 _ => return Ok(items),
             }
         }

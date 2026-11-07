@@ -109,7 +109,10 @@ impl Database {
                 self.conn.execute(
                     "UPDATE playlist SET
                        name = CASE WHEN ?6 THEN name ELSE ?2 END,
-                       spotify_owner = ?3, editable = ?4, readable = ?5, spotify_image_url = ?7
+                       spotify_owner = ?3, editable = ?4, spotify_image_url = ?7,
+                       -- Once Spotify refused the entries, only owning or
+                       -- collaborating makes them readable again.
+                       readable = CASE WHEN ?4 THEN 1 ELSE min(readable, ?5) END
                      WHERE id = ?1",
                     params![
                         id,
@@ -209,6 +212,16 @@ impl Database {
     pub fn forget_spotify(&mut self) -> Result<()> {
         self.forget_spotify_playlists(&[])?;
         self.conn.execute("DELETE FROM spotify_track", [])?;
+        Ok(())
+    }
+
+    /// Spotify refused the entries (403): not asked again for this
+    /// snapshot, and shown as hidden.
+    pub fn mark_unreadable(&mut self, id: i64, snapshot_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE playlist SET readable = 0, snapshot_id = ?2 WHERE id = ?1",
+            params![id, snapshot_id],
+        )?;
         Ok(())
     }
 
@@ -866,6 +879,22 @@ mod tests {
         // Deleting the playlist on Spotify deletes the mirror.
         db.forget_spotify_playlists(&[]).unwrap();
         assert!(db.playlist(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn refused_playlists_stay_hidden() {
+        let mut db = Database::open_in_memory().unwrap();
+        let mut theirs = info("sp5");
+        theirs.editable = false;
+        let id = db.upsert_spotify_playlist(&theirs, 1).unwrap();
+        assert!(db.playlist(id).unwrap().unwrap().readable);
+        db.mark_unreadable(id, "s1").unwrap();
+        db.upsert_spotify_playlist(&theirs, 2).unwrap();
+        assert!(!db.playlist(id).unwrap().unwrap().readable);
+        // Made collaborative: readable again.
+        theirs.editable = true;
+        db.upsert_spotify_playlist(&theirs, 3).unwrap();
+        assert!(db.playlist(id).unwrap().unwrap().readable);
     }
 
     #[test]

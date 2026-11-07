@@ -74,12 +74,32 @@ impl Spotify {
         let mut later = Vec::new();
         if player.playing() && !player.is_remote() {
             let ids = player.upcoming_track_ids(HAND_OVER_SONGS);
-            if let Some(first) = ids.first()
-                && let Some(version) = self.find_version(*first).await
-                && let (Some(uri), Some(Confidence::Sure)) = (version.uri, version.confidence)
-            {
-                uris.push(uri);
-                later = ids[1..].to_vec();
+            let title = player
+                .current_track()
+                .map(|t| t.title())
+                .unwrap_or_default();
+            if let Some(first) = ids.first() {
+                // Playing isn't editing: a likely match is good enough.
+                match self.find_version(*first).await {
+                    Ok(SpotifyVersion { uri: Some(uri), .. }) => {
+                        uris.push(uri);
+                        later = ids[1..].to_vec();
+                    }
+                    Ok(_) => {
+                        // Translators: {} is a song title.
+                        self.message(
+                            &gettext("“{}” isn't on Spotify; the device plays what Spotify had")
+                                .replace("{}", &title),
+                        );
+                    }
+                    Err(err) => {
+                        self.message(&format!(
+                            "{} {}",
+                            super::sync::search_error(&err),
+                            gettext("The device plays what Spotify had.")
+                        ));
+                    }
+                }
             }
         }
         let position = player.position();
@@ -117,13 +137,14 @@ impl Spotify {
                         if spotify.remote_device_id().as_deref() != Some(device_id.as_str()) {
                             break;
                         }
-                        let Some(SpotifyVersion {
-                            uri: Some(uri),
-                            confidence: Some(Confidence::Sure),
-                            ..
-                        }) = spotify.find_version(id).await
-                        else {
-                            continue;
+                        let uri = match spotify.find_version(id).await {
+                            Ok(SpotifyVersion {
+                                uri: Some(uri),
+                                confidence: Some(Confidence::Sure),
+                                ..
+                            }) => uri,
+                            Ok(_) => continue,
+                            Err(_) => break,
                         };
                         if let Err(err) = spotify.call(move |c| c.add_to_queue(&uri)).await {
                             tracing::info!("Cannot queue on the device: {err}");

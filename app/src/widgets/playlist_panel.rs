@@ -127,7 +127,7 @@ mod imp {
             self.items.connect_row_activated(glib::clone!(
                 #[weak]
                 obj,
-                move |_, row| obj.play(Some(row.index() as usize), false)
+                move |_, row| obj.activate_entry(row.index() as usize)
             ));
             // Renaming: commit when editing ends (Enter or focus leaves).
             self.name.connect_editing_notify(glib::clone!(
@@ -324,14 +324,16 @@ impl PlaylistPanel {
         imp.source.set_label(&source_line(info));
         imp.source.set_visible(info.spotify_id.is_some());
         let editable = info.editable;
-        imp.name.set_editable(editable);
-        imp.name
-            .set_tooltip_text(editable.then(|| gettext("Rename")).as_deref());
-        imp.add_search.set_visible(editable);
         let connected = GatefoldApplication::get().spotify().is_connected();
         let linked = info.spotify_id.is_some();
         let mirror = info.source == "spotify";
-        self.action_set_enabled("playlist.rename", editable);
+        // Linked to Spotify: only adding and removing songs for now.
+        let renamable = editable && !linked;
+        imp.name.set_editable(renamable);
+        imp.name
+            .set_tooltip_text(renamable.then(|| gettext("Rename")).as_deref());
+        imp.add_search.set_visible(editable);
+        self.action_set_enabled("playlist.rename", renamable);
         self.action_set_enabled("playlist.change-cover", !mirror);
         self.action_set_enabled("playlist.reset-cover", !mirror);
         self.action_set_enabled("playlist.publish", connected && !linked);
@@ -410,7 +412,10 @@ impl PlaylistPanel {
             .margin_top(6)
             .margin_bottom(6)
             .build();
-        if editable {
+        // Reordering Spotify playlists comes later; adding and removing
+        // work.
+        let reorderable = editable && !linked;
+        if reorderable {
             line.append(
                 &gtk::Image::builder()
                     .icon_name("list-drag-handle-symbolic")
@@ -487,16 +492,17 @@ impl PlaylistPanel {
         let row = gtk::ListBoxRow::builder().child(&content).build();
         let remote = GatefoldApplication::get().player().is_remote() && linked;
         if track.is_none() && !(remote && entry.spotify_uri.is_some()) {
-            // Not in the library: shown, but can't play here.
+            // Not in the library: shown, but can't play here. Spotify songs
+            // say how to play them when clicked.
             line.add_css_class("unavailable");
-            row.set_activatable(false);
             if entry.spotify_uri.is_none() {
+                row.set_activatable(false);
                 row.set_tooltip_text(Some(&gettext("This song isn't in your library")));
             }
         }
 
         // Drag and drop to reorder, animated.
-        if editable {
+        if reorderable {
             super::reorder::attach(&row, entry.position, move |from, to| {
                 GatefoldApplication::get()
                     .library()
@@ -504,6 +510,27 @@ impl PlaylistPanel {
             });
         }
         row
+    }
+
+    /// A row was clicked: plays from it, or says how a Spotify-only song
+    /// can play.
+    fn activate_entry(&self, index: usize) {
+        let only_on_spotify = self
+            .imp()
+            .entries
+            .borrow()
+            .get(index)
+            .is_some_and(|e| e.track.is_none() && e.spotify_uri.is_some());
+        if only_on_spotify && !GatefoldApplication::get().player().is_remote() {
+            GatefoldApplication::get().library().emit_by_name::<()>(
+                "message",
+                &[&gettext(
+                    "This song is only on Spotify; choose a device under Play On… to play it there",
+                )],
+            );
+            return;
+        }
+        self.play(Some(index), false);
     }
 
     /// Plays the entries that are in the library, from `start` (a row).

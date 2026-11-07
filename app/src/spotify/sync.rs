@@ -29,7 +29,9 @@ const RETRY_DELAY_S: u32 = 60;
 /// "Not on Spotify" is believed for this long, then searched again.
 const NOT_FOUND_TTL_S: i64 = 30 * 24 * 3600;
 /// Pause between searches, to stay below Spotify's rate limit.
-const SEARCH_PAUSE: Duration = Duration::from_millis(120);
+const SEARCH_PAUSE: Duration = Duration::from_millis(250);
+/// A search waits this long at most when Spotify asks to wait.
+const MAX_SEARCH_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct SyncState {
@@ -324,6 +326,30 @@ impl Spotify {
         ));
     }
 
+    /// Searches failed for a temporary reason: try the playlist again later.
+    fn retry_resolve_later(&self, id: i64) {
+        glib::timeout_add_seconds_local_once(
+            RETRY_DELAY_S,
+            glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                move || spotify.resolve_soon(id, false)
+            ),
+        );
+    }
+
+    /// Reading playlists stopped (offline, too many requests): try again.
+    fn retry_later_full(&self) {
+        glib::timeout_add_seconds_local_once(
+            RETRY_DELAY_S,
+            glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                move || spotify.sync_soon()
+            ),
+        );
+    }
+
     fn retry_later(&self) {
         let mut state = self.imp().sync.borrow_mut();
         if state.retry_timer.is_some() {
@@ -390,7 +416,9 @@ impl Spotify {
                         keep.push(summary.id.clone());
                         let stale = existing
                             .is_none_or(|p| p.snapshot_id.as_deref() != Some(&summary.snapshot_id));
-                        if info.readable && stale {
+                        // Spotify refused before: don't ask again.
+                        let readable = existing.map_or(info.readable, |p| p.readable || editable);
+                        if readable && stale {
                             to_read.push((id, summary.id.clone(), summary.snapshot_id.clone()));
                         }
                     }
@@ -403,13 +431,30 @@ impl Spotify {
         }
         library.reload_playlists();
         for (id, spotify_id, snapshot) in to_read {
-            if let Err(err) = self
-                .read_items(id, &spotify_id, Some(snapshot), false)
+            match self
+                .read_items(id, &spotify_id, Some(snapshot.clone()), false)
                 .await
             {
-                tracing::warn!("Cannot read a Spotify playlist: {err}");
+                Ok(_) => {}
+                // Development Mode: only own and collaborative playlists
+                // show their entries (§9.5).
+                Err(Error::Status { status: 403, .. }) => {
+                    tracing::info!("Spotify doesn't show the songs of playlist {spotify_id}");
+                    if let Some(mut db) = library.db() {
+                        let _ = db.mark_unreadable(id, &snapshot);
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("Cannot read a Spotify playlist: {err}");
+                    // Too many requests or offline: the rest waits.
+                    if err.is_temporary() {
+                        self.retry_later_full();
+                        break;
+                    }
+                }
             }
         }
+        library.reload_playlists();
         self.load_covers().await;
         let editable: Vec<i64> = library
             .db()
@@ -667,17 +712,28 @@ impl Spotify {
 
     /// The Spotify version of a library song: from the cache, another
     /// playlist, or a search (ISRC first, then title and artist).
-    pub async fn find_version(&self, track_id: i64) -> Option<SpotifyVersion> {
+    /// An error means Spotify couldn't be asked (offline, too many
+    /// requests); nothing is remembered then, so it's tried again later.
+    pub async fn find_version(&self, track_id: i64) -> gatefold_spotify::Result<SpotifyVersion> {
         let library = GatefoldApplication::get().library();
+        let not_found = || SpotifyVersion {
+            uri: None,
+            confidence: None,
+            title: None,
+            artist: None,
+            checked: now(),
+        };
         {
-            let db = library.db()?;
+            let Some(db) = library.db() else {
+                return Ok(not_found());
+            };
             if let Some(version) = db.spotify_version(track_id).ok().flatten()
                 && (version.uri.is_some() || now() - version.checked < NOT_FOUND_TTL_S)
             {
-                return Some(version);
+                return Ok(version);
             }
             if let Some(uri) = db.known_uri(track_id).ok().flatten() {
-                return Some(SpotifyVersion {
+                return Ok(SpotifyVersion {
                     uri: Some(uri),
                     confidence: Some(Confidence::Sure),
                     title: None,
@@ -686,7 +742,9 @@ impl Spotify {
                 });
             }
         }
-        let track = library.tracks(&[track_id]).remove(&track_id)?;
+        let Some(track) = library.tracks(&[track_id]).remove(&track_id) else {
+            return Ok(not_found());
+        };
         let local = local_track(&track);
         let isrc = local.isrc.clone();
         let query = format!(
@@ -702,15 +760,26 @@ impl Spotify {
                     .unwrap_or_else(|| a.to_owned()))
                 .unwrap_or_default()
         );
+        let title = local.title.clone();
         let results = self
             .call(move |client| {
+                // Too many requests: wait as long as Spotify asks (on this
+                // worker thread), once.
+                let search = |query: &str, limit: u32| match client.search_tracks(query, limit) {
+                    Err(Error::RateLimited(wait)) if wait <= MAX_SEARCH_WAIT => {
+                        tracing::info!("Spotify asks to wait {wait:?} before searching");
+                        std::thread::sleep(wait);
+                        client.search_tracks(query, limit)
+                    }
+                    result => result,
+                };
                 let mut results = Vec::new();
                 if let Some(isrc) = isrc {
-                    results.extend(client.search_tracks(&format!("isrc:{isrc}"), 5)?);
+                    results.extend(search(&format!("isrc:{isrc}"), 5)?);
                     std::thread::sleep(SEARCH_PAUSE);
                 }
                 if results.is_empty() {
-                    results.extend(client.search_tracks(&query, 10)?);
+                    results.extend(search(&query, 10)?);
                     std::thread::sleep(SEARCH_PAUSE);
                 }
                 Ok(results)
@@ -719,10 +788,11 @@ impl Spotify {
         let results = match results {
             Ok(results) => results,
             Err(err) => {
-                tracing::info!("Cannot search Spotify: {err}");
-                return None;
+                tracing::warn!("Cannot search Spotify for “{title}”: {err}");
+                return Err(err);
             }
         };
+        tracing::debug!("Spotify search for “{title}”: {} results", results.len());
         let aliases = library.aliases().clone();
         let best = results
             .iter()
@@ -747,7 +817,7 @@ impl Spotify {
         if let Some(mut db) = library.db() {
             let _ = db.set_spotify_version(track_id, &version);
         }
-        Some(version)
+        Ok(version)
     }
 
     /// Library songs in a linked playlist get their Spotify version: sure
@@ -761,9 +831,15 @@ impl Spotify {
             .unwrap_or_default();
         let mut added = 0;
         let mut missing = 0;
+        let mut failed = None;
         for (item, track) in entries {
-            let Some(version) = self.find_version(track).await else {
-                continue;
+            let version = match self.find_version(track).await {
+                Ok(version) => version,
+                Err(err) => {
+                    // Spotify can't be asked now: the rest waits too.
+                    failed = Some(err);
+                    break;
+                }
             };
             let Some(mut db) = library.db() else { break };
             match (version.uri, version.confidence) {
@@ -795,7 +871,14 @@ impl Spotify {
         if added > 0 {
             self.changes_queued();
         }
-        if announce && missing > 0 {
+        if let Some(err) = failed {
+            if announce {
+                self.message(&search_error(&err));
+            }
+            if err.is_temporary() {
+                self.retry_resolve_later(id);
+            }
+        } else if announce && missing > 0 {
             self.message(
                 &ngettext(
                     "{} song isn't on Spotify; it stays in Gatefold only",
@@ -825,20 +908,30 @@ impl Spotify {
         let mut sure = Vec::new();
         let mut likely = Vec::new();
         let mut missing = Vec::new();
+        let mut unchecked = Vec::new();
+        let mut failure = None;
         for (item, track) in &entries {
+            if failure.is_some() {
+                unchecked.push(*track);
+                continue;
+            }
             match self.find_version(*track).await {
-                Some(SpotifyVersion {
+                Ok(SpotifyVersion {
                     uri: Some(uri),
                     confidence: Some(Confidence::Sure),
                     ..
                 }) => sure.push((*item, uri)),
-                Some(SpotifyVersion {
+                Ok(SpotifyVersion {
                     uri: Some(uri),
                     title,
                     artist,
                     ..
                 }) => likely.push((*item, *track, uri, title, artist)),
-                _ => missing.push(*track),
+                Ok(_) => missing.push(*track),
+                Err(err) => {
+                    unchecked.push(*track);
+                    failure = Some(err);
+                }
             }
         }
         self.set_syncing(self.imp().sync.borrow().running);
@@ -908,6 +1001,31 @@ impl Spotify {
                 row.add_prefix(&check);
                 list.append(&row);
                 checks.push(check);
+            }
+            content.append(&list);
+        }
+        if let Some(err) = &failure {
+            content.append(&small_heading(&gettext("Not Checked Yet")));
+            content.append(
+                &gtk::Label::builder()
+                    .label(format!(
+                        "{} {}",
+                        search_error(err),
+                        gettext("These songs stay in Gatefold for now and are added on Spotify once they're found.")
+                    ))
+                    .wrap(true)
+                    .xalign(0.0)
+                    .css_classes(["dim-label", "caption"])
+                    .build(),
+            );
+            let list = boxed_list();
+            for track in &unchecked {
+                list.append(
+                    &adw::ActionRow::builder()
+                        .use_markup(false)
+                        .title(title_of(*track))
+                        .build(),
+                );
             }
             content.append(&list);
         }
@@ -986,6 +1104,17 @@ impl Spotify {
         state.flush = true;
         drop(state);
         self.run_jobs();
+    }
+}
+
+/// Why Spotify couldn't be searched, for the user.
+pub fn search_error(err: &Error) -> String {
+    match err {
+        Error::RateLimited(_) => {
+            gettext("Spotify is busy (too many requests); Gatefold tries again later.")
+        }
+        Error::Http(_) => gettext("Spotify can't be reached; Gatefold tries again later."),
+        _ => gettext("Spotify couldn't be searched."),
     }
 }
 
