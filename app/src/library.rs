@@ -600,6 +600,7 @@ impl Library {
         let due = match meta.lookup_state.as_deref() {
             None => true,
             Some("offline") => online,
+            Some("spotify-later") => online && age > metadata::SPOTIFY_LATER,
             // Done before Spotify and Deezer had portraits: again, once.
             Some("done") => {
                 age > metadata::REFRESH_DONE

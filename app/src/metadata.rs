@@ -27,6 +27,10 @@ pub const REFRESH_FAILED: i64 = 7 * 24 * 3600;
 /// (2026-11-08) are done again, for their better portraits.
 pub const PORTRAIT_SOURCES_SINCE: i64 = 1_794_096_000;
 
+/// A lookup whose Spotify part couldn't be done (too many requests,
+/// offline) is repeated after this long.
+pub const SPOTIFY_LATER: i64 = 24 * 3600;
+
 /// The Spotify account, for portraits (`None`: not connected, or turned
 /// off in Preferences).
 pub type SpotifyClient = Option<Arc<gatefold_spotify::Client>>;
@@ -257,12 +261,22 @@ impl Worker {
                         .spotify_id
                         .clone()
                         .or(artist.meta.spotify_id.clone());
-                    if let Some(client) = spotify
-                        && let Some((id, candidate)) =
-                            self.spotify_portrait(client, known.as_deref(), &artist.name)
-                    {
-                        info.links.spotify_id.get_or_insert(id);
-                        info.portraits.insert(0, candidate);
+                    if let Some(client) = spotify {
+                        match self.spotify_portrait(client, known.as_deref(), &artist.name) {
+                            Ok(Some((id, candidate))) => {
+                                info.links.spotify_id.get_or_insert(id);
+                                info.portraits.insert(0, candidate);
+                            }
+                            Ok(None) => {}
+                            // Too many requests, offline: done otherwise,
+                            // Spotify is asked again in a day (see
+                            // SPOTIFY_LATER).
+                            Err(()) => {
+                                if meta.lookup_state.as_deref() == Some("done") {
+                                    meta.lookup_state = Some("spotify-later".into());
+                                }
+                            }
+                        }
                     }
                     meta.wikidata_id = info.links.wikidata_id;
                     meta.spotify_id = info.links.spotify_id;
@@ -342,7 +356,7 @@ impl Worker {
         };
         let mut candidates = Vec::new();
         if let Some(client) = spotify
-            && let Some((_, candidate)) =
+            && let Ok(Some((_, candidate))) =
                 self.spotify_portrait(client, artist.meta.spotify_id.as_deref(), &artist.name)
         {
             candidates.push(candidate);
@@ -366,26 +380,32 @@ impl Worker {
 
     /// The artist's picture on Spotify, with their Spotify ID: by `known`
     /// ID (from Wikidata, or stored for followed artists), else the
-    /// search result of exactly that name.
+    /// search result of exactly that name. `Err` when Spotify couldn't be
+    /// asked for now (too many requests, offline), to try again later.
     fn spotify_portrait(
         &self,
         client: &gatefold_spotify::Client,
         known: Option<&str>,
         name: &str,
-    ) -> Option<(String, PortraitCandidate)> {
+    ) -> Result<Option<(String, PortraitCandidate)>, ()> {
+        let failed = |what: &str, err: gatefold_spotify::Error| {
+            tracing::info!("Spotify {what}: {err}");
+            if err.is_temporary() {
+                Err(())
+            } else {
+                Ok(None)
+            }
+        };
         let found = match known {
             // Followed artists are stored with their picture.
             Some(id) => match self.db.spotify_artist(id).ok().flatten() {
                 Some(stored) if stored.image_url.is_some() => {
                     Some((id.to_owned(), stored.image_url))
                 }
-                _ => client
-                    .artist(id)
-                    .map(|a| Some((a.id, a.image_url)))
-                    .unwrap_or_else(|err| {
-                        tracing::info!("Spotify artist {id}: {err}");
-                        None
-                    }),
+                _ => match client.artist(id) {
+                    Ok(artist) => Some((artist.id, artist.image_url)),
+                    Err(err) => return failed(&format!("artist {id}"), err),
+                },
             },
             None => {
                 let wanted = name.trim().to_lowercase();
@@ -394,22 +414,20 @@ impl Worker {
                         .into_iter()
                         .find(|a| a.name.trim().to_lowercase() == wanted)
                         .map(|a| (a.id, a.image_url)),
-                    Err(err) => {
-                        tracing::info!("Spotify search for the artist {name}: {err}");
-                        None
-                    }
+                    Err(err) => return failed(&format!("search for the artist {name}"), err),
                 }
             }
         };
-        let (id, url) = found?;
-        Some((
-            id,
-            PortraitCandidate {
-                url: url?,
-                source: "spotify",
-                attribution: Some("Spotify".to_owned()),
-            },
-        ))
+        Ok(found.and_then(|(id, url)| {
+            Some((
+                id,
+                PortraitCandidate {
+                    url: url?,
+                    source: "spotify",
+                    attribution: Some("Spotify".to_owned()),
+                },
+            ))
+        }))
     }
 
     fn set_custom(&mut self, artist_id: i64, data: Vec<u8>) -> Result<(), String> {
