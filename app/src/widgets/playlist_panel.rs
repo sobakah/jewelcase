@@ -44,6 +44,13 @@ mod imp {
         pub items: TemplateChild<gtk::ListBox>,
         pub playlist: RefCell<Option<PlaylistObject>>,
         pub entries: RefCell<Vec<PlaylistItem>>,
+        /// Rows are built a batch per idle moment (playlists can have
+        /// thousands of songs); a newer refresh stops an older fill.
+        pub fill_generation: std::cell::Cell<u64>,
+        /// Covers of Spotify-only songs, by image URL, filled in as they
+        /// download.
+        pub spotify_covers:
+            RefCell<std::collections::HashMap<String, Vec<glib::WeakRef<CoverImage>>>>,
     }
 
     #[glib::object_subclass]
@@ -217,9 +224,16 @@ impl PlaylistPanel {
             .into_iter()
             .collect();
         let panel = self.downgrade();
-        crate::spotify::fetch_covers(urls, move || {
-            if let Some(panel) = panel.upgrade() {
-                panel.refresh();
+        crate::spotify::fetch_covers_in_batches(urls, move |done| {
+            let Some(panel) = panel.upgrade() else { return };
+            let covers = panel.imp().spotify_covers.borrow();
+            for url in done {
+                let key = crate::spotify::image_cover_key(&url);
+                for cover in covers.get(&url).into_iter().flatten() {
+                    if let Some(cover) = cover.upgrade() {
+                        cover.set_cover(Some(&key));
+                    }
+                }
             }
         });
     }
@@ -373,11 +387,44 @@ impl PlaylistPanel {
         imp.hidden.set_visible(hidden);
         imp.empty.set_visible(entries.is_empty() && !hidden);
         imp.items.set_visible(!entries.is_empty());
+        // Unchanged (another playlist changed, a sync): keep the rows.
+        let same = *imp.entries.borrow() == entries && imp.items.first_child().is_some();
+        if same {
+            return;
+        }
         imp.items.remove_all();
-        for entry in &entries {
+        imp.spotify_covers.borrow_mut().clear();
+        imp.entries.replace(entries.clone());
+        let generation = imp.fill_generation.get() + 1;
+        imp.fill_generation.set(generation);
+        self.fill_rows(playlist, entries, 0, generation);
+    }
+
+    /// Appends rows from `from`, a batch now and the rest in later idle
+    /// moments, so a big playlist doesn't freeze the window.
+    fn fill_rows(
+        &self,
+        playlist: PlaylistObject,
+        entries: Vec<PlaylistItem>,
+        from: usize,
+        generation: u64,
+    ) {
+        const BATCH: usize = 60;
+        let imp = self.imp();
+        if imp.fill_generation.get() != generation {
+            return;
+        }
+        let end = (from + BATCH).min(entries.len());
+        for entry in &entries[from..end] {
             imp.items.append(&self.row(&playlist, entry));
         }
-        imp.entries.replace(entries);
+        if end < entries.len() {
+            glib::idle_add_local_once(glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                move || panel.fill_rows(playlist, entries, end, generation)
+            ));
+        }
     }
 
     fn row(&self, playlist: &PlaylistObject, entry: &PlaylistItem) -> gtk::ListBoxRow {
@@ -395,6 +442,16 @@ impl PlaylistPanel {
             .image_url
             .as_deref()
             .map(crate::spotify::image_cover_key);
+        if track.is_none()
+            && let Some(url) = &entry.image_url
+        {
+            self.imp()
+                .spotify_covers
+                .borrow_mut()
+                .entry(url.clone())
+                .or_default()
+                .push(cover.downgrade());
+        }
         cover.set_cover(
             track
                 .as_ref()

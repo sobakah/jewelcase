@@ -39,6 +39,11 @@ fn load(kind: Kind, key: &str, size: CoverSize) -> Option<gdk::Texture> {
         return Some(texture);
     }
     let path = path(kind, key, size);
+    // Not downloaded yet (Spotify covers): not an error, and quiet — big
+    // playlists ask for hundreds at once.
+    if !path.is_file() {
+        return None;
+    }
     let texture = match gdk::Texture::from_filename(&path) {
         Ok(texture) => texture,
         Err(err) => {

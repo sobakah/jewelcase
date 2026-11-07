@@ -65,6 +65,39 @@ pub fn image_cover_key(url: &str) -> String {
     gatefold_core::library::covers::cover_key('s', url.as_bytes())
 }
 
+/// Downloads Spotify images in batches; `done` gets each batch's URLs
+/// (downloaded or already there) as it finishes, on the main thread.
+pub fn fetch_covers_in_batches(urls: Vec<String>, done: impl Fn(Vec<String>) + 'static) {
+    const BATCH: usize = 24;
+    if urls.is_empty() {
+        return;
+    }
+    gtk::glib::spawn_future_local(async move {
+        for chunk in urls.chunks(BATCH) {
+            let chunk = chunk.to_vec();
+            let ready = gtk::gio::spawn_blocking(move || {
+                let covers =
+                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                chunk
+                    .into_iter()
+                    .filter(|url| {
+                        let key = image_cover_key(url);
+                        covers.has(&key)
+                            || gatefold_spotify::download_image(url)
+                                .ok()
+                                .is_some_and(|data| covers.generate(&key, data).is_ok())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
+            if !ready.is_empty() {
+                done(ready);
+            }
+        }
+    });
+}
+
 /// Downloads Spotify images into the cover cache (skipping cached ones);
 /// `done` runs on the main thread when any arrived.
 pub fn fetch_covers(urls: Vec<String>, done: impl FnOnce() + 'static) {

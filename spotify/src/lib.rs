@@ -210,7 +210,7 @@ impl Client {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<Option<Value>> {
-        let url = if path.starts_with("https://") {
+        let url = if path.starts_with("https://") || path.starts_with("http://") {
             path.to_owned()
         } else {
             format!("{}{path}", api_base())
