@@ -18,6 +18,7 @@ use gtk::{gio, glib};
 use crate::config::APP_ID;
 use crate::library::Library;
 use crate::objects::{QueueEntry, TrackObject};
+use crate::spotify::RemoteCommand;
 
 /// How often the position is updated while playing (lyrics follow it).
 const TICK: Duration = Duration::from_millis(150);
@@ -28,6 +29,9 @@ const HISTORY_MIN_MS: u64 = 30_000;
 
 /// "Previous" restarts the track instead when it has played this long.
 const RESTART_THRESHOLD_MS: u64 = 3000;
+
+/// Takes the controls' commands in remote mode.
+type RemoteHandler = Box<dyn Fn(RemoteCommand)>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum State {
@@ -58,6 +62,16 @@ mod imp {
         /// "off", "all" or "one".
         #[property(get)]
         pub repeat: RefCell<String>,
+        /// The Spotify device being controlled (remote mode, §9.3).
+        #[property(get, nullable)]
+        pub remote_device: RefCell<Option<String>>,
+        /// Where transport commands go in remote mode.
+        pub remote: RefCell<Option<RemoteHandler>>,
+        /// The local position, kept while remote.
+        pub local_position: Cell<u64>,
+        /// Remote position and when it was reported, to move it along.
+        pub remote_clock: Cell<Option<(std::time::Instant, u64)>>,
+        pub remote_tick: RefCell<Option<glib::SourceId>>,
 
         pub engine: OnceCell<playback::Player>,
         pub library: OnceCell<Library>,
@@ -295,6 +309,13 @@ impl Player {
                 current.is_some_and(|c| c + 1 < queue.items().len()),
             )
         };
+        if self.is_remote() {
+            for name in ["play-pause", "next", "previous"] {
+                self.set_action_enabled(name, true);
+            }
+            self.set_action_enabled("clear-queue", has_upcoming);
+            return;
+        }
         let has_engine = self.engine().is_some();
         self.set_action_enabled("play-pause", has_engine && has_current);
         self.set_action_enabled("next", has_engine && has_next);
@@ -509,6 +530,9 @@ impl Player {
     // Transport --------------------------------------------------------------
 
     pub fn play_pause(&self) {
+        if self.forward(RemoteCommand::PlayPause) {
+            return;
+        }
         let Some(engine) = self.engine() else { return };
         match self.imp().state.get() {
             State::Playing => {
@@ -544,6 +568,9 @@ impl Player {
     }
 
     pub fn next(&self) {
+        if self.forward(RemoteCommand::Next) {
+            return;
+        }
         let advanced = self.imp().queue.borrow_mut().advance(false).is_some();
         if advanced {
             self.load_current(self.imp().state.get() == State::Playing, 0);
@@ -552,6 +579,9 @@ impl Player {
     }
 
     pub fn previous(&self) {
+        if self.forward(RemoteCommand::Previous) {
+            return;
+        }
         if self.position() > RESTART_THRESHOLD_MS {
             self.seek(0);
             return;
@@ -567,6 +597,14 @@ impl Player {
 
     pub fn seek(&self, ms: u64) {
         let ms = ms.min(self.duration());
+        if self.forward(RemoteCommand::Seek(ms)) {
+            self.imp()
+                .remote_clock
+                .set(Some((std::time::Instant::now(), ms)));
+            self.set_position(ms);
+            self.emit_by_name::<()>("seeked", &[]);
+            return;
+        }
         if let Some(engine) = self.engine()
             && self.imp().state.get() != State::Stopped
         {
@@ -578,6 +616,9 @@ impl Player {
     }
 
     pub fn set_shuffle(&self, shuffle: bool) {
+        if self.forward(RemoteCommand::Shuffle(shuffle)) {
+            return;
+        }
         // "Shuffle albums" (§7): albums in random order, each in order.
         let albums = self.settings().boolean("shuffle-albums");
         let album_of = |id: i64| self.track(id).and_then(|t| t.track().album_id);
@@ -593,12 +634,19 @@ impl Player {
     }
 
     pub fn set_repeat(&self, repeat: RepeatMode) {
+        if self.forward(RemoteCommand::Repeat(repeat)) {
+            return;
+        }
         self.imp().queue.borrow_mut().set_repeat(repeat);
         self.queue_changed();
     }
 
     fn cycle_repeat(&self) {
-        let repeat = self.imp().queue.borrow().repeat().cycle();
+        let repeat = if self.is_remote() {
+            RepeatMode::from_str_lossy(&self.repeat()).cycle()
+        } else {
+            self.imp().queue.borrow().repeat().cycle()
+        };
         self.set_repeat(repeat);
     }
 
@@ -607,16 +655,190 @@ impl Player {
     }
 
     pub fn set_volume(&self, volume: f64) {
+        if self.forward(RemoteCommand::Volume(volume.clamp(0.0, 1.0))) {
+            return;
+        }
         if let Some(engine) = self.engine() {
             engine.set_volume(volume);
         }
         let _ = self.settings().set_double("volume", volume.clamp(0.0, 1.0));
     }
 
+    // Remote mode (§9.3) ------------------------------------------------
+
+    pub fn is_remote(&self) -> bool {
+        self.imp().remote.borrow().is_some()
+    }
+
+    /// Sends a command to the remote device; false when playing here.
+    fn forward(&self, command: RemoteCommand) -> bool {
+        match self.imp().remote.borrow().as_ref() {
+            Some(handler) => {
+                handler(command);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Hands the controls to a Spotify device. Local playback pauses.
+    pub fn enter_remote(&self, device: &str, handler: impl Fn(RemoteCommand) + 'static) {
+        let imp = self.imp();
+        if !self.is_remote() {
+            if imp.state.get() == State::Playing
+                && let Some(engine) = self.engine()
+            {
+                engine.pause();
+                self.set_state(State::Paused);
+            }
+            imp.local_position.set(self.position());
+            self.save();
+        }
+        imp.remote.replace(Some(Box::new(handler)));
+        self.set_remote_device(Some(device));
+        self.update_actions();
+    }
+
+    pub fn set_remote_device(&self, device: Option<&str>) {
+        let imp = self.imp();
+        if imp.remote_device.borrow().as_deref() != device {
+            imp.remote_device.replace(device.map(str::to_owned));
+            self.notify_remote_device();
+        }
+    }
+
+    /// Shows what the remote device plays.
+    pub fn show_remote(
+        &self,
+        track: Option<TrackObject>,
+        playing: bool,
+        position: u64,
+        shuffle: bool,
+        repeat: RepeatMode,
+    ) {
+        let imp = self.imp();
+        if !self.is_remote() {
+            return;
+        }
+        let changed = imp.current_track.borrow().as_ref().map(TrackObject::id)
+            != track.as_ref().map(TrackObject::id);
+        let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
+        imp.current_track.replace(track);
+        if imp.duration.replace(duration) != duration {
+            self.notify_duration();
+        }
+        if changed {
+            self.notify_current_track();
+        }
+        imp.remote_clock
+            .set(playing.then(|| (std::time::Instant::now(), position)));
+        self.set_position(position);
+        if changed {
+            self.emit_by_name::<()>("seeked", &[]);
+        }
+        if imp.playing.replace(playing) != playing {
+            self.notify_playing();
+        }
+        self.show_shuffle_repeat(shuffle, repeat);
+        // Move the position along between reports (lyrics follow it).
+        if playing && imp.remote_tick.borrow().is_none() {
+            let source = glib::timeout_add_local(
+                TICK,
+                glib::clone!(
+                    #[weak(rename_to = player)]
+                    self,
+                    #[upgrade_or]
+                    glib::ControlFlow::Break,
+                    move || {
+                        if let Some((at, ms)) = player.imp().remote_clock.get() {
+                            let now = ms + at.elapsed().as_millis() as u64;
+                            player.set_position(now.min(player.duration()));
+                        }
+                        glib::ControlFlow::Continue
+                    }
+                ),
+            );
+            imp.remote_tick.replace(Some(source));
+        } else if !playing && let Some(source) = imp.remote_tick.take() {
+            source.remove();
+        }
+    }
+
+    /// Shows shuffle and repeat (the queue's, or the remote device's).
+    fn show_shuffle_repeat(&self, shuffle: bool, repeat: RepeatMode) {
+        let imp = self.imp();
+        if imp.shuffle.replace(shuffle) != shuffle {
+            self.notify_shuffle();
+        }
+        if let Some(action) = imp
+            .actions
+            .lookup_action("shuffle")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            action.set_state(&shuffle.to_variant());
+        }
+        if *imp.repeat.borrow() != repeat.as_str() {
+            imp.repeat.replace(repeat.as_str().to_owned());
+            self.notify_repeat();
+        }
+    }
+
+    /// Back to playing here, paused where the local queue was.
+    pub fn leave_remote(&self) {
+        let imp = self.imp();
+        if imp.remote.take().is_none() {
+            return;
+        }
+        if let Some(source) = imp.remote_tick.take() {
+            source.remove();
+        }
+        imp.remote_clock.set(None);
+        self.set_remote_device(None);
+        let current = imp.queue.borrow().current().copied();
+        let track = current.and_then(|item| self.track(item.track_id));
+        let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
+        imp.current_track.replace(track);
+        imp.duration.replace(duration);
+        self.notify_duration();
+        self.notify_current_track();
+        self.set_position(imp.local_position.get());
+        self.emit_by_name::<()>("seeked", &[]);
+        self.set_state(if imp.state.get() == State::Stopped {
+            State::Stopped
+        } else {
+            State::Paused
+        });
+        if imp.playing.replace(false) {
+            self.notify_playing();
+        }
+        self.queue_changed();
+    }
+
+    /// The current track and up to `limit` after it (remote hand-over).
+    pub fn upcoming_track_ids(&self, limit: usize) -> Vec<i64> {
+        let queue = self.imp().queue.borrow();
+        let start = queue.current_index().unwrap_or(0);
+        queue
+            .items()
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(|i| i.track_id)
+            .collect()
+    }
+
     // Internals --------------------------------------------------------------
 
     /// Loads the queue's current track into GStreamer.
     fn load_current(&self, play: bool, start_ms: u64) {
+        // Playing something here ends remote mode (the device pauses).
+        if self.is_remote() {
+            self.forward(RemoteCommand::Pause);
+            self.leave_remote();
+            if play {
+                self.emit_by_name::<()>("message", &[&gettext("Playing on this computer")]);
+            }
+        }
         let imp = self.imp();
         imp.pending_next.set(None);
         let current = imp.queue.borrow().current().copied();
@@ -916,21 +1138,11 @@ impl Player {
         let model = self.queue_model();
         model.splice(0, model.n_items(), &objects);
 
-        if imp.shuffle.replace(shuffle) != shuffle {
-            self.notify_shuffle();
-        }
-        // set_state(), not change_action_state(): the latter would call
-        // back into set_shuffle().
-        if let Some(action) = imp
-            .actions
-            .lookup_action("shuffle")
-            .and_downcast::<gio::SimpleAction>()
-        {
-            action.set_state(&shuffle.to_variant());
-        }
-        if *imp.repeat.borrow() != repeat {
-            imp.repeat.replace(repeat.to_owned());
-            self.notify_repeat();
+        // In remote mode, shuffle and repeat show the device's.
+        if !self.is_remote() {
+            // set_state(), not change_action_state() (inside): the latter
+            // would call back into set_shuffle().
+            self.show_shuffle_repeat(shuffle, RepeatMode::from_str_lossy(repeat));
         }
         self.update_next();
         self.update_actions();

@@ -161,6 +161,7 @@ mod imp {
                 .build();
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();
+            obj.add(&crate::spotify::preferences::page());
         }
     }
 

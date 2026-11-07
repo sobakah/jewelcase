@@ -150,6 +150,37 @@ impl Title {
     }
 }
 
+/// A title for a search query: without brackets, " - …" suffixes,
+/// featured artists and quotes ("Wildflower (with youjeen)" → "Wildflower").
+pub fn search_title(title: &str) -> String {
+    let mut rest = title.to_owned();
+    while let Some(open) = rest.find(['(', '[']) {
+        let Some(close) = rest[open..].find([')', ']']).map(|c| open + c) else {
+            break;
+        };
+        rest.replace_range(open..=close, " ");
+    }
+    if let Some(dash) = rest.find(" - ") {
+        rest.truncate(dash);
+    }
+    let lower = rest.to_lowercase();
+    if lower.len() == rest.len() {
+        for marker in [" feat. ", " feat ", " ft. ", " featuring "] {
+            if let Some(at) = lower.find(marker) {
+                rest.truncate(at);
+                break;
+            }
+        }
+    }
+    let cleaned: String = rest.chars().filter(|c| *c != '"').collect();
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        title.replace('"', "")
+    } else {
+        cleaned
+    }
+}
+
 /// What a bracket or suffix says about the version; `None` for things
 /// that don't change the recording (credits, remasters, subtitles).
 fn version_note(extra: &str) -> Option<String> {
@@ -391,6 +422,14 @@ mod tests {
             ),
             Some(Confidence::Sure)
         );
+    }
+
+    #[test]
+    fn search_titles_are_plain() {
+        assert_eq!(search_title("Wildflower (with youjeen)"), "Wildflower");
+        assert_eq!(search_title("Dynamite - Tropical Remix"), "Dynamite");
+        assert_eq!(search_title("Song feat. X"), "Song");
+        assert_eq!(search_title("(Intro)"), "(Intro)");
     }
 
     #[test]

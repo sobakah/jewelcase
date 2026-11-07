@@ -5,7 +5,7 @@ members = ["app", "core", "lyrics", "metadata", "spotify", "tools"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/sobakah/gatefold"
 
@@ -35,6 +35,8 @@ lofty = "0.25"
 mpris-server = "0.10"
 quick-xml = "0.38"
 notify = "8"
+# Spotify tokens in the keyring (CONCEPT.md §9.3); async-io, not tokio.
+oo7 = { version = "0.7", default-features = false, features = ["async-std", "native_crypto"] }
 rand = "0.9"
 rusqlite = "0.37"
 rusqlite_migration = "2"

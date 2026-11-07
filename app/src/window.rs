@@ -949,6 +949,7 @@ impl GatefoldWindow {
             app.library().upcast::<glib::Object>(),
             app.player().upcast(),
             app.tools().upcast(),
+            app.spotify().upcast(),
         ] {
             source.connect_local(
                 "message",
@@ -1254,6 +1255,115 @@ impl GatefoldWindow {
                         }
                         Err(err) => tracing::warn!("Import failed: {err}"),
                     }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_SPOTIFY=1`: connect (with the stand-in
+            // server of GATEFOLD_SPOTIFY_TEST_SERVER).
+            if std::env::var_os("GATEFOLD_SCREENSHOT_SPOTIFY").is_some() {
+                let spotify = GatefoldApplication::get().spotify();
+                glib::spawn_future_local(async move { spotify.connect().await });
+            }
+            // `GATEFOLD_SCREENSHOT_PLAYLIST=name`: open it once it exists.
+            if let Ok(name) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST") {
+                let library = GatefoldApplication::get().library();
+                let open = glib::clone!(
+                    #[weak]
+                    window,
+                    #[upgrade_or]
+                    false,
+                    move || {
+                        let library = GatefoldApplication::get().library();
+                        let store = library.playlists();
+                        let found = (0..store.n_items())
+                            .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
+                            .find(|p| p.playlist().name == name);
+                        if let Some(playlist) = &found
+                            && window.imp().playlist_panel.playlist_id() != Some(playlist.id())
+                        {
+                            window.show_playlist(playlist);
+                        }
+                        found.is_some()
+                    }
+                );
+                if !open() {
+                    library.connect_local("playlists-changed", false, move |_| {
+                        open();
+                        None
+                    });
+                }
+            }
+            // `GATEFOLD_SCREENSHOT_EDITS="move:0:2 remove:1 add:Title
+            // rename:Name"`: edits of the open playlist, 3 s in.
+            if let Ok(edits) = std::env::var("GATEFOLD_SCREENSHOT_EDITS") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(3, move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let Some(id) = window.imp().playlist_panel.playlist_id() else {
+                        return;
+                    };
+                    let library = GatefoldApplication::get().library();
+                    for edit in edits.split_whitespace() {
+                        let parts: Vec<&str> = edit.split(':').collect();
+                        match parts.as_slice() {
+                            ["move", from, to] => library.move_playlist_item(
+                                id,
+                                from.parse().unwrap_or(0),
+                                to.parse().unwrap_or(0),
+                            ),
+                            ["remove", index] => {
+                                let items = library.playlist_items(id);
+                                if let Some(item) = items.get(index.parse::<usize>().unwrap_or(0)) {
+                                    library.remove_playlist_item(id, item.id);
+                                }
+                            }
+                            ["add", title] => {
+                                let title = title.replace('_', " ");
+                                let found = library.search(&title, 1).tracks;
+                                library.add_to_playlist(id, &found, false);
+                            }
+                            ["rename", name] => {
+                                library.rename_playlist(id, &name.replace('_', " "))
+                            }
+                            _ => tracing::warn!("Unknown edit {edit}"),
+                        }
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_PUBLISH=1`: "Create on Spotify" for the
+            // open playlist once connected, without asking.
+            if std::env::var_os("GATEFOLD_SCREENSHOT_PUBLISH").is_some() {
+                let spotify = GatefoldApplication::get().spotify();
+                let window = window.downgrade();
+                spotify.connect_status_notify(move |spotify| {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let panel = window.imp().playlist_panel.get();
+                    if spotify.is_connected()
+                        && let Some(id) = panel.playlist_id()
+                    {
+                        let spotify = spotify.clone();
+                        glib::spawn_future_local(async move { spotify.publish(id, &panel).await });
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_DEVICE=name`: play on that Spotify device
+            // once connected.
+            if let Ok(name) = std::env::var("GATEFOLD_SCREENSHOT_DEVICE") {
+                let spotify = GatefoldApplication::get().spotify();
+                spotify.connect_status_notify(move |spotify| {
+                    if !spotify.is_connected() {
+                        return;
+                    }
+                    let (spotify, name) = (spotify.clone(), name.clone());
+                    glib::spawn_future_local(async move {
+                        let devices = spotify.devices().await.unwrap_or_default();
+                        if let Some(device) = devices.into_iter().find(|d| d.name == name) {
+                            spotify.play_on(device).await;
+                        }
+                    });
                 });
             }
             // `GATEFOLD_SCREENSHOT_PREFS=integrations`: a Preferences page.

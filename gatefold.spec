@@ -23,7 +23,7 @@ Source1:        %{name}-%{version}-vendor.tar.xz
 ExclusiveArch:  %{rust_arches}
 
 BuildRequires:  cargo-rpm-macros >= 26
-BuildRequires:  rust >= 1.92
+BuildRequires:  rust >= 1.95
 BuildRequires:  cargo
 BuildRequires:  meson >= 1.4
 BuildRequires:  blueprint-compiler
@@ -97,3 +97,5 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Companion tools: lyrembed, cdimport, tag editor (phase 4)
 - Playlists, M3U8/XSPF import and export, search (phase 5)
 - Smart shuffle: song analysis, similar songs, album shuffle (phase 6)
+- Spotify account: Connect devices, playlists matched to the library,
+  two-way editing, "Create on Spotify" (phase 7)

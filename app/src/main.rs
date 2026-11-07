@@ -10,6 +10,7 @@ mod mpris;
 mod objects;
 mod player;
 mod preferences_dialog;
+mod spotify;
 mod theme;
 mod tools;
 mod widgets;

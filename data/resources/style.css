@@ -226,3 +226,8 @@
 .track-row:hover .row-action {
   opacity: 1;
 }
+
+/* Playlist entries that can't play here (not in the library, §9.5). */
+.boxed-list > row .unavailable {
+  opacity: 0.6;
+}

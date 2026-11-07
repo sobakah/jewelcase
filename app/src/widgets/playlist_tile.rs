@@ -1,6 +1,7 @@
 //! A tile in the playlist grid: cover (custom or a 2×2 mosaic), name and
 //! song count (CONCEPT.md §4.1).
 
+use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -80,7 +81,15 @@ impl PlaylistTile {
         let info = playlist.playlist();
         imp.cover.set_cover(playlist.cover_key().as_deref());
         imp.name.set_label(&info.name);
-        imp.count.set_label(&format::song_count(info.item_count));
+        imp.count
+            .set_label(&match (info.spotify_id.is_some(), info.readable) {
+                // Translators: a playlist tile, e.g. "Spotify · 12 songs".
+                (true, true) => {
+                    gettext("Spotify · {}").replace("{}", &format::song_count(info.item_count))
+                }
+                (true, false) => gettext("Spotify"),
+                _ => format::song_count(info.item_count),
+            });
         self.set_tooltip_text(Some(&info.name));
     }
 }

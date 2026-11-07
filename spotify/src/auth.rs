@@ -35,7 +35,11 @@ pub const SCOPES: &[&str] = &[
 ];
 
 const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
-pub(crate) const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
+const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
+
+pub(crate) fn token_url() -> String {
+    crate::test_server().map_or_else(|| TOKEN_URL.to_owned(), |s| format!("{s}/api/token"))
+}
 
 /// The secret half of a login.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +96,9 @@ pub fn authorize_url(client_id: &str, pkce: &Pkce) -> String {
         .iter()
         .map(|(k, v)| format!("{k}={}", encode(v)))
         .collect();
-    format!("{AUTHORIZE_URL}?{}", query.join("&"))
+    let base =
+        crate::test_server().map_or_else(|| AUTHORIZE_URL.to_owned(), |s| format!("{s}/authorize"));
+    format!("{base}?{}", query.join("&"))
 }
 
 /// Access and refresh token, as kept in the keyring.

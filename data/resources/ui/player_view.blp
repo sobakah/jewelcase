@@ -67,6 +67,22 @@ template $GatefoldPlayerView: Adw.Bin {
 
           // More about the song: format, bitrate, release, tags.
 
+          // Spotify Connect devices (CONCEPT.md §9.3).
+          [end]
+          Gtk.MenuButton devices_button {
+            icon-name: "preferences-system-devices-symbolic";
+            tooltip-text: _("Play On…");
+            direction: down;
+            visible: false;
+
+            popover: Gtk.Popover devices_popover {};
+
+            styles [
+              "flat",
+              "circular",
+            ]
+          }
+
           [end]
           Gtk.MenuButton info_button {
             icon-name: "info-outline-symbolic";
@@ -84,6 +100,12 @@ template $GatefoldPlayerView: Adw.Bin {
           styles [
             "flat",
           ]
+        }
+
+        // Remote mode: a Spotify device plays, these controls steer it.
+        [top]
+        Adw.Banner remote_banner {
+          button-label: _("Play _Here");
         }
 
         // The first layout ("wide") is the default.

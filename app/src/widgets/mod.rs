@@ -3,6 +3,7 @@ mod album_tile;
 mod artist_page;
 mod artist_tile;
 mod cover_image;
+mod device_popover;
 mod identify_dialog;
 mod lyrics_view;
 mod mini_player;

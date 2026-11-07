@@ -16,6 +16,20 @@ pub use auth::Tokens;
 pub use model::{Device, PlaybackState, PlaylistEntry, PlaylistSummary, Track, User};
 
 const API: &str = "https://api.spotify.com/v1";
+
+/// Development aid: debug builds talk to a local stand-in for Spotify
+/// when `GATEFOLD_SPOTIFY_TEST_SERVER` is set (e.g. `http://127.0.0.1:8975`).
+pub(crate) fn test_server() -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var("GATEFOLD_SPOTIFY_TEST_SERVER").ok()
+    } else {
+        None
+    }
+}
+
+fn api_base() -> String {
+    test_server().map_or_else(|| API.to_owned(), |server| format!("{server}/v1"))
+}
 const MAX_JSON_BYTES: u64 = 8 * 1024 * 1024;
 /// Spotify's limit for adding or removing items in one call.
 pub const MAX_ITEMS_PER_CALL: usize = 100;
@@ -81,7 +95,7 @@ fn agent() -> ureq::Agent {
 
 /// Exchanges the code from the browser for tokens (end of the login).
 pub fn exchange_code(client_id: &str, code: &str, pkce: &auth::Pkce) -> Result<Tokens> {
-    let response = agent().post(auth::TOKEN_URL).send_form([
+    let response = agent().post(&auth::token_url()).send_form([
         ("grant_type", "authorization_code"),
         ("code", code),
         ("redirect_uri", auth::REDIRECT_URI),
@@ -112,6 +126,20 @@ fn token_answer(mut response: ureq::http::Response<ureq::Body>) -> Result<Value>
                 .to_owned(),
         )),
     }
+}
+
+/// Downloads a playlist or album image (Spotify's image server needs no
+/// login). At most 4 MB.
+pub fn download_image(url: &str) -> Result<Vec<u8>> {
+    let mut response = agent().get(url).call()?;
+    if !response.status().is_success() {
+        return Err(status_error(response.status().as_u16(), ""));
+    }
+    Ok(response
+        .body_mut()
+        .with_config()
+        .limit(4 * 1024 * 1024)
+        .read_to_vec()?)
 }
 
 /// HTTP methods the API uses.
@@ -149,7 +177,7 @@ impl Client {
     fn access_token(&self, force_refresh: bool) -> Result<String> {
         let mut tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
         if force_refresh || tokens.expired() {
-            let response = self.agent.post(auth::TOKEN_URL).send_form([
+            let response = self.agent.post(&auth::token_url()).send_form([
                 ("grant_type", "refresh_token"),
                 ("refresh_token", tokens.refresh_token.as_str()),
                 ("client_id", self.client_id.as_str()),
@@ -173,7 +201,7 @@ impl Client {
         let url = if path.starts_with("https://") {
             path.to_owned()
         } else {
-            format!("{API}{path}")
+            format!("{}{path}", api_base())
         };
         let mut refreshed = false;
         let mut waited = false;
@@ -312,15 +340,38 @@ impl Client {
     pub fn play(&self, device_id: Option<&str>, what: Option<PlayRequest>) -> Result<()> {
         let query = device_query(device_id);
         let body = what.map(|what| match what {
-            PlayRequest::Context { uri, offset } => {
-                json!({"context_uri": uri, "offset": {"position": offset}})
-            }
-            PlayRequest::Tracks { uris, offset } => {
-                json!({"uris": uris, "offset": {"position": offset}})
-            }
+            PlayRequest::Context {
+                uri,
+                offset,
+                position_ms,
+            } => json!({
+                "context_uri": uri,
+                "offset": {"position": offset},
+                "position_ms": position_ms,
+            }),
+            PlayRequest::Tracks {
+                uris,
+                offset,
+                position_ms,
+            } => json!({
+                "uris": uris,
+                "offset": {"position": offset},
+                "position_ms": position_ms,
+            }),
         });
         self.call(Method::Put, "/me/player/play", &query, body.as_ref())
             .map(drop)
+    }
+
+    /// Adds a track to the device's queue (after the current song).
+    pub fn add_to_queue(&self, uri: &str) -> Result<()> {
+        self.call(
+            Method::Post,
+            "/me/player/queue",
+            &[("uri", uri.to_owned())],
+            None,
+        )
+        .map(drop)
     }
 
     pub fn pause(&self) -> Result<()> {
@@ -504,7 +555,7 @@ impl Client {
         let token = self.access_token(false)?;
         let response = self
             .agent
-            .put(&format!("{API}/playlists/{id}/images"))
+            .put(&format!("{}/playlists/{id}/images", api_base()))
             .header("Authorization", &format!("Bearer {token}"))
             .content_type("image/jpeg")
             .send(encoded)?;
@@ -547,8 +598,16 @@ impl Client {
 /// What to play.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayRequest {
-    Context { uri: String, offset: u32 },
-    Tracks { uris: Vec<String>, offset: u32 },
+    Context {
+        uri: String,
+        offset: u32,
+        position_ms: u64,
+    },
+    Tracks {
+        uris: Vec<String>,
+        offset: u32,
+        position_ms: u64,
+    },
 }
 
 fn device_query(device_id: Option<&str>) -> Vec<(&'static str, String)> {

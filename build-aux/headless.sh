@@ -8,7 +8,7 @@
 # - in-memory GSettings (the real settings stay untouched)
 # - its own data and cache folders, in $GATEFOLD_HEADLESS_STATE
 #   (default: _build/headless), kept between runs so scans stay quick
-# - silent audio (GATEFOLD_SILENT=1)
+# - silent audio (GATEFOLD_SILENT=1), no browser, no keyring
 #
 # Usage: build-aux/headless.sh COMMAND [ARGS...]
 # GATEFOLD_HEADLESS_MONITOR=WxH sets the virtual monitor (default 1100x760).
@@ -44,7 +44,7 @@ trap 'exit 130' INT TERM
 
 export XDG_RUNTIME_DIR="$runtime"
 export XDG_DATA_HOME="$state/data" XDG_CACHE_HOME="$state/cache"
-export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1
+export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1 GATEFOLD_NO_KEYRING=1
 # Keep GTK away from portals, gvfs and the accessibility bus.
 export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none
 export WAYLAND_DISPLAY="gatefold-headless-$$"

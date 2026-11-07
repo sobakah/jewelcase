@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
+use gatefold_core::db::LinkedPlaylist;
 use gatefold_core::db::{Album, Database, PlaylistItem, SearchResults, Track};
 use gatefold_core::library::artists::AlbumRole;
 use gatefold_core::library::artists::Aliases;
@@ -21,6 +22,7 @@ use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
+use crate::application::GatefoldApplication;
 use crate::config::{self, APP_ID};
 use crate::library_folders;
 use crate::metadata::{self, ArtistChanged, Job, MetadataService};
@@ -261,6 +263,7 @@ impl Library {
 
         crate::covers::clear();
         self.reload_artists();
+        self.rematch_spotify();
         self.reload_playlists();
         let store = self.albums();
         store.splice(0, store.n_items(), &objects);
@@ -502,28 +505,29 @@ impl Library {
         };
         let covers = CoverCache::new(config::cover_dir());
         let mut missing_mosaics = Vec::new();
-        let objects: Vec<PlaylistObject> =
-            playlists
-                .into_iter()
-                .map(|playlist| {
-                    let cover = playlist.custom_cover_key.clone().or_else(|| {
-                        match playlist.cover_keys.len() {
-                            0 => None,
-                            1 => playlist.cover_keys.first().cloned(),
-                            _ => {
-                                let mosaic = covers.mosaic_key(&playlist.cover_keys);
-                                if covers.has(&mosaic) {
-                                    Some(mosaic)
-                                } else {
-                                    missing_mosaics.push(playlist.cover_keys.clone());
-                                    playlist.cover_keys.first().cloned()
-                                }
+        let objects: Vec<PlaylistObject> = playlists
+            .into_iter()
+            .map(|playlist| {
+                let cover = playlist.custom_cover_key.clone().or_else(|| {
+                    match playlist.cover_keys.len() {
+                        // Spotify's, for Spotify playlists without
+                        // library songs.
+                        0 => playlist.spotify_cover_key.clone(),
+                        1 => playlist.cover_keys.first().cloned(),
+                        _ => {
+                            let mosaic = covers.mosaic_key(&playlist.cover_keys);
+                            if covers.has(&mosaic) {
+                                Some(mosaic)
+                            } else {
+                                missing_mosaics.push(playlist.cover_keys.clone());
+                                playlist.cover_keys.first().cloned()
                             }
                         }
-                    });
-                    PlaylistObject::new(playlist, cover)
-                })
-                .collect();
+                    }
+                });
+                PlaylistObject::new(playlist, cover)
+            })
+            .collect();
         let store = self.playlists();
         store.splice(0, store.n_items(), &objects);
         self.emit_by_name::<()>("playlists-changed", &[]);
@@ -546,6 +550,22 @@ impl Library {
                     }
                 }
             ));
+        }
+    }
+
+    /// New or removed songs: Spotify entries are matched again (§9.5).
+    fn rematch_spotify(&self) {
+        let aliases = self.aliases().clone();
+        let Some(mut db) = self.db() else { return };
+        if db.linked_playlists().map_or(true, |l| l.is_empty()) {
+            return;
+        }
+        let tracks = db.match_tracks().unwrap_or_default();
+        let index = gatefold_core::matching::MatchIndex::new(tracks, &aliases);
+        match db.rematch_spotify_items(&index) {
+            Ok(0) => {}
+            Ok(changed) => tracing::info!("{changed} Spotify playlist entries matched again"),
+            Err(err) => tracing::warn!("Cannot match Spotify entries: {err}"),
         }
     }
 
@@ -588,9 +608,42 @@ impl Library {
         created
     }
 
+    /// The playlist's Spotify link, when edits go to Spotify too (§9.6).
+    fn spotify_link(&self, id: i64) -> Option<LinkedPlaylist> {
+        self.db()?.linked_playlist(id).ok().flatten()
+    }
+
+    /// Others' Spotify playlists can't be changed; says so.
+    fn refuse_read_only(&self, id: i64) -> bool {
+        let read_only = self.spotify_link(id).is_some_and(|p| !p.editable);
+        if read_only {
+            self.emit_by_name::<()>(
+                "message",
+                &[&gettext("Only its owner can change this Spotify playlist")],
+            );
+        }
+        read_only
+    }
+
+    fn queue_spotify_op(&self, id: i64, op: crate::spotify::Op) {
+        if let Some(mut db) = self.db()
+            && let Err(err) = db.queue_spotify_op(id, &op.to_json(), metadata::now())
+        {
+            tracing::warn!("Cannot queue a Spotify change: {err}");
+        }
+        GatefoldApplication::get().spotify().changes_queued();
+    }
+
     /// `announce`: confirm with a toast (not needed where the list shows it).
     pub fn add_to_playlist(&self, id: i64, tracks: &[i64], announce: bool) {
+        if self.refuse_read_only(id) {
+            return;
+        }
         self.playlist_op(|db, now| db.add_to_playlist(id, tracks, None, now));
+        // On Spotify too, once their Spotify versions are found.
+        if self.spotify_link(id).is_some() {
+            GatefoldApplication::get().spotify().resolve_soon(id, true);
+        }
         if !announce {
             return;
         }
@@ -603,7 +656,19 @@ impl Library {
     }
 
     pub fn rename_playlist(&self, id: i64, name: &str) {
+        if self.refuse_read_only(id) {
+            self.reload_playlists();
+            return;
+        }
         self.playlist_op(|db, now| db.rename_playlist(id, name, now));
+        if self.spotify_link(id).is_some() {
+            self.queue_spotify_op(
+                id,
+                crate::spotify::Op::Rename {
+                    name: name.to_owned(),
+                },
+            );
+        }
     }
 
     pub fn delete_playlist(&self, id: i64) {
@@ -611,11 +676,114 @@ impl Library {
     }
 
     pub fn remove_playlist_item(&self, id: i64, item: i64) {
+        if self.refuse_read_only(id) {
+            return;
+        }
+        let uri = self
+            .spotify_link(id)
+            .and_then(|_| self.db()?.item_uri(item).ok().flatten());
         self.playlist_op(|db, now| db.remove_playlist_item(id, item, now));
+        if let Some(uri) = uri {
+            // Spotify removes every occurrence; the others go back in.
+            let restore = self
+                .db()
+                .and_then(|db| db.spotify_uris(id).ok())
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .filter(|(_, u)| *u == uri)
+                .map(|(position, u)| (u, position as u32))
+                .collect();
+            self.queue_spotify_op(
+                id,
+                crate::spotify::Op::Remove {
+                    uris: vec![uri],
+                    restore,
+                },
+            );
+        }
     }
 
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
+        if self.refuse_read_only(id) {
+            self.reload_playlists();
+            return;
+        }
+        // Where Spotify has it, before and after.
+        let moved = self.spotify_link(id).and_then(|_| {
+            let db = self.db()?;
+            let (item, uri) = db.item_at(id, from).ok().flatten()?;
+            uri?;
+            Some((item, db.remote_position(item).ok().flatten()?))
+        });
         self.playlist_op(|db, now| db.move_playlist_item(id, from, to, now));
+        if let Some((item, start)) = moved
+            && let Some(end) = self
+                .db()
+                .and_then(|db| db.remote_position(item).ok().flatten())
+            && start != end
+        {
+            self.queue_spotify_op(
+                id,
+                crate::spotify::Op::Move {
+                    start,
+                    // Spotify counts the place before the move.
+                    before: if end > start { end + 1 } else { end },
+                    length: 1,
+                },
+            );
+        }
+    }
+
+    /// A Spotify entry plays this library song (or, `None`, whatever
+    /// matching finds) (§9.5).
+    pub fn choose_local_match(&self, item: i64, track: Option<i64>) {
+        self.playlist_op(|db, _| db.choose_local_match(item, track));
+    }
+
+    /// "Always Play from Spotify".
+    pub fn pin_spotify(&self, item: i64) {
+        self.playlist_op(|db, _| db.pin_spotify(item));
+    }
+
+    /// The suggested Spotify track is right: the entry goes to Spotify.
+    pub fn accept_spotify_suggestion(&self, id: i64, item: i64, uri: &str) {
+        let mut position = None;
+        self.playlist_op(|db, _| {
+            db.set_item_spotify(item, uri)?;
+            position = db.remote_position(item)?;
+            Ok(())
+        });
+        if let Some(position) = position {
+            self.queue_spotify_op(
+                id,
+                crate::spotify::Op::Add {
+                    uris: vec![uri.to_owned()],
+                    position: Some(position),
+                },
+            );
+        }
+    }
+
+    /// Drops a suggestion; for Spotify suggestions, the song counts as
+    /// not on Spotify from now on.
+    pub fn dismiss_suggestion(&self, item: i64, track: Option<i64>, spotify: bool) {
+        self.playlist_op(|db, now| {
+            db.dismiss_suggestion(item)?;
+            if spotify && let Some(track) = track {
+                db.set_spotify_version(
+                    track,
+                    &gatefold_core::db::SpotifyVersion {
+                        uri: None,
+                        confidence: None,
+                        title: None,
+                        artist: None,
+                        checked: now,
+                    },
+                )?;
+            }
+            Ok(())
+        });
     }
 
     pub fn reset_playlist_cover(&self, id: i64) {

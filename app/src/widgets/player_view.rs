@@ -101,6 +101,12 @@ mod imp {
         #[template_child]
         pub info_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub devices_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub devices_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub remote_banner: TemplateChild<adw::Banner>,
+        #[template_child]
         pub transport: TemplateChild<gtk::Box>,
         #[template_child]
         pub lyrics_content: TemplateChild<adw::ButtonContent>,
@@ -260,6 +266,12 @@ impl PlayerView {
             .set_popover(Some(&super::shuffle_options::shuffle_popover()));
         imp.repeat_options
             .set_popover(Some(&super::shuffle_options::repeat_popover()));
+
+        super::device_popover::setup(
+            &imp.devices_button,
+            &imp.devices_popover,
+            &imp.remote_banner,
+        );
 
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {

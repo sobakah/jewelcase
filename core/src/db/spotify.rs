@@ -102,7 +102,7 @@ impl Database {
             Some(id) => {
                 let renaming: bool = self.conn.query_row(
                     "SELECT EXISTS(SELECT 1 FROM spotify_outbox
-                       WHERE playlist_id = ?1 AND op LIKE '{\"op\":\"rename\"%')",
+                       WHERE playlist_id = ?1 AND op LIKE '%\"op\":\"rename\"%')",
                     [id],
                     |row| row.get(0),
                 )?;

@@ -35,6 +35,10 @@ mod imp {
         #[template_child]
         pub availability: TemplateChild<gtk::Label>,
         #[template_child]
+        pub source: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub hidden: TemplateChild<adw::StatusPage>,
+        #[template_child]
         pub empty: TemplateChild<adw::StatusPage>,
         #[template_child]
         pub items: TemplateChild<gtk::ListBox>,
@@ -76,6 +80,33 @@ mod imp {
             });
             klass.install_action_async("playlist.delete", None, |panel, _, _| async move {
                 panel.delete().await;
+            });
+            klass.install_action_async("playlist.publish", None, |panel, _, _| async move {
+                let Some(id) = panel.playlist_id() else {
+                    return;
+                };
+                GatefoldApplication::get()
+                    .spotify()
+                    .publish(id, &panel)
+                    .await;
+            });
+            klass.install_action("playlist.refresh", None, |panel, _, _| {
+                if let Some(id) = panel.playlist_id() {
+                    GatefoldApplication::get().spotify().refresh_playlist(id);
+                }
+            });
+            klass.install_action("playlist.open-spotify", None, |panel, _, _| {
+                if let Some(id) = panel.spotify_id() {
+                    crate::spotify::open_in_browser(&format!(
+                        "https://open.spotify.com/playlist/{id}"
+                    ));
+                }
+            });
+            klass.install_action("playlist.duplicate", None, |panel, _, _| {
+                panel.duplicate();
+            });
+            klass.install_action_async("playlist.unlink", None, |panel, _, _| async move {
+                panel.unlink().await;
             });
         }
 
@@ -159,10 +190,24 @@ impl PlaylistPanel {
             imp.add_search.set_text("");
         }
         self.refresh();
+        // Spotify's version may be newer.
+        if changed && playlist.playlist().spotify_id.is_some() {
+            GatefoldApplication::get()
+                .spotify()
+                .refresh_playlist(playlist.id());
+        }
         // A new, empty playlist: go straight to finding songs.
-        if changed && playlist.playlist().item_count == 0 {
+        if changed && playlist.playlist().item_count == 0 && playlist.playlist().editable {
             imp.add_search.grab_focus();
         }
+    }
+
+    fn spotify_id(&self) -> Option<String> {
+        self.imp()
+            .playlist
+            .borrow()
+            .as_ref()
+            .and_then(|p| p.playlist().spotify_id.clone())
     }
 
     /// Types `text` into the "Add Songs" field (screenshot hook).
@@ -276,19 +321,44 @@ impl PlaylistPanel {
             .replace("{local}", &info.local_count.to_string())
             .replace("{total}", &info.item_count.to_string()),
         );
-        imp.playlist.replace(Some(playlist));
+        imp.source.set_label(&source_line(info));
+        imp.source.set_visible(info.spotify_id.is_some());
+        let editable = info.editable;
+        imp.name.set_editable(editable);
+        imp.name
+            .set_tooltip_text(editable.then(|| gettext("Rename")).as_deref());
+        imp.add_search.set_visible(editable);
+        let connected = GatefoldApplication::get().spotify().is_connected();
+        let linked = info.spotify_id.is_some();
+        let mirror = info.source == "spotify";
+        self.action_set_enabled("playlist.rename", editable);
+        self.action_set_enabled("playlist.change-cover", !mirror);
+        self.action_set_enabled("playlist.reset-cover", !mirror);
+        self.action_set_enabled("playlist.publish", connected && !linked);
+        self.action_set_enabled("playlist.refresh", connected && linked);
+        self.action_set_enabled("playlist.open-spotify", linked);
+        self.action_set_enabled("playlist.duplicate", mirror && info.readable);
+        self.action_set_enabled("playlist.unlink", linked && !mirror);
+        self.action_set_enabled("playlist.delete", !mirror);
+        imp.playlist.replace(Some(playlist.clone()));
 
         let entries = library.playlist_items(id);
-        imp.empty.set_visible(entries.is_empty());
+        let hidden = !info.readable;
+        imp.hidden.set_visible(hidden);
+        imp.empty.set_visible(entries.is_empty() && !hidden);
         imp.items.set_visible(!entries.is_empty());
         imp.items.remove_all();
         for entry in &entries {
-            imp.items.append(&self.row(id, entry));
+            imp.items.append(&self.row(&playlist, entry));
         }
         imp.entries.replace(entries);
     }
 
-    fn row(&self, playlist_id: i64, entry: &PlaylistItem) -> gtk::ListBoxRow {
+    fn row(&self, playlist: &PlaylistObject, entry: &PlaylistItem) -> gtk::ListBoxRow {
+        let info = playlist.playlist();
+        let playlist_id = info.id;
+        let editable = info.editable;
+        let linked = info.spotify_id.is_some();
         let track = entry.track.clone().map(TrackObject::new);
         let cover: CoverImage = glib::Object::builder()
             .property("min-size", 40)
@@ -340,14 +410,42 @@ impl PlaylistPanel {
             .margin_top(6)
             .margin_bottom(6)
             .build();
-        line.append(
-            &gtk::Image::builder()
-                .icon_name("list-drag-handle-symbolic")
-                .css_classes(["dim-label", "drag-handle"])
-                .build(),
-        );
+        if editable {
+            line.append(
+                &gtk::Image::builder()
+                    .icon_name("list-drag-handle-symbolic")
+                    .css_classes(["dim-label", "drag-handle"])
+                    .build(),
+            );
+        }
         line.append(&cover);
         line.append(&text);
+        // Where it plays from (§9.5): nothing for the library, the normal
+        // case.
+        let (icon, tooltip) = match entry.match_state.as_str() {
+            "spotify_only" | "user_pinned_spotify" if entry.spotify_uri.is_some() => (
+                Some("folder-remote-symbolic"),
+                Some(if entry.match_state == "user_pinned_spotify" {
+                    gettext("Plays from Spotify")
+                } else {
+                    gettext("Only on Spotify")
+                }),
+            ),
+            _ if linked && entry.spotify_uri.is_none() && track.is_some() => (
+                Some("computer-symbolic"),
+                Some(gettext("Only in Gatefold; not on Spotify")),
+            ),
+            _ => (None, None),
+        };
+        if let Some(icon) = icon {
+            line.append(
+                &gtk::Image::builder()
+                    .icon_name(icon)
+                    .tooltip_text(tooltip.unwrap_or_default())
+                    .css_classes(["dim-label"])
+                    .build(),
+            );
+        }
         let duration = track
             .as_ref()
             .map(TrackObject::duration_ms)
@@ -360,41 +458,96 @@ impl PlaylistPanel {
                     .build(),
             );
         }
-        let remove = gtk::Button::builder()
-            .icon_name("list-remove-symbolic")
-            .tooltip_text(gettext("Remove from Playlist"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat", "circular"])
-            .build();
+        if entry.spotify_uri.is_some() {
+            line.append(&entry_menu(entry, track.as_ref()));
+        }
         let item_id = entry.id;
-        remove.connect_clicked(move |_| {
-            GatefoldApplication::get()
-                .library()
-                .remove_playlist_item(playlist_id, item_id);
-        });
-        line.append(&remove);
+        if editable {
+            let remove = gtk::Button::builder()
+                .icon_name("list-remove-symbolic")
+                .tooltip_text(gettext("Remove from Playlist"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build();
+            remove.connect_clicked(move |_| {
+                GatefoldApplication::get()
+                    .library()
+                    .remove_playlist_item(playlist_id, item_id);
+            });
+            line.append(&remove);
+        }
 
-        let row = gtk::ListBoxRow::builder().child(&line).build();
-        if track.is_none() {
-            // Not in the library (any more): shown, but can't play.
-            row.add_css_class("unavailable");
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        content.append(&line);
+        if let Some(question) = suggestion(playlist_id, entry, editable) {
+            content.append(&question);
+        }
+        let row = gtk::ListBoxRow::builder().child(&content).build();
+        let remote = GatefoldApplication::get().player().is_remote() && linked;
+        if track.is_none() && !(remote && entry.spotify_uri.is_some()) {
+            // Not in the library: shown, but can't play here.
+            line.add_css_class("unavailable");
             row.set_activatable(false);
-            row.set_tooltip_text(Some(&gettext("This song isn't in your library")));
+            if entry.spotify_uri.is_none() {
+                row.set_tooltip_text(Some(&gettext("This song isn't in your library")));
+            }
         }
 
         // Drag and drop to reorder, animated.
-        super::reorder::attach(&row, entry.position, move |from, to| {
-            GatefoldApplication::get()
-                .library()
-                .move_playlist_item(playlist_id, from, to);
-        });
+        if editable {
+            super::reorder::attach(&row, entry.position, move |from, to| {
+                GatefoldApplication::get()
+                    .library()
+                    .move_playlist_item(playlist_id, from, to);
+            });
+        }
         row
     }
 
     /// Plays the entries that are in the library, from `start` (a row).
+    /// With a Spotify device in control, the Spotify playlist plays there.
     fn play(&self, start: Option<usize>, shuffle: bool) {
         let imp = self.imp();
+        let app = GatefoldApplication::get();
+        if app.player().is_remote()
+            && let Some(spotify_id) = self.spotify_id()
+        {
+            let entries = imp.entries.borrow();
+            let offset = start
+                .map(|row| {
+                    entries[..row.min(entries.len())]
+                        .iter()
+                        .filter(|e| e.spotify_uri.is_some())
+                        .count() as u32
+                })
+                .unwrap_or(0);
+            let spotify = app.spotify();
+            glib::spawn_future_local(async move {
+                if shuffle {
+                    let _ = spotify.call(|c| c.set_shuffle(true)).await;
+                }
+                spotify.play_playlist_remote(&spotify_id, offset).await;
+            });
+            return;
+        }
         let entries = imp.entries.borrow();
+        let skipped = entries
+            .iter()
+            .filter(|e| e.track.is_none() && e.spotify_uri.is_some())
+            .count();
+        if skipped > 0 {
+            app.library().emit_by_name::<()>(
+                "message",
+                &[&ngettext(
+                    "{} song is only on Spotify and is skipped",
+                    "{} songs are only on Spotify and are skipped",
+                    skipped as u32,
+                )
+                .replace("{}", &skipped.to_string())],
+            );
+        }
         let playable: Vec<(usize, TrackObject)> = entries
             .iter()
             .enumerate()
@@ -500,7 +653,11 @@ impl PlaylistPanel {
         let dialog = adw::AlertDialog::builder()
             // Translators: {} is a playlist name.
             .heading(gettext("Delete “{}”?").replace("{}", &playlist.playlist().name))
-            .body(gettext("The songs stay in your library."))
+            .body(if playlist.playlist().spotify_id.is_some() {
+                gettext("The songs stay in your library, and the playlist stays on Spotify.")
+            } else {
+                gettext("The songs stay in your library.")
+            })
             .close_response("cancel")
             .default_response("cancel")
             .build();
@@ -515,4 +672,320 @@ impl PlaylistPanel {
                 .delete_playlist(playlist.id());
         }
     }
+}
+
+impl PlaylistPanel {
+    /// "Duplicate as Local Playlist": a Spotify playlist's songs as a new
+    /// local playlist (library songs only).
+    fn duplicate(&self) {
+        let imp = self.imp();
+        let Some(playlist) = imp.playlist.borrow().clone() else {
+            return;
+        };
+        let tracks: Vec<i64> = imp
+            .entries
+            .borrow()
+            .iter()
+            .filter_map(|e| e.track.as_ref().map(|t| t.record.id))
+            .collect();
+        let library = GatefoldApplication::get().library();
+        // Translators: {} is a playlist name.
+        let name = gettext("{} (Copy)").replace("{}", &playlist.playlist().name);
+        if let Some(id) = library.create_playlist(&name, &tracks) {
+            if let Some(copy) = library.playlist(id) {
+                self.set_playlist(&copy);
+            }
+            // Translators: {} is a playlist name.
+            library.emit_by_name::<()>("message", &[&gettext("Created “{}”").replace("{}", &name)]);
+        }
+    }
+
+    async fn unlink(&self) {
+        let Some(id) = self.playlist_id() else { return };
+        let dialog = adw::AlertDialog::builder()
+            .heading(gettext("Stop Syncing with Spotify?"))
+            .body(gettext(
+                "The playlist stays here and on Spotify, but changes are no longer copied between them.",
+            ))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", &gettext("_Cancel")),
+            ("unlink", &gettext("_Stop Syncing")),
+        ]);
+        if dialog.choose_future(Some(self)).await == "unlink" {
+            let library = GatefoldApplication::get().library();
+            if let Some(mut db) = library.db() {
+                let _ = db.unlink_playlist(id);
+            }
+            library.reload_playlists();
+        }
+    }
+}
+
+/// "Spotify playlist by Max · 2 changes waiting".
+fn source_line(info: &gatefold_core::db::Playlist) -> String {
+    let mut parts = Vec::new();
+    let owner = info.spotify_owner.clone().unwrap_or_default();
+    parts.push(match (info.source.as_str(), info.editable) {
+        // Translators: {} is a Spotify user name.
+        ("spotify", true) => gettext("Spotify playlist by {}").replace("{}", &owner),
+        // Translators: {} is a Spotify user name.
+        ("spotify", false) => gettext("Spotify playlist by {}, read-only").replace("{}", &owner),
+        _ => gettext("Also on Spotify"),
+    });
+    if info.pending_changes > 0 {
+        parts.push(
+            ngettext(
+                "{} change waiting to be sent",
+                "{} changes waiting to be sent",
+                info.pending_changes,
+            )
+            .replace("{}", &info.pending_changes.to_string()),
+        );
+    }
+    parts.join(" · ")
+}
+
+/// What Yes or No does.
+type Answer = Box<dyn Fn()>;
+
+/// "Is this “Butterfly” from your library?" for likely matches (§9.5),
+/// both ways.
+fn suggestion(playlist_id: i64, entry: &PlaylistItem, editable: bool) -> Option<gtk::Box> {
+    let item = entry.id;
+    let (text, accept, reject): (String, Answer, Answer) =
+        if let Some(local) = &entry.suggested_track {
+            let local = TrackObject::new(local.clone());
+            let track_id = local.id();
+            let label = [
+                Some(local.title()),
+                local.artist(),
+                local.track().album_title.clone(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" — ");
+            (
+                // Translators: {} is "Song — Artist — Album" from the library.
+                gettext("Play “{}” from your library?").replace("{}", &label),
+                Box::new(move || {
+                    GatefoldApplication::get()
+                        .library()
+                        .choose_local_match(item, Some(track_id));
+                }),
+                Box::new(move || {
+                    GatefoldApplication::get()
+                        .library()
+                        .dismiss_suggestion(item, None, false);
+                }),
+            )
+        } else {
+            let (uri, title, artist) = entry
+                .suggested_spotify
+                .as_deref()
+                .and_then(crate::spotify::parse_suggestion)
+                .filter(|_| editable)?;
+            let track_id = entry.track.as_ref().map(|t| t.record.id);
+            (
+                // Translators: {} is "Song — Artist" on Spotify.
+                gettext("On Spotify as “{}”?").replace("{}", &format!("{title} — {artist}")),
+                Box::new(move || {
+                    GatefoldApplication::get()
+                        .library()
+                        .accept_spotify_suggestion(playlist_id, item, &uri);
+                }),
+                Box::new(move || {
+                    GatefoldApplication::get()
+                        .library()
+                        .dismiss_suggestion(item, track_id, true);
+                }),
+            )
+        };
+    let line = gtk::Box::builder()
+        .spacing(6)
+        .margin_start(12)
+        .margin_end(6)
+        .margin_bottom(6)
+        .build();
+    line.append(
+        &gtk::Label::builder()
+            .label(&text)
+            .xalign(0.0)
+            .wrap(true)
+            .hexpand(true)
+            .css_classes(["caption"])
+            .build(),
+    );
+    let yes = gtk::Button::builder()
+        .label(gettext("Yes"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "small"])
+        .build();
+    yes.connect_clicked(move |_| accept());
+    let no = gtk::Button::builder()
+        .label(gettext("No"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "small"])
+        .build();
+    no.connect_clicked(move |_| reject());
+    line.append(&yes);
+    line.append(&no);
+    Some(line)
+}
+
+/// The menu of a Spotify entry: which version plays, and where to find it.
+fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuButton {
+    let item = entry.id;
+    let actions = gio::SimpleActionGroup::new();
+    let menu = gio::Menu::new();
+    let choose = gio::SimpleAction::new("use-local", None);
+    let query = [entry.title.clone(), entry.artist.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    choose.connect_activate(move |_, _| {
+        let query = query.clone();
+        glib::spawn_future_local(async move {
+            let window = GatefoldApplication::get().active_window();
+            if let Some(track) = choose_library_song(window.as_ref(), &query).await {
+                GatefoldApplication::get()
+                    .library()
+                    .choose_local_match(item, Some(track));
+            }
+        });
+    });
+    actions.add_action(&choose);
+    menu.append(
+        Some(&gettext("_Use Song from Library…")),
+        Some("entry.use-local"),
+    );
+    if entry.match_state == "user_pinned_spotify" || entry.match_state == "user_matched" {
+        let auto = gio::SimpleAction::new("auto", None);
+        auto.connect_activate(move |_, _| {
+            GatefoldApplication::get()
+                .library()
+                .choose_local_match(item, None);
+        });
+        actions.add_action(&auto);
+        menu.append(Some(&gettext("_Match Automatically")), Some("entry.auto"));
+    } else if track.is_some() {
+        let pin = gio::SimpleAction::new("pin", None);
+        pin.connect_activate(move |_, _| GatefoldApplication::get().library().pin_spotify(item));
+        actions.add_action(&pin);
+        menu.append(
+            Some(&gettext("Always Play from _Spotify")),
+            Some("entry.pin"),
+        );
+    }
+    let section = gio::Menu::new();
+    if let Some(album) = track.and_then(|t| t.track().album_id) {
+        section.append(
+            Some(&gettext("Show in _Library")),
+            Some(&gio::Action::print_detailed_name(
+                "win.show-album",
+                Some(&album.to_variant()),
+            )),
+        );
+    }
+    if let Some(id) = entry
+        .spotify_uri
+        .as_deref()
+        .and_then(|u| u.strip_prefix("spotify:track:"))
+    {
+        let url = format!("https://open.spotify.com/track/{id}");
+        let open = gio::SimpleAction::new("open", None);
+        open.connect_activate(move |_, _| crate::spotify::open_in_browser(&url));
+        actions.add_action(&open);
+        section.append(Some(&gettext("_Open in Spotify")), Some("entry.open"));
+    }
+    menu.append_section(None, &section);
+    let button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .tooltip_text(gettext("More"))
+        .valign(gtk::Align::Center)
+        .menu_model(&menu)
+        .css_classes(["flat", "circular"])
+        .build();
+    button.insert_action_group("entry", Some(&actions));
+    button
+}
+
+/// Lets the user pick a library song (for a Spotify entry).
+async fn choose_library_song(parent: Option<&gtk::Window>, query: &str) -> Option<i64> {
+    let dialog = adw::AlertDialog::builder()
+        .heading(gettext("Use Song from Library"))
+        .close_response("cancel")
+        .build();
+    dialog.add_responses(&[("cancel", &gettext("_Cancel"))]);
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .width_request(320)
+        .build();
+    let search = gtk::SearchEntry::builder().text(query).build();
+    let results = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(["boxed-list"])
+        .build();
+    content.append(&search);
+    content.append(
+        &gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(320)
+            .child(&results)
+            .build(),
+    );
+    dialog.set_extra_child(Some(&content));
+    let chosen = std::rc::Rc::new(std::cell::Cell::new(None));
+    let fill = glib::clone!(
+        #[weak]
+        results,
+        #[weak]
+        dialog,
+        #[strong]
+        chosen,
+        move |text: &str| {
+            results.remove_all();
+            let library = GatefoldApplication::get().library();
+            let ids = library.search(text, 10).tracks;
+            let tracks = library.tracks(&ids);
+            for id in ids {
+                let Some(track) = tracks.get(&id).cloned().map(TrackObject::new) else {
+                    continue;
+                };
+                let row = adw::ActionRow::builder()
+                    .use_markup(false)
+                    .title(track.title())
+                    .subtitle(
+                        [track.artist(), track.track().album_title.clone()]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" — "),
+                    )
+                    .activatable(true)
+                    .build();
+                row.connect_activated(glib::clone!(
+                    #[weak]
+                    dialog,
+                    #[strong]
+                    chosen,
+                    move |_| {
+                        chosen.set(Some(id));
+                        dialog.close();
+                    }
+                ));
+                results.append(&row);
+            }
+        }
+    );
+    fill(query);
+    search.connect_search_changed(move |entry| fill(&entry.text()));
+    dialog.choose_future(parent).await;
+    chosen.get()
 }

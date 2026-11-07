@@ -15,13 +15,17 @@ spotify-stream = []
 gatefold-core.workspace = true
 gatefold-lyrics.workspace = true
 gatefold-metadata.workspace = true
+gatefold-spotify.workspace = true
 gatefold-tools.workspace = true
 
 adw.workspace = true
 async-channel.workspace = true
+futures-lite.workspace = true
 libc.workspace = true
 mpris-server.workspace = true
+oo7.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 gettext-rs.workspace = true
 gtk.workspace = true
 tracing.workspace = true

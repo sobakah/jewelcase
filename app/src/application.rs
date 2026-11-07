@@ -21,6 +21,7 @@ mod imp {
         pub player: OnceCell<Player>,
         pub tools: OnceCell<Tools>,
         pub analyzer: OnceCell<crate::analyzer::Analyzer>,
+        pub spotify: OnceCell<crate::spotify::Spotify>,
     }
 
     #[glib::object_subclass]
@@ -78,6 +79,10 @@ mod imp {
             self.player.set(player.clone()).expect("set once");
             player.restore();
             crate::mpris::start(&app, &player);
+
+            let spotify = crate::spotify::Spotify::new();
+            self.spotify.set(spotify.clone()).expect("set once");
+            spotify.start();
         }
 
         fn shutdown(&self) {
@@ -132,6 +137,10 @@ impl GatefoldApplication {
 
     pub fn player(&self) -> Player {
         self.imp().player.get().expect("set in startup()").clone()
+    }
+
+    pub fn spotify(&self) -> crate::spotify::Spotify {
+        self.imp().spotify.get().expect("set in startup()").clone()
     }
 
     pub fn analyzer(&self) -> crate::analyzer::Analyzer {

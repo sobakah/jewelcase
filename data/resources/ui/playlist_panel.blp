@@ -84,6 +84,19 @@ template $GatefoldPlaylistPanel: Adw.Bin {
             ]
           }
 
+          // Spotify playlists (CONCEPT.md §9.5): whose, and changes not
+          // sent yet.
+          Gtk.Label source {
+            wrap: true;
+            xalign: 0;
+            visible: false;
+
+            styles [
+              "dim-label",
+              "caption",
+            ]
+          }
+
           Gtk.Box {
             spacing: 6;
             margin-top: 12;
@@ -143,6 +156,28 @@ template $GatefoldPlaylistPanel: Adw.Bin {
             ]
           }
 
+          Adw.StatusPage hidden {
+            icon-name: "folder-remote-symbolic";
+            title: _("Spotify Doesn’t Show These Songs");
+            description: _("Spotify only shows the songs of playlists you own or collaborate on to apps like Gatefold.");
+            visible: false;
+
+            child: Gtk.Button {
+              label: _("_Open in Spotify");
+              use-underline: true;
+              action-name: "playlist.open-spotify";
+              halign: center;
+
+              styles [
+                "pill",
+              ]
+            };
+
+            styles [
+              "compact",
+            ]
+          }
+
           Adw.StatusPage empty {
             icon-name: "view-list-bullet-symbolic";
             title: _("Empty Playlist");
@@ -173,16 +208,52 @@ menu playlist_menu {
     item {
       label: _("_Rename…");
       action: "playlist.rename";
+      hidden-when: "action-disabled";
     }
 
     item {
       label: _("Change _Cover…");
       action: "playlist.change-cover";
+      hidden-when: "action-disabled";
     }
 
     item {
       label: _("Use _Automatic Cover");
       action: "playlist.reset-cover";
+      hidden-when: "action-disabled";
+    }
+  }
+
+  // Spotify (CONCEPT.md §9.6).
+  section {
+    item {
+      label: _("Create on _Spotify…");
+      action: "playlist.publish";
+      hidden-when: "action-disabled";
+    }
+
+    item {
+      label: _("Re_fresh from Spotify");
+      action: "playlist.refresh";
+      hidden-when: "action-disabled";
+    }
+
+    item {
+      label: _("_Open in Spotify");
+      action: "playlist.open-spotify";
+      hidden-when: "action-disabled";
+    }
+
+    item {
+      label: _("_Duplicate as Local Playlist");
+      action: "playlist.duplicate";
+      hidden-when: "action-disabled";
+    }
+
+    item {
+      label: _("_Stop Syncing with Spotify…");
+      action: "playlist.unlink";
+      hidden-when: "action-disabled";
     }
   }
 
@@ -195,6 +266,7 @@ menu playlist_menu {
     item {
       label: _("_Delete Playlist…");
       action: "playlist.delete";
+      hidden-when: "action-disabled";
     }
   }
 }

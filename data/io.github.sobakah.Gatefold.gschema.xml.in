@@ -125,6 +125,21 @@
       <summary>Open Spotify links in the Spotify app</summary>
       <description>Off: in the browser. The Spotify app starts playing what a link points to.</description>
     </key>
+    <key name="spotify-client-id" type="s">
+      <default>""</default>
+      <summary>Spotify client ID</summary>
+      <description>From the user’s own app at developer.spotify.com, with the redirect URI http://127.0.0.1:8974/callback.</description>
+    </key>
+    <key name="spotify-account" type="s">
+      <default>""</default>
+      <summary>Connected Spotify account</summary>
+      <description>Its display name; empty when not connected. The login itself is in the keyring.</description>
+    </key>
+    <key name="spotify-playlists" type="b">
+      <default>true</default>
+      <summary>Show Spotify playlists</summary>
+      <description>The user’s Spotify playlists next to the local ones. Playlists published from Gatefold stay linked either way.</description>
+    </key>
     <key name="show-remaining-time" type="b">
       <default>false</default>
       <summary>Show the remaining time instead of the song’s length</summary>

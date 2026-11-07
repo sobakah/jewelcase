@@ -456,6 +456,15 @@ Each write returns a new `snapshot_id`. OAuth scopes: `playlist-read-private`, `
 
 **Export:** XSPF keeps both (`<location>` file path + `<identifier>` Spotify URI/ISRC). M3U8 exports local entries and lists Spotify-only entries as comments, with a warning.
 
+### 9.7 As built (phase 7)
+- **Login**: the loopback redirect uses a fixed port, `http://127.0.0.1:8974/callback`, since the URI must be registered exactly. The access token is refreshed by itself; tokens live in the keyring (oo7), the account name in GSettings.
+- **Linked playlists**: Spotify mirrors and published local playlists work the same way. Entries with a Spotify URI are synced; library songs without a Spotify version stay as "only in Gatefold" entries in any linked playlist (rather than being refused), and keep their place after the Spotify entry they followed when the playlist is re-read.
+- **Removing**: Spotify removes every occurrence of a URI, so a remove puts the other occurrences back.
+- **Reading**: the 2026 `/items` endpoints (`item` instead of `track` per row, `items` instead of `tracks` in playlist objects); both shapes are accepted.
+- **Matching**: implemented as described (ISRC, then title + artist + duration with version notes; likely matches are offered as "Play … from your library? Yes / No", both directions). The MusicBrainz ISRC lookup (step 2) isn't implemented yet.
+- **Remote mode**: "Play On…" moves playback to a device, taking the current song along when Spotify has it (the following songs go into the device's queue). The player shows the device's song, as the library song when it matches (cover, lyrics). Playing anything locally ends remote mode and pauses the device. Spotify playlists started in remote mode play on the device.
+- **Not yet**: deleting or unfollowing Spotify playlists (the follow endpoints moved to `/me/library`), uploading a changed cover to Spotify, the artist page section "On Spotify, not in your library".
+
 ---
 
 ## 10. Companion Tools: lyrembed, cdimport & Ear Tag

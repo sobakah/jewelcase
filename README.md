@@ -53,6 +53,26 @@ Set `GATEFOLD_LOG=debug` (or `trace`, `warn`, …) to change the log level.
 
 Meson runs Cargo and passes it the compiled GResource bundle (Blueprint UI, CSS, icons), which is embedded in the binary. `cargo check` and `cargo clippy` work without Meson, but a binary built only by Cargo won't start.
 
+## Spotify (optional)
+
+Gatefold connects to Spotify with a client ID of your own (Spotify no longer gives apps
+like this a shared one). Preferences → Spotify walks through it:
+
+1. Create an app at <https://developer.spotify.com/dashboard> (any name), choose “Web API”.
+2. Add the redirect URI `http://127.0.0.1:8974/callback` exactly.
+3. Paste the client ID into Preferences and press Connect.
+
+The account needs Spotify Premium. The login is stored in the keyring. Then:
+
+- **Play On…** in the player lists your Spotify Connect devices; the player then controls the
+  device and shows what it plays (with lyrics and cover from your library when it has the song).
+- **Spotify playlists** appear next to local ones; entries that are in your library play from
+  your files (ISRC, then title, artist and length). Your own playlists can be edited here
+  and the changes are sent to Spotify; *Create on Spotify* publishes a local playlist.
+
+For development, debug builds talk to a stand-in server instead of Spotify when
+`GATEFOLD_SPOTIFY_TEST_SERVER=http://127.0.0.1:<port>` is set.
+
 ## Layout
 
 ```
