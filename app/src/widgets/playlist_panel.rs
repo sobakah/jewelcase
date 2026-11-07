@@ -462,7 +462,7 @@ impl PlaylistPanel {
         // case.
         let (icon, tooltip) = match entry.match_state.as_str() {
             "spotify_only" | "user_pinned_spotify" if entry.spotify_uri.is_some() => (
-                Some("folder-remote-symbolic"),
+                Some("gatefold-spotify-symbolic"),
                 Some(if entry.match_state == "user_pinned_spotify" {
                     gettext("Plays from Spotify")
                 } else {

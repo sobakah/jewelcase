@@ -528,6 +528,7 @@ fn remote_row(entry: &QueueEntry) -> gtk::Widget {
 fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     let offset = entry.entry().offset;
     let track = &entry.entry().track;
+    let streamed = track.is_stand_in();
     let cover: CoverImage = glib::Object::builder()
         .property("min-size", 40)
         .property("natural-size", 40)
@@ -538,13 +539,7 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
         .valign(gtk::Align::Center)
         .hexpand(true)
         .build();
-    text.append(
-        &gtk::Label::builder()
-            .label(track.title())
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build(),
-    );
+    text.append(&super::spotify_title(&track.title(), streamed));
     // Smart shuffle's picks say so (§7).
     let suggested = entry.entry().origin == Origin::Suggested;
     let subtitle = match (track.artist(), suggested) {

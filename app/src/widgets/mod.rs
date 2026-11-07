@@ -33,3 +33,28 @@ pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;
 pub use track_row::TrackRow;
+
+/// A song title, with the Spotify icon before it for songs that play from
+/// Spotify (§9.4).
+pub fn spotify_title(title: &str, from_spotify: bool) -> gtk::Widget {
+    use gtk::prelude::*;
+    let label = gtk::Label::builder()
+        .label(title)
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    if !from_spotify {
+        return label.upcast();
+    }
+    let line = gtk::Box::builder().spacing(6).build();
+    line.append(
+        &gtk::Image::builder()
+            .icon_name("gatefold-spotify-symbolic")
+            .pixel_size(12)
+            .valign(gtk::Align::Center)
+            .tooltip_text(gettextrs::gettext("Plays from Spotify"))
+            .build(),
+    );
+    line.append(&label);
+    line.upcast()
+}

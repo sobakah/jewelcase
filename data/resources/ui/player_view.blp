@@ -220,13 +220,27 @@ template $GatefoldPlayerView: Adw.Bin {
                 orientation: vertical;
                 spacing: 3;
 
-                Gtk.Label title {
-                  label: _("Not Playing");
-                  ellipsize: end;
+                // The Spotify icon marks a song playing from Spotify.
+                Gtk.Box {
+                  halign: center;
+                  spacing: 8;
 
-                  styles [
-                    "title-2",
-                  ]
+                  Gtk.Image spotify_mark {
+                    icon-name: "gatefold-spotify-symbolic";
+                    pixel-size: 20;
+                    valign: center;
+                    visible: false;
+                    tooltip-text: _("Plays from Spotify");
+                  }
+
+                  Gtk.Label title {
+                    label: _("Not Playing");
+                    ellipsize: end;
+
+                    styles [
+                      "title-2",
+                    ]
+                  }
                 }
 
                 Gtk.Label subtitle {

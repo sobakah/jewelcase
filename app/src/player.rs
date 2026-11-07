@@ -717,6 +717,11 @@ impl Player {
         self.imp().remote.borrow().is_some()
     }
 
+    /// The song plays from Spotify: streamed, or on a Spotify device.
+    pub fn plays_from_spotify(&self) -> bool {
+        self.is_remote() || self.current_track().is_some_and(|t| t.is_stand_in())
+    }
+
     /// Sends a command to the remote device; false when playing here.
     fn forward(&self, command: RemoteCommand) -> bool {
         match self.imp().remote.borrow().as_ref() {

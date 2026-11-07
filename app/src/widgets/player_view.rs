@@ -75,6 +75,8 @@ mod imp {
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
+        pub spotify_mark: TemplateChild<gtk::Image>,
+        #[template_child]
         pub subtitle: TemplateChild<gtk::Label>,
         #[template_child]
         pub position_label: TemplateChild<gtk::Label>,
@@ -206,6 +208,13 @@ impl PlayerView {
             self,
             move |player| view.update_track(player)
         ));
+        // The Spotify icon before the title (§9).
+        let mark = imp.spotify_mark.get();
+        let show_mark = move |player: &Player| mark.set_visible(player.plays_from_spotify());
+        show_mark(&player);
+        let on_track = show_mark.clone();
+        player.connect_current_track_notify(move |player| on_track(player));
+        player.connect_remote_device_notify(move |player| show_mark(player));
         player.connect_playing_notify(glib::clone!(
             #[weak(rename_to = view)]
             self,
