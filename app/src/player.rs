@@ -118,6 +118,8 @@ mod imp {
         pub active: Cell<usize>,
         /// A crossfade in progress: the engine fading out, and when.
         pub fade: RefCell<Option<Fade>>,
+        /// Whether ReplayGain was on, to notice it being switched.
+        pub replaygain_on: Cell<bool>,
         /// Where songs' music starts and ends (smart crossfade), by track.
         pub edges: RefCell<HashMap<i64, Option<gatefold_core::analysis::Edges>>>,
         pub library: OnceCell<Library>,
@@ -189,6 +191,8 @@ impl Player {
         imp.library.set(library.clone()).expect("set once");
 
         let settings = gio::Settings::new(APP_ID);
+        imp.replaygain_on
+            .set(settings.string("replaygain") != "off");
         // Crossfade on or off changes how the next song is handed over.
         settings.connect_changed(
             Some("crossfade"),
@@ -198,16 +202,22 @@ impl Player {
                 move |_, _| player.update_next()
             ),
         );
-        for key in ["replaygain", "replaygain-preamp"] {
-            settings.connect_changed(
-                Some(key),
-                glib::clone!(
-                    #[weak]
-                    player,
-                    move |_, _| player.apply_replaygain()
-                ),
-            );
-        }
+        settings.connect_changed(
+            Some("replaygain-preamp"),
+            glib::clone!(
+                #[weak]
+                player,
+                move |_, _| player.apply_replaygain()
+            ),
+        );
+        settings.connect_changed(
+            Some("replaygain"),
+            glib::clone!(
+                #[weak]
+                player,
+                move |_, _| player.replaygain_switched()
+            ),
+        );
         // Songs ↔ albums while shuffled: shuffle again the new way.
         settings.connect_changed(
             Some("shuffle-albums"),
@@ -1670,6 +1680,24 @@ impl Player {
                 queue.context_album().is_some() && !queue.is_shuffled()
             }
         }
+    }
+
+    /// ReplayGain's filter is attached when a song loads (and songs that
+    /// follow gaplessly keep it), so turning it on or off reloads the
+    /// current song where it is; other mode changes apply at once.
+    fn replaygain_switched(&self) {
+        let enabled = self.settings().string("replaygain") != "off";
+        let imp = self.imp();
+        let was = imp.replaygain_on.replace(enabled);
+        self.apply_replaygain();
+        let state = imp.state.get();
+        if was == enabled || state == State::Stopped || self.is_remote() || imp.streaming.get() {
+            return;
+        }
+        let Some(position) = self.engine().and_then(|engine| engine.position_ms()) else {
+            return;
+        };
+        self.load_current(state == State::Playing, position);
     }
 
     fn apply_replaygain(&self) {
