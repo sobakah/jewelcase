@@ -1,16 +1,38 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (pre-release)
 
-- Playlists can be sorted like on Spotify: by title, artist, album, date added or duration, or in their own order, each also reversed. The choice is kept per playlist.
-- A playlist's songs have the same actions as an album's: Add to Queue, Play Next, Add to Playlist, Go to Album and Go to Artist; the playlist's menu adds all of it to the queue or another playlist.
-- The artist and album of a Spotify song in the player open their pages, like for your own songs.
+Mostly playlists, Spotify fixes and a new look for the side panels. Gatefold's database is updated on the first start; after that, 0.1.0 can't open it any more.
+
+### Playlists
+
+- Sort a playlist like on Spotify: by title, artist, album, date added or duration, or in its own order, each also reversed. It's kept per playlist and only changes the view (and what Play plays); dragging works in the playlist's own order.
+- A playlist's songs have the same actions as an album's: Add to Queue on the row, and Play Next, Add to Playlist, Go to Album and Go to Artist in its menu, also for songs that are only on Spotify. The playlist's menu adds all of it to the queue or another playlist.
+
+### Player and panels
+
+- The artist and album of a Spotify song in the player open their pages: the library's when you have them, else Spotify's.
 - Preferences → Library → Start: open with the last view or a fixed one. Preferences → Playback → Player: whether lyrics and queue are shown when Gatefold starts.
-- Artist pages cover less of the artist grid. Side panels (albums, playlists, artists) close with a grip on their left edge, like the one on top of the player, instead of a close button.
-- Album, playlist and artist panels show their cover blurred behind the top, like the player.
-- Artist photos come from Spotify (while it's connected) and Deezer, then Wikimedia Commons; fanart.tv is gone, and its API key with it. Artists looked up before get their photos looked up once more.
-- Fixed: searching Spotify always failed with "403: Insufficient client scope". Matching a playlist's songs then asked Spotify once for every song, again at every sync, which could get Gatefold blocked for hours ("too many requests"). Searches now stop at the first error, and while Spotify asks to wait for a long time, Gatefold doesn't ask again, also after a restart.
-- When Spotify doesn't show an artist's releases, the page now says why.
+- Album, playlist and artist panels show their cover blurred behind the top, like the player, and close with a grip on their left edge instead of a close button. Artist pages cover less of the artist grid.
+
+### Artist photos
+
+- Photos come from Spotify (while it's connected) and Deezer, then Wikimedia Commons. fanart.tv is no longer used, so no API key is needed. Deezer finds artists by name and checks them against your albums, so an artist with the same name isn't mistaken for yours.
+- Artists looked up before get their photos looked up once more. Photos you chose yourself stay.
+
+### Spotify fixes
+
+- Searching Spotify always failed with "403: Insufficient client scope"; it works again.
+- Because of that, matching a playlist's songs asked Spotify once for every song, again at every sync, which could get Gatefold blocked for many hours ("too many requests"). Searches now stop at the first error, and while Spotify asks to wait, Gatefold doesn't ask again, also after a restart.
+- When Spotify doesn't show an artist's releases, the page says why.
+
+### Install
+
+Download `gatefold-0.1.1-1.fc45.x86_64.rpm` below and install it:
+
+```sh
+sudo dnf install ./gatefold-0.1.1-1.fc45.x86_64.rpm
+```
 
 ## 0.1.0 (pre-release)
 

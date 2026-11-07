@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -97,6 +97,15 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sun Nov 08 2026 sobakah - 0.1.1-1
+- Playlists sort like on Spotify; playlist songs get the album songs'
+  actions; Spotify songs' artist and album open from the player
+- Start options for the view and the player's panes
+- Side panels: cover backdrop, a grip to close them
+- Artist photos from Spotify and Deezer instead of fanart.tv
+- Fixed Spotify search (403), and the request flood it caused; rate
+  limits are kept across restarts
+
 * Fri Nov 06 2026 sobakah - 0.1.0-1
 - Project skeleton (roadmap phase 0)
 - Library scanner, album grid and panel, playback, queue, MPRIS (phase 1)

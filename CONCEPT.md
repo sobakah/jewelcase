@@ -178,7 +178,7 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 - **Narrow windows** (`AdwBreakpoint` < ~700 px): the side panel turns into an overlay sheet that covers the grid, and the mini bar stays visible.
 - **Artists**: grid of circular portraits (`AdwAvatar`-style, with the actual image) and names, using only album artists. Clicking one pushes the **artist page** onto an `AdwNavigationView`. This is the **only** real page navigation in the app.
 - **Playlists**: grid of playlist covers (custom image or an automatic 2×2 cover mosaic). Clicking opens the same detail side panel with an editable track order (drag & drop, remove, rename).
-  - Like on Spotify, a playlist can be listed by its own order, title, artist, album, date added or duration, each also reversed. It's remembered per playlist and only changes the view (and what Play plays), not the stored order; dragging only works in the playlist's own order. The date added is Spotify's for Spotify entries, else when the song was added (unknown for entries from before 0.2).
+  - Like on Spotify, a playlist can be listed by its own order, title, artist, album, date added or duration, each also reversed. It's remembered per playlist and only changes the view (and what Play plays), not the stored order; dragging only works in the playlist's own order. The date added is Spotify's for Spotify entries, else when the song was added (unknown for entries from before 0.1.1).
   - Its songs have the same actions as an album's: Add to queue on the row, Play next, Add to playlist, Go to album and Go to artist in its menu (Spotify songs too: their pages are looked up on Spotify). The playlist's menu has Play next, Add to queue and Add to playlist for all of it.
 - **Search**: a single search field (`GtkSearchBar`) backed by SQLite FTS5. Results are grouped into Artists / Albums / Songs / Playlists in a popover-like card that floats over the current view. The field takes typing as soon as search opens; Escape, the search button, a click beside the card or opening a result closes it.
 
@@ -348,7 +348,7 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 5. **Wikidata `P18`** → Wikimedia Commons image (freely licensed; attribution shown in a tooltip).
 6. Fallback: generated initials avatar tinted with the color of their most common album cover.
 
-fanart.tv was dropped in 0.2: it needed a key and, being volunteer-made, rarely had more than Commons for this library. Lookups done before Spotify and Deezer were sources are repeated once (database migration 019).
+fanart.tv was dropped in 0.1.1: it needed a key and, being volunteer-made, rarely had more than Commons for this library. Lookups done before Spotify and Deezer were sources are repeated once (database migration 019).
 
 If tags have no MBIDs, the app searches MusicBrainz by name and album titles and auto-accepts only a high-confidence match. Otherwise the artist shows a small "Identify artist…" prompt where the user picks the right match.
 

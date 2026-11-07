@@ -48,6 +48,20 @@
   </branding>
 
   <releases>
+    <release version="0.1.1" date="2026-11-08" type="development">
+      <description>
+        <p>Playlists, Spotify fixes and a new look for the side panels.</p>
+        <ul>
+          <li>Playlists can be sorted by title, artist, album, date added or duration, also reversed</li>
+          <li>Playlist songs can be queued, added to other playlists and lead to their album and artist</li>
+          <li>The artist and album of Spotify songs in the player open their pages</li>
+          <li>Choose the view to start with, and whether lyrics and queue show in the player</li>
+          <li>Side panels show their cover blurred behind the top and close with a grip</li>
+          <li>Artist photos from Spotify and Deezer; fanart.tv is no longer used</li>
+          <li>Spotify search works again, and Gatefold respects Spotify's rate limits</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-07" type="development">
       <description>
         <p>The first pre-release of Gatefold.</p>
