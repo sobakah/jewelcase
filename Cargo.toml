@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["app", "core", "lyrics", "metadata", "spotify", "stream", "tools"]
+members = ["app", "core", "lyrics", "metadata", "soloist", "spotify", "stream", "tools"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ repository = "https://github.com/sobakah/gatefold"
 gatefold-core = { path = "core" }
 gatefold-lyrics = { path = "lyrics" }
 gatefold-metadata = { path = "metadata" }
+gatefold-soloist = { path = "soloist" }
 gatefold-spotify = { path = "spotify" }
 gatefold-stream = { path = "stream" }
 gatefold-tools = { path = "tools" }

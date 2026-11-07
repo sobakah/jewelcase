@@ -1,0 +1,16 @@
+[package]
+name = "gatefold-soloist"
+description = "Gatefold's Spotify Soloist control: starts Spotify's official headless client and drives it over its local WebSocket API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-channel.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Plain ws:// on 127.0.0.1 only; no TLS.
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }

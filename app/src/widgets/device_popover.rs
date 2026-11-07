@@ -137,7 +137,12 @@ fn fill(popover: &gtk::Popover) {
                 )));
             }
             let current = spotify.remote_device_id();
-            for device in devices {
+            // Soloist streams for Gatefold: it's "This Computer" already.
+            let own = spotify.soloist_device_name();
+            for device in devices
+                .into_iter()
+                .filter(|d| own.as_deref() != Some(d.name.as_str()))
+            {
                 let usable = device.id.is_some() && !device.is_restricted;
                 let row = device_row(
                     device.icon_name(),

@@ -8,6 +8,7 @@
 mod keyring;
 pub mod preferences;
 mod remote;
+mod soloist;
 mod stream;
 mod sync;
 

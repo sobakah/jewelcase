@@ -1147,6 +1147,7 @@ dependencies = [
  "gatefold-core",
  "gatefold-lyrics",
  "gatefold-metadata",
+ "gatefold-soloist",
  "gatefold-spotify",
  "gatefold-stream",
  "gatefold-tools",
@@ -1202,6 +1203,17 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "ureq",
+]
+
+[[package]]
+name = "gatefold-soloist"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "tungstenite",
 ]
 
 [[package]]

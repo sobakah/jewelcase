@@ -98,3 +98,18 @@ where
         .map_err(|_| "the keyring job failed".to_owned())?
         .map_err(|e| e.to_string())
 }
+
+/// The user's Spotify Soloist API key (CONCEPT.md §9.4).
+const SOLOIST_KEY: &str = "soloist-api-key";
+
+pub async fn load_soloist_key() -> Result<Option<String>, String> {
+    load_text(SOLOIST_KEY).await
+}
+
+pub async fn save_soloist_key(key: String) -> Result<(), String> {
+    save_text(SOLOIST_KEY, "Gatefold: Spotify Soloist API key", key).await
+}
+
+pub async fn delete_soloist_key() -> Result<(), String> {
+    delete_kind(SOLOIST_KEY).await
+}

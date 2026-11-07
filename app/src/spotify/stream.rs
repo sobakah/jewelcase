@@ -1,10 +1,11 @@
-//! Streaming from Spotify (CONCEPT.md §9.4): optional, unofficial
-//! (librespot), built only with the `spotify-stream` feature. Spotify
-//! songs that aren't in the library play through Gatefold's own output.
+//! Streaming Spotify songs that aren't in the library (CONCEPT.md §9.4),
+//! with one of two backends: Spotify Soloist (official, `soloist.rs`) or
+//! librespot (unofficial, only built with the `spotify-stream` feature;
+//! its songs play through Gatefold's own output).
 //!
-//! Without the feature, everything here says "can't stream", so callers
-//! don't need their own `cfg`s.
+//! Callers use the `stream_*` methods and don't need their own `cfg`s.
 
+use gtk::gio::prelude::*;
 use gtk::subclass::prelude::*;
 
 use super::Spotify;
@@ -28,6 +29,7 @@ pub struct StreamState {
     /// The login just happened in the browser: store it once connected.
     #[cfg(feature = "spotify-stream")]
     fresh_login: bool,
+    pub(super) soloist: super::soloist::SoloistState,
 }
 
 impl Spotify {
@@ -96,7 +98,7 @@ pub fn fetch_covers(urls: Vec<String>, done: impl FnOnce() + 'static) {
 }
 
 impl Spotify {
-    fn set_stream_status(&self, status: &str) {
+    pub(super) fn set_stream_status(&self, status: &str) {
         if *self.imp().stream_status.borrow() != status {
             self.imp().stream_status.replace(status.to_owned());
             self.notify_stream_status();
@@ -116,17 +118,13 @@ mod enabled {
     use gatefold_stream::{Credentials, Login, StreamEvent, StreamPlayer};
     use gettextrs::gettext;
     use gtk::glib;
-    use gtk::prelude::*;
 
     use super::*;
     use crate::spotify::keyring;
 
     impl Spotify {
         /// On start: logs in with the stored streaming login.
-        pub fn start_streaming(&self) {
-            if !self.settings().boolean("spotify-streaming") {
-                return;
-            }
+        pub(super) fn librespot_start(&self) {
             glib::spawn_future_local(glib::clone!(
                 #[weak(rename_to = spotify)]
                 self,
@@ -150,7 +148,7 @@ mod enabled {
 
         /// Turns streaming on: a login in the browser (as librespot, the
         /// only client Spotify lets stream), then connects.
-        pub async fn enable_streaming(&self) {
+        pub(super) async fn librespot_enable(&self) {
             let callback = match Callback::bind_at(gatefold_stream::REDIRECT_PORT, "/login") {
                 Ok(callback) => callback,
                 Err(err) => {
@@ -221,14 +219,14 @@ mod enabled {
         }
 
         /// Turns streaming off and forgets its login.
-        pub async fn disable_streaming(&self) {
+        pub(super) async fn librespot_disable(&self, forget: bool) {
             if let Some(player) = self.imp().stream.borrow().player.as_ref() {
                 player.stop();
             }
             self.imp().stream.borrow_mut().player = None;
             self.set_stream_status("off");
             GatefoldApplication::get().player().stream_gone();
-            if let Err(err) = keyring::delete_stream().await {
+            if forget && let Err(err) = keyring::delete_stream().await {
                 tracing::info!("Cannot remove the streaming login: {err}");
             }
         }
@@ -300,35 +298,35 @@ mod enabled {
             }
         }
 
-        pub fn stream_load(&self, uri: &str, start_ms: u64, play: bool) {
+        pub(super) fn librespot_load(&self, uri: &str, start_ms: u64, play: bool) {
             self.with_stream(|p| p.load(uri, start_ms, play));
         }
 
-        pub fn stream_preload(&self, uri: &str) {
+        pub(super) fn librespot_preload(&self, uri: &str) {
             self.with_stream(|p| p.preload(uri));
         }
 
-        pub fn stream_play(&self) {
+        pub(super) fn librespot_play(&self) {
             self.with_stream(StreamPlayer::play);
         }
 
-        pub fn stream_pause(&self) {
+        pub(super) fn librespot_pause(&self) {
             self.with_stream(StreamPlayer::pause);
         }
 
-        pub fn stream_stop(&self) {
+        pub(super) fn librespot_stop(&self) {
             self.with_stream(StreamPlayer::stop);
         }
 
-        pub fn stream_seek(&self, ms: u64) {
+        pub(super) fn librespot_seek(&self, ms: u64) {
             self.with_stream(|p| p.seek(ms));
         }
 
-        pub fn stream_volume(&self, volume: f64) {
+        pub(super) fn librespot_volume(&self, volume: f64) {
             self.with_stream(|p| p.set_volume(volume));
         }
 
-        pub fn stream_position(&self) -> u64 {
+        pub(super) fn librespot_position(&self) -> u64 {
             self.imp()
                 .stream
                 .borrow()
@@ -339,25 +337,136 @@ mod enabled {
     }
 }
 
+/// Builds without librespot: only Soloist streams.
 #[cfg(not(feature = "spotify-stream"))]
 impl Spotify {
-    pub fn start_streaming(&self) {}
-    pub async fn enable_streaming(&self) {
+    pub(super) fn librespot_start(&self) {}
+    pub(super) async fn librespot_enable(&self) {
         self.set_stream_status("off");
     }
-    pub async fn disable_streaming(&self) {}
-    pub fn stream_load(&self, _uri: &str, _start_ms: u64, _play: bool) {
+    pub(super) async fn librespot_disable(&self, _forget: bool) {}
+    pub(super) fn librespot_load(&self, _uri: &str, _start_ms: u64, _play: bool) {
         GatefoldApplication::get()
             .player()
             .stream_note(StreamNote::Unavailable);
     }
-    pub fn stream_preload(&self, _uri: &str) {}
-    pub fn stream_play(&self) {}
-    pub fn stream_pause(&self) {}
-    pub fn stream_stop(&self) {}
-    pub fn stream_seek(&self, _ms: u64) {}
-    pub fn stream_volume(&self, _volume: f64) {}
-    pub fn stream_position(&self) -> u64 {
+    pub(super) fn librespot_preload(&self, _uri: &str) {}
+    pub(super) fn librespot_play(&self) {}
+    pub(super) fn librespot_pause(&self) {}
+    pub(super) fn librespot_stop(&self) {}
+    pub(super) fn librespot_seek(&self, _ms: u64) {}
+    pub(super) fn librespot_volume(&self, _volume: f64) {}
+    pub(super) fn librespot_position(&self) -> u64 {
         0
+    }
+}
+
+/// How Spotify songs stream (§9.4): Spotify's official Soloist, or
+/// librespot (unofficial, only in builds with the feature).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Soloist,
+    Librespot,
+}
+
+impl Spotify {
+    pub fn stream_backend(&self) -> Backend {
+        if Self::streaming_built()
+            && self.settings().string("spotify-stream-backend") == "librespot"
+        {
+            Backend::Librespot
+        } else {
+            Backend::Soloist
+        }
+    }
+
+    /// On start: streams again if it's on.
+    pub fn start_streaming(&self) {
+        if !self.settings().boolean("spotify-streaming") {
+            return;
+        }
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_start(),
+            Backend::Librespot => self.librespot_start(),
+        }
+    }
+
+    /// The switch was turned on.
+    pub async fn enable_streaming(&self) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_start(),
+            Backend::Librespot => self.librespot_enable().await,
+        }
+    }
+
+    /// The switch was turned off (`forget`: the librespot login too).
+    pub async fn disable_streaming(&self, forget: bool) {
+        self.soloist_stop();
+        self.librespot_disable(forget).await;
+        self.set_stream_status("off");
+    }
+
+    /// Another backend was chosen: the old one stops, the new one starts.
+    pub async fn switch_stream_backend(&self) {
+        GatefoldApplication::get().player().stream_gone();
+        self.soloist_stop();
+        self.librespot_disable(false).await;
+        self.set_stream_status("off");
+        self.start_streaming();
+    }
+
+    pub fn stream_load(&self, uri: &str, start_ms: u64, play: bool) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_load(uri, start_ms, play),
+            Backend::Librespot => self.librespot_load(uri, start_ms, play),
+        }
+    }
+
+    pub fn stream_preload(&self, uri: &str) {
+        if self.stream_backend() == Backend::Librespot {
+            self.librespot_preload(uri);
+        }
+    }
+
+    pub fn stream_play(&self) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_play(),
+            Backend::Librespot => self.librespot_play(),
+        }
+    }
+
+    pub fn stream_pause(&self) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_pause(),
+            Backend::Librespot => self.librespot_pause(),
+        }
+    }
+
+    pub fn stream_stop(&self) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_stop_playback(),
+            Backend::Librespot => self.librespot_stop(),
+        }
+    }
+
+    pub fn stream_seek(&self, ms: u64) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_seek(ms),
+            Backend::Librespot => self.librespot_seek(ms),
+        }
+    }
+
+    pub fn stream_volume(&self, volume: f64) {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_volume(volume),
+            Backend::Librespot => self.librespot_volume(volume),
+        }
+    }
+
+    pub fn stream_position(&self) -> u64 {
+        match self.stream_backend() {
+            Backend::Soloist => self.soloist_position(),
+            Backend::Librespot => self.librespot_position(),
+        }
     }
 }

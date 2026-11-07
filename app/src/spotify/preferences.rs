@@ -209,34 +209,58 @@ pub fn page() -> adw::PreferencesPage {
     page
 }
 
-/// Streaming (§9.4): its own switch, with the risks said plainly.
+/// Streaming (§9.4): Spotify Soloist (official) or librespot (unofficial,
+/// only in builds with it), with the switch and what each needs.
 fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
+    use super::stream::Backend;
+    let settings = spotify.settings().clone();
     let group = adw::PreferencesGroup::builder()
         .title(gettext("Streaming"))
         .description(gettext(
-            "Plays songs that aren’t in your library from Spotify, right in Gatefold, through librespot, an unofficial Spotify client. Needs Spotify Premium. Using it goes against Spotify’s terms of use, and Spotify can stop it from working at any time. Your own files always play from your library.",
+            "Plays Spotify songs that aren’t in your library. Your own files always play from your library.",
         ))
         .build();
-    if !Spotify::streaming_built() {
-        group.add(
-            &adw::ActionRow::builder()
-                .title(gettext("Not Included in This Build"))
-                .subtitle(gettext(
-                    "Gatefold was built without streaming (the spotify-stream feature).",
-                ))
-                .build(),
-        );
-        return group;
-    }
+
+    // Which way (only offered when librespot is built in).
+    let backend = adw::ComboRow::builder()
+        .title(gettext("Streams _With"))
+        .use_underline(true)
+        .model(&gtk::StringList::new(&[
+            &gettext("Spotify Soloist (official)"),
+            &gettext("librespot (unofficial)"),
+        ]))
+        .visible(Spotify::streaming_built())
+        .build();
+    backend.set_selected(u32::from(spotify.stream_backend() == Backend::Librespot));
+    backend.connect_selected_notify(glib::clone!(
+        #[weak]
+        spotify,
+        move |row| {
+            let value = if row.selected() == 1 {
+                "librespot"
+            } else {
+                "soloist"
+            };
+            if spotify.settings().string("spotify-stream-backend") == value {
+                return;
+            }
+            let _ = spotify
+                .settings()
+                .set_string("spotify-stream-backend", value);
+            glib::spawn_future_local(async move { spotify.switch_stream_backend().await });
+        }
+    ));
+    group.add(&backend);
+
+    let about = adw::ActionRow::builder().use_markup(false).build();
+    about.add_css_class("property");
+    group.add(&about);
+
     let switch = adw::SwitchRow::builder()
         .title(gettext("Stream _From Spotify"))
-        .subtitle(gettext(
-            "Turning it on opens a second Spotify login in the browser, as librespot",
-        ))
         .use_underline(true)
         .build();
-    spotify
-        .settings()
+    settings
         .bind("spotify-streaming", &switch, "active")
         .build();
     switch.connect_active_notify(glib::clone!(
@@ -244,33 +268,173 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         spotify,
         move |switch| {
             let on = switch.is_active();
-            let ready = spotify.stream_status() != "off";
+            let running = !matches!(
+                spotify.stream_status().as_str(),
+                "off" | "missing" | "needs-key" | "error" | "expired"
+            );
             glib::spawn_future_local(async move {
-                if on && !ready {
+                if on && !running {
                     spotify.enable_streaming().await;
                 } else if !on {
-                    spotify.disable_streaming().await;
+                    spotify.disable_streaming(true).await;
                 }
             });
         }
     ));
     group.add(&switch);
-    let status = adw::ActionRow::builder().title(gettext("Status")).build();
+
+    // Soloist: the program (or soloistd) and the API key.
+    let program = adw::ActionRow::builder()
+        .title(gettext("Soloist"))
+        .use_markup(false)
+        .build();
+    let download = gtk::Button::builder()
+        .label(gettext("Download Page"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    download.connect_clicked(|_| super::open_in_browser(gatefold_soloist::DOWNLOADS_URL));
+    program.add_suffix(&download);
+    group.add(&program);
+    let key = adw::PasswordEntryRow::builder()
+        .title(gettext("Soloist API Key"))
+        .show_apply_button(true)
+        .build();
+    let get_key = gtk::Button::builder()
+        .icon_name("adw-external-link-symbolic")
+        .tooltip_text(gettext("Get an API Key"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    get_key.connect_clicked(|_| super::open_in_browser(gatefold_soloist::API_KEY_URL));
+    key.add_suffix(&get_key);
+    key.connect_apply(glib::clone!(
+        #[weak]
+        spotify,
+        move |row| {
+            let text = row.text().trim().to_owned();
+            row.set_text("");
+            glib::spawn_future_local(async move {
+                let saved = if text.is_empty() {
+                    super::keyring::delete_soloist_key().await
+                } else {
+                    super::keyring::save_soloist_key(text).await
+                };
+                match saved {
+                    Ok(()) => {
+                        spotify.message(&gettext("Soloist API key saved"));
+                        if spotify.settings().boolean("spotify-streaming") {
+                            spotify.start_streaming();
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("Cannot store the Soloist API key: {err}");
+                        spotify.message(&gettext("The API key couldn't be saved in the keyring"));
+                    }
+                }
+            });
+        }
+    ));
+    group.add(&key);
+
+    let status = adw::ActionRow::builder()
+        .title(gettext("Status"))
+        .use_markup(false)
+        .build();
+    group.add(&status);
+
     let update = glib::clone!(
+        #[weak]
+        about,
+        #[weak]
+        switch,
+        #[weak]
+        program,
+        #[weak]
+        download,
+        #[weak]
+        key,
         #[weak]
         status,
         move |spotify: &Spotify| {
+            let soloist = spotify.stream_backend() == Backend::Soloist;
+            about.set_title(&if soloist {
+                gettext(
+                    "Spotify Soloist is Spotify’s own headless player; it plays through your speakers, Gatefold controls it. Get it from Spotify (soloistd can install and update it), plus a free Soloist API key. Needs Spotify Premium. Spotify’s terms don’t clearly cover using it from another app.",
+                )
+            } else {
+                gettext(
+                    "librespot is an unofficial Spotify client; songs play through Gatefold’s own output. Needs Spotify Premium. Using it goes against Spotify’s terms of use, and Spotify can stop it from working at any time (on some accounts it already doesn’t).",
+                )
+            });
+            switch.set_subtitle(&if soloist {
+                String::new()
+            } else {
+                gettext("Turning it on opens a second Spotify login in the browser, as librespot")
+            });
+            program.set_visible(soloist);
+            key.set_visible(soloist);
+            if soloist {
+                let running = gatefold_soloist::find_running();
+                let configured = spotify.settings().string("soloist-path");
+                let configured = (!configured.trim().is_empty())
+                    .then(|| std::path::PathBuf::from(configured.trim()));
+                let binary = gatefold_soloist::find_binary(configured.as_deref());
+                let (text, missing) = match (&running, &binary) {
+                    (Some(running), _) => (
+                        // Translators: {} is "soloistd" or "soloist".
+                        gettext("Running ({}); Gatefold uses it, no API key needed here")
+                            .replace("{}", running.source),
+                        false,
+                    ),
+                    (None, Some(binary)) => (
+                        gatefold_soloist::version(binary)
+                            .unwrap_or_else(|| binary.display().to_string()),
+                        false,
+                    ),
+                    (None, None) if gatefold_soloist::soloistd_installed() => (
+                        gettext(
+                            "soloistd is set up but its WebSocket API is off: add \"websocket\": \"127.0.0.1:9090\" to its config.json and restart it",
+                        ),
+                        false,
+                    ),
+                    (None, None) => (gettext("Not installed"), true),
+                };
+                program.set_subtitle(&text);
+                download.set_visible(missing);
+                // Only needed when Gatefold starts Soloist itself.
+                key.set_sensitive(running.is_none());
+            }
             status.set_subtitle(&match spotify.stream_status().as_str() {
                 "ready" => gettext("Ready: songs that aren’t in your library play from Spotify"),
-                "connecting" => gettext("Logging in…"),
-                "error" => gettext("Not working right now; Spotify may have changed something"),
+                "connecting" => gettext("Connecting…"),
+                "pairing" => gettext(
+                    "Link Soloist once: in the Spotify app on your phone or computer, open the device list and choose it",
+                ),
+                "missing" => gettext("Soloist isn’t installed (see above)"),
+                "needs-key" => gettext("Enter your Soloist API key above"),
+                "expired" => gettext(
+                    "This Soloist build has expired: download the new one (soloistd updates it by itself)",
+                ),
+                "error" => gettext("Not working right now"),
                 _ => gettext("Off"),
             });
         }
     );
     update(spotify);
-    spotify.connect_stream_status_notify(move |spotify| update(spotify));
-    group.add(&status);
+    spotify.connect_stream_status_notify(glib::clone!(
+        #[strong]
+        update,
+        move |spotify| update(spotify)
+    ));
+    settings.connect_changed(
+        Some("spotify-stream-backend"),
+        glib::clone!(
+            #[weak]
+            spotify,
+            move |_, _| update(&spotify)
+        ),
+    );
     group
 }
 

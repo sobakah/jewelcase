@@ -140,6 +140,20 @@
       <summary>Stream from Spotify</summary>
       <description>Songs that aren’t in the library play from Spotify through librespot (unofficial; only in builds with the spotify-stream feature).</description>
     </key>
+    <key name="spotify-stream-backend" type="s">
+      <choices>
+        <choice value="soloist"/>
+        <choice value="librespot"/>
+      </choices>
+      <default>"soloist"</default>
+      <summary>How Spotify songs stream</summary>
+      <description>soloist: Spotify’s official Soloist (a running one, e.g. from soloistd, or started by Gatefold). librespot: unofficial, only in builds with the spotify-stream feature.</description>
+    </key>
+    <key name="soloist-path" type="s">
+      <default>""</default>
+      <summary>Spotify Soloist program</summary>
+      <description>Empty: look in PATH, ~/.local/bin and /usr/local/bin.</description>
+    </key>
     <key name="spotify-playlists" type="b">
       <default>true</default>
       <summary>Show Spotify playlists</summary>

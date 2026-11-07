@@ -44,6 +44,8 @@ trap 'exit 130' INT TERM
 
 export XDG_RUNTIME_DIR="$runtime"
 export XDG_DATA_HOME="$state/data" XDG_CACHE_HOME="$state/cache"
+# Never the user's own soloistd (it would control their real Soloist).
+export GATEFOLD_SOLOISTD_CONFIG="$state/soloistd/config.json"
 export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1 GATEFOLD_NO_KEYRING=1
 # Keep GTK away from portals, gvfs and the accessibility bus.
 export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none

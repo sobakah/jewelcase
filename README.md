@@ -70,10 +70,19 @@ The account needs Spotify Premium. The login is stored in the keyring. Then:
   your files (ISRC, then title, artist and length). Your own playlists can be edited here
   and the changes are sent to Spotify; *Create on Spotify* publishes a local playlist.
 
-**Streaming** (optional, unofficial): with the `spotify-stream` feature (`meson -Dspotify_stream=true`,
-on in `make run` builds), Preferences → Spotify → Streaming plays songs that aren't in your
-library through librespot. It needs a second, one-time browser login. It's against Spotify's
-terms of use and may stop working at any time; your own files always play from the library.
+**Streaming** (optional): Preferences → Spotify → Streaming plays songs that aren't in your
+library, in Gatefold's queue. Your own files always play from the library.
+
+- **Spotify Soloist** (default): Spotify's official headless client. Install it from Spotify's
+  [downloads page](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates),
+  or let [soloistd](https://github.com/MopigamesYT/soloistd) install and update it (set its
+  `websocket` to e.g. `127.0.0.1:9090`; Gatefold then uses it and needs nothing else). Without
+  soloistd, Gatefold starts Soloist itself with your Soloist API key. Link it once by choosing it
+  in the Spotify app's device list. Builds expire after 90 days. Spotify's terms don't clearly
+  cover controlling it from another app.
+- **librespot** (unofficial): with the `spotify-stream` feature (`meson -Dspotify_stream=true`, on
+  in `make run` builds). Needs a second browser login, is against Spotify's terms of use, and
+  doesn't work on some accounts (Spotify refuses its audio keys).
 
 For development, debug builds talk to a stand-in server instead of Spotify when
 `GATEFOLD_SPOTIFY_TEST_SERVER=http://127.0.0.1:<port>` is set.
@@ -87,6 +96,8 @@ tools/      lyrembed, cdimport, tag editor: detection, commands, configs (crate 
 lyrics/     LRC parsing, embedded and sidecar lyrics, dual-line pairing (crate `gatefold-lyrics`)
 metadata/   MusicBrainz, Wikidata, Commons, fanart.tv lookups (crate `gatefold-metadata`)
 spotify/    Spotify login (OAuth PKCE) and Web API: player, playlists, search (crate `gatefold-spotify`)
+soloist/    Spotify Soloist control over its local WebSocket API (crate `gatefold-soloist`)
+stream/     optional librespot streaming into GStreamer (crate `gatefold-stream`, feature `spotify-stream`)
 data/       desktop file, metainfo, GSettings schema, icons, Blueprint UI + CSS (data/resources)
 po/         translations
 build-aux/  build helper scripts

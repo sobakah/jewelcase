@@ -1257,6 +1257,11 @@ impl GatefoldWindow {
                     }
                 });
             }
+            // `GATEFOLD_SCREENSHOT_STREAM=1`: start streaming (the settings
+            // above came after the app's start).
+            if std::env::var_os("GATEFOLD_SCREENSHOT_STREAM").is_some() {
+                GatefoldApplication::get().spotify().start_streaming();
+            }
             // `GATEFOLD_SCREENSHOT_SPOTIFY=1`: connect (with the stand-in
             // server of GATEFOLD_SPOTIFY_TEST_SERVER).
             if std::env::var_os("GATEFOLD_SCREENSHOT_SPOTIFY").is_some() {
@@ -1360,6 +1365,22 @@ impl GatefoldWindow {
                     {
                         let spotify = spotify.clone();
                         glib::spawn_future_local(async move { spotify.publish(id, &panel).await });
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS=playlist.play`: actions of
+            // the playlist panel, 4 s in.
+            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(4, move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let panel = window.imp().playlist_panel.get();
+                    for action in actions.split_whitespace() {
+                        if let Err(err) = WidgetExt::activate_action(&panel, action, None) {
+                            tracing::warn!("Screenshot playlist action {action}: {err}");
+                        }
                     }
                 });
             }

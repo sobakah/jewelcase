@@ -99,4 +99,5 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 - Smart shuffle: song analysis, similar songs, album shuffle (phase 6)
 - Spotify account: Connect devices, playlists matched to the library,
   two-way editing, "Create on Spotify" (phase 7)
-- Optional Spotify streaming through librespot, --with spotify_stream (phase 8)
+- Streaming Spotify songs through Spotify Soloist (official, installed
+  separately), or librespot with --with spotify_stream (phase 8)

@@ -16,6 +16,7 @@ spotify-stream = ["dep:gatefold-stream"]
 gatefold-core.workspace = true
 gatefold-lyrics.workspace = true
 gatefold-metadata.workspace = true
+gatefold-soloist.workspace = true
 gatefold-spotify.workspace = true
 gatefold-stream = { workspace = true, optional = true }
 gatefold-tools.workspace = true
