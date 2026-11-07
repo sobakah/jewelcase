@@ -92,26 +92,13 @@ pub struct AlbumFacts<'a> {
 /// the same year and number of songs and a word of the title in common
 /// ("樂-STAR" is "ROCK-STAR" on Spotify).
 pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) -> bool {
-    let digits = |code: &str| code.trim_start_matches('0').to_owned();
     if let (Some(a), Some(b)) = (local.barcode, remote.barcode)
         && !a.is_empty()
-        && digits(a) == digits(b)
+        && barcode_key(a) == barcode_key(b)
     {
         return true;
     }
-    let keys = |names: &[String]| -> BTreeSet<String> {
-        names
-            .iter()
-            .flat_map(|a| {
-                let mut names = track_artist_names(a);
-                names.push(a.clone());
-                names
-            })
-            .map(|name| artist_key(&name, aliases))
-            .filter(|k| !k.is_empty())
-            .collect()
-    };
-    if keys(local.artists).is_disjoint(&keys(remote.artists)) {
+    if artist_keys(local.artists, aliases).is_disjoint(&artist_keys(remote.artists, aliases)) {
         return false;
     }
     // The same title is the same release only with the same version
@@ -139,6 +126,26 @@ pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) ->
         && local.tracks > 0
         && local.tracks == remote.tracks
         && !words(local.title).is_disjoint(&words(remote.title))
+}
+
+/// The keys albums by these artists are compared and indexed by: each
+/// name and the names in a joint credit, aliases resolved.
+pub fn artist_keys(names: &[String], aliases: &Aliases) -> BTreeSet<String> {
+    names
+        .iter()
+        .flat_map(|a| {
+            let mut names = track_artist_names(a);
+            names.push(a.clone());
+            names
+        })
+        .map(|name| artist_key(&name, aliases))
+        .filter(|k| !k.is_empty())
+        .collect()
+}
+
+/// A barcode as compared (leading zeros don't count: UPC vs EAN-13).
+pub fn barcode_key(code: &str) -> String {
+    code.trim().trim_start_matches('0').to_owned()
 }
 
 fn artists_agree(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> bool {

@@ -31,6 +31,25 @@ use crate::objects::{AlbumObject, ArtistObject, PlaylistObject, TrackObject};
 /// Changes are collected this long before an incremental scan starts.
 const WATCH_DEBOUNCE: Duration = Duration::from_secs(3);
 
+/// The library's albums by artist and barcode, to find a Spotify album's
+/// library copy quickly (§9.8).
+#[derive(Debug, Default)]
+pub struct AlbumIndex {
+    entries: Vec<AlbumEntry>,
+    by_artist: HashMap<String, Vec<usize>>,
+    by_barcode: HashMap<String, Vec<usize>>,
+}
+
+#[derive(Debug)]
+struct AlbumEntry {
+    group: AlbumObject,
+    title: String,
+    artist: String,
+    year: Option<i32>,
+    tracks: u32,
+    barcode: Option<String>,
+}
+
 enum ScanMessage {
     Progress(ScanProgress),
     Done(Result<ScanSummary, String>, Aliases),
@@ -61,6 +80,8 @@ mod imp {
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
         /// The next scan regroups even if nothing changed ("Rescan Library").
         pub force_rescan: Cell<bool>,
+        /// See `album_index()`; dropped when the library is read again.
+        pub album_index: RefCell<Option<std::rc::Rc<super::AlbumIndex>>>,
         /// See `match_index()`; dropped when the library is read again.
         pub match_index: RefCell<Option<std::rc::Rc<gatefold_core::matching::MatchIndex>>>,
         /// Barcodes by album, to recognize albums on Spotify (§9.8).
@@ -297,6 +318,7 @@ impl Library {
         crate::covers::clear();
         // Songs or aliases changed: matched afresh.
         self.imp().match_index.replace(None);
+        self.imp().album_index.replace(None);
         self.reload_artists();
         self.rematch_spotify();
         self.reload_playlists();
@@ -415,7 +437,7 @@ impl Library {
 
     /// The library's copy of an album on Spotify, if it has one (§9.8).
     pub fn local_album_for(&self, album: &gatefold_core::db::SpotifyAlbum) -> Option<AlbumObject> {
-        use gatefold_core::matching::{AlbumFacts, same_album};
+        use gatefold_core::matching::{AlbumFacts, artist_keys, barcode_key, same_album};
         let remote_artists: Vec<String> = album.artist.split(", ").map(str::to_owned).collect();
         let remote = AlbumFacts {
             title: &album.name,
@@ -424,24 +446,79 @@ impl Library {
             tracks: album.total_tracks,
             barcode: album.upc.as_deref(),
         };
+        let index = self.album_index();
         let aliases = self.aliases().clone();
-        let barcodes = self.imp().album_barcodes.borrow();
+        // Only albums by the same artist (or with the same barcode) are
+        // compared, not all of them for every Spotify album.
+        let mut candidates: Vec<usize> = artist_keys(&remote_artists, &aliases)
+            .iter()
+            .filter_map(|key| index.by_artist.get(key))
+            .flatten()
+            .copied()
+            .collect();
+        if let Some(code) = &album.upc {
+            candidates.extend(
+                index
+                    .by_barcode
+                    .get(&barcode_key(code))
+                    .into_iter()
+                    .flatten(),
+            );
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates.into_iter().find_map(|i| {
+            let entry = &index.entries[i];
+            let local = AlbumFacts {
+                title: &entry.title,
+                artists: std::slice::from_ref(&entry.artist),
+                year: entry.year,
+                tracks: entry.tracks,
+                barcode: entry.barcode.as_deref(),
+            };
+            same_album(&local, &remote, &aliases).then(|| entry.group.clone())
+        })
+    }
+
+    /// The library's albums indexed for `local_album_for` (per reload).
+    fn album_index(&self) -> std::rc::Rc<AlbumIndex> {
+        use gatefold_core::matching::{artist_keys, barcode_key};
+        if let Some(index) = self.imp().album_index.borrow().as_ref() {
+            return index.clone();
+        }
+        let aliases = self.aliases().clone();
+        let barcodes = self.imp().album_barcodes.borrow().clone();
+        let mut index = AlbumIndex::default();
         let store = self.albums();
-        (0..store.n_items())
-            .filter_map(|i| store.item(i).and_downcast::<AlbumObject>())
-            .find(|group| {
-                group.versions().iter().any(|version| {
-                    let artists = vec![version.artist_credit.clone()];
-                    let local = AlbumFacts {
-                        title: &version.title,
-                        artists: &artists,
-                        year: version.year,
-                        tracks: version.track_count,
-                        barcode: barcodes.get(&version.id).map(String::as_str),
-                    };
-                    same_album(&local, &remote, &aliases)
-                })
-            })
+        for group in
+            (0..store.n_items()).filter_map(|i| store.item(i).and_downcast::<AlbumObject>())
+        {
+            for version in group.versions() {
+                let position = index.entries.len();
+                let barcode = barcodes.get(&version.id).cloned();
+                for key in artist_keys(std::slice::from_ref(&version.artist_credit), &aliases) {
+                    index.by_artist.entry(key).or_default().push(position);
+                }
+                if let Some(code) = &barcode {
+                    index
+                        .by_barcode
+                        .entry(barcode_key(code))
+                        .or_default()
+                        .push(position);
+                }
+                index.entries.push(AlbumEntry {
+                    group: group.clone(),
+                    title: version.title.clone(),
+                    artist: version.artist_credit.clone(),
+                    year: version.year,
+                    tracks: version.track_count,
+                    barcode,
+                });
+            }
+        }
+        let index = std::rc::Rc::new(index);
+        self.imp().album_index.replace(Some(index.clone()));
+        index
     }
 
     /// The album group containing the album with this ID.
