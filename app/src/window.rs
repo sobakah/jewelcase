@@ -1772,8 +1772,13 @@ impl GatefoldWindow {
                     let action = action.to_owned();
                     let window = window.downgrade();
                     glib::timeout_add_seconds_local_once(at, move || {
+                        let (name, target) = match action.split_once("::") {
+                            Some((name, target)) => (name, Some(screenshot_target(target))),
+                            None => (action.as_str(), None),
+                        };
                         if let Some(window) = window.upgrade()
-                            && let Err(err) = WidgetExt::activate_action(&window, &action, None)
+                            && let Err(err) =
+                                WidgetExt::activate_action(&window, name, target.as_ref())
                         {
                             tracing::warn!("Screenshot action {action}: {err}");
                         }

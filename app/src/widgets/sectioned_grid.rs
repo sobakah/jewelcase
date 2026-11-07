@@ -58,7 +58,10 @@ mod imp {
         pub activate: OnceCell<Activate>,
         /// The narrowest column (a tile's smallest width with its padding).
         pub min_width: Cell<i32>,
-        pub columns: Cell<u32>,
+        /// 0 until the first width is known (rows built for a guess would
+        /// show huge tiles for a frame). Shared with the rows, which size
+        /// their tiles by it.
+        pub columns: Rc<Cell<u32>>,
         pub rebuild_pending: Cell<bool>,
         pub settings: OnceCell<gio::Settings>,
         /// The setting that keeps the Spotify section open.
@@ -86,17 +89,19 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
-            self.columns.set(MIN_COLUMNS as u32);
             self.min_width.set(138);
             let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
             let factory = gtk::SignalListItemFactory::new();
-            factory.connect_setup(|_, item| {
+            let columns = self.columns.clone();
+            factory.connect_setup(move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
                 // Tiles take the focus and clicks, not the rows.
                 item.set_activatable(false);
                 item.set_selectable(false);
                 item.set_focusable(false);
-                item.set_child(Some(&GridRow::default()));
+                let row = GridRow::default();
+                row.imp().columns.replace(Some(columns.clone()));
+                item.set_child(Some(&row));
             });
             factory.connect_bind(glib::clone!(
                 #[weak]
@@ -275,7 +280,11 @@ impl SectionedGrid {
     /// The rows for the current items and column count.
     fn rebuild(&self) {
         let imp = self.imp();
-        let columns = imp.columns.get().max(1);
+        let columns = imp.columns.get();
+        if columns == 0 {
+            // Not laid out yet: no rows rather than rows for a guess.
+            return;
+        }
         let chunks = |count: u32, make: &dyn Fn(u32, u32) -> Row| -> Vec<Row> {
             (0..count)
                 .step_by(columns as usize)
@@ -427,6 +436,9 @@ mod row_imp {
         /// What each library tile shows, for its click.
         pub items: RefCell<Vec<Option<glib::Object>>>,
         pub activate: RefCell<Option<Activate>>,
+        /// The grid's column count now (tiles are sized by it, also before
+        /// the rows are rebuilt for a new width).
+        pub columns: RefCell<Option<Rc<Cell<u32>>>>,
         /// The first Spotify item of the row, and what opens one.
         pub spotify_start: Cell<usize>,
         pub spotify_activate: RefCell<Option<SpotifyActivate>>,
@@ -445,6 +457,19 @@ mod row_imp {
         }
     }
 
+    impl GridRow {
+        /// As many columns as the grid has now, or as there are tiles
+        /// (narrowing: until rebuilt, more tiles than columns share it).
+        fn column_count(&self, slots: usize) -> i32 {
+            let live = self
+                .columns
+                .borrow()
+                .as_ref()
+                .map_or(0, |c| c.get() as usize);
+            live.max(slots).max(1) as i32
+        }
+    }
+
     impl WidgetImpl for GridRow {
         fn request_mode(&self) -> gtk::SizeRequestMode {
             gtk::SizeRequestMode::HeightForWidth
@@ -459,7 +484,7 @@ mod row_imp {
                 };
             }
             let slots = self.slots.borrow();
-            let count = slots.len().max(1) as i32;
+            let count = self.column_count(slots.len());
             match orientation {
                 gtk::Orientation::Horizontal => {
                     let natural = slots
@@ -493,7 +518,7 @@ mod row_imp {
                 return;
             }
             let slots = self.slots.borrow();
-            let count = slots.len().max(1) as i32;
+            let count = self.column_count(slots.len());
             let column = width / count;
             for (index, slot) in slots.iter().enumerate() {
                 let x = column * index as i32;
