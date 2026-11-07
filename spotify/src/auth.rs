@@ -32,6 +32,9 @@ pub const SCOPES: &[&str] = &[
     "playlist-modify-private",
     "playlist-modify-public",
     "ugc-image-upload",
+    // Saved albums and followed artists (§9.8).
+    "user-library-read",
+    "user-follow-read",
 ];
 
 const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";

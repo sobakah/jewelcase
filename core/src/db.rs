@@ -19,6 +19,8 @@ use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 
 mod spotify;
 pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, StreamInfo};
+mod spotify_library;
+pub use spotify_library::{SpotifyAlbum, SpotifyArtist};
 
 const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/001_library.sql")),
@@ -33,6 +35,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/010_larger_spotify_images.sql")),
     M::up(include_str!("db/011_song_edges.sql")),
     M::up(include_str!("db/012_loudness.sql")),
+    M::up(include_str!("db/013_spotify_library.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1126,6 +1129,19 @@ impl Database {
 
     /// Each album's genres from its songs' tags, most common first. Case
     /// variants count as one ("K-Pop", "K-POP"); the most used spelling wins.
+    /// Each album's barcode (from its songs' tags), to recognize albums
+    /// on Spotify (§9.8).
+    pub fn album_barcodes(&self) -> Result<HashMap<i64, String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT album_id, max(barcode) FROM track
+             WHERE album_id IS NOT NULL AND barcode IS NOT NULL AND barcode != ''
+             GROUP BY album_id",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
+    }
+
     pub fn album_genres(&self) -> Result<HashMap<i64, Vec<String>>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT album_id, genres FROM track WHERE album_id IS NOT NULL AND genres != ''",

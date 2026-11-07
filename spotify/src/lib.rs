@@ -13,7 +13,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 pub use auth::Tokens;
-pub use model::{Device, PlaybackState, PlaylistEntry, PlaylistSummary, Track, User};
+pub use model::{
+    Album, AlbumTrack, Artist, Device, PlaybackState, PlaylistEntry, PlaylistSummary, Track, User,
+};
 
 const API: &str = "https://api.spotify.com/v1";
 
@@ -587,6 +589,104 @@ impl Client {
     }
 
     // Search -------------------------------------------------------------
+
+    // Library (saved albums, followed artists) and discographies ------------
+
+    /// The user's saved albums, the latest first (`user-library-read`).
+    pub fn saved_albums(&self) -> Result<Vec<Album>> {
+        let items = self.get_all("/me/albums", &[("limit", "50".into())])?;
+        Ok(items
+            .iter()
+            .filter_map(|item| Album::parse(&item["album"]))
+            .collect())
+    }
+
+    /// The artists the user follows (`user-follow-read`). Paged by cursor.
+    pub fn followed_artists(&self) -> Result<Vec<Artist>> {
+        let mut artists = Vec::new();
+        let mut page = self.get(
+            "/me/following",
+            &[("type", "artist".into()), ("limit", "50".into())],
+        )?;
+        loop {
+            let list = &page["artists"];
+            if let Some(items) = list["items"].as_array() {
+                artists.extend(items.iter().filter_map(Artist::parse));
+            }
+            match list["next"].as_str() {
+                Some(next) if !next.is_empty() => {
+                    std::thread::sleep(PAGE_PAUSE);
+                    page = self.get(next, &[])?;
+                }
+                _ => return Ok(artists),
+            }
+        }
+    }
+
+    pub fn artist(&self, id: &str) -> Result<Artist> {
+        Artist::parse(&self.get(&format!("/artists/{id}"), &[])?).ok_or(Error::Format("artist"))
+    }
+
+    /// An artist's albums, EPs and singles (no compilations they appear on).
+    pub fn artist_albums(&self, id: &str) -> Result<Vec<Album>> {
+        let items = self.get_all(
+            &format!("/artists/{id}/albums"),
+            &[
+                ("include_groups", "album,single".into()),
+                ("limit", "50".into()),
+            ],
+        )?;
+        Ok(items.iter().filter_map(Album::parse).collect())
+    }
+
+    /// An album and its songs.
+    pub fn album(&self, id: &str) -> Result<(Album, Vec<AlbumTrack>)> {
+        let value = self.get(&format!("/albums/{id}"), &[])?;
+        let album = Album::parse(&value).ok_or(Error::Format("album"))?;
+        let mut items: Vec<Value> = value["tracks"]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut next = value["tracks"]["next"].as_str().map(str::to_owned);
+        while let Some(url) = next.filter(|n| !n.is_empty()) {
+            std::thread::sleep(PAGE_PAUSE);
+            let page = self.get(&url, &[])?;
+            items.extend(page["items"].as_array().cloned().unwrap_or_default());
+            next = page["next"].as_str().map(str::to_owned);
+        }
+        let tracks = items
+            .iter()
+            .filter_map(|item| {
+                let mut track = Track::parse(item)?;
+                // Album songs come without their album.
+                track.album = Some(album.name.clone());
+                track.album_id = Some(album.id.clone());
+                track.image_url.clone_from(&album.image_url);
+                Some(AlbumTrack {
+                    track,
+                    disc: item["disc_number"].as_u64().unwrap_or(1) as u32,
+                    number: item["track_number"].as_u64().unwrap_or(0) as u32,
+                })
+            })
+            .collect();
+        Ok((album, tracks))
+    }
+
+    /// Artists by name (a few; for artists without a known Spotify ID).
+    pub fn search_artists(&self, name: &str) -> Result<Vec<Artist>> {
+        let value = self.get(
+            "/search",
+            &[
+                ("q", name.to_owned()),
+                ("type", "artist".into()),
+                ("limit", "5".into()),
+            ],
+        )?;
+        Ok(value["artists"]["items"]
+            .as_array()
+            .map(|items| items.iter().filter_map(Artist::parse).collect())
+            .unwrap_or_default())
+    }
 
     /// Up to 10 tracks; `query` may use filters like `isrc:USA2P2025832`
     /// or `track:… artist:…`.

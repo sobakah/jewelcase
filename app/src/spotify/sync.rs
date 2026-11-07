@@ -468,6 +468,7 @@ impl Spotify {
         for id in editable {
             self.resolve_entries(id, false).await;
         }
+        self.sync_library().await;
     }
 
     /// One playlist: its changes, then a re-read if Spotify's changed.

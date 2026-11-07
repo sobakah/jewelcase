@@ -59,6 +59,8 @@ mod imp {
         pub lookups: RefCell<HashSet<i64>>,
         /// Each album's genres, most common first (filter, album panel).
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
+        /// Barcodes by album, to recognize albums on Spotify (§9.8).
+        pub album_barcodes: RefCell<HashMap<i64, String>>,
         /// lyrembed's alias groups, from the last scan (search, artist pages).
         pub aliases: RefCell<Aliases>,
         pub db: OnceCell<RefCell<Database>>,
@@ -260,6 +262,11 @@ impl Library {
             .and_then(|db| db.album_genres().ok())
             .unwrap_or_default();
         self.imp().album_genres.replace(genres);
+        let barcodes = self
+            .db()
+            .and_then(|db| db.album_barcodes().ok())
+            .unwrap_or_default();
+        self.imp().album_barcodes.replace(barcodes);
 
         crate::covers::clear();
         self.reload_artists();
@@ -357,6 +364,37 @@ impl Library {
         self.db()
             .and_then(|db| db.album_artists(album_id).ok())
             .unwrap_or_default()
+    }
+
+    /// The library's copy of an album on Spotify, if it has one (§9.8).
+    pub fn local_album_for(&self, album: &gatefold_core::db::SpotifyAlbum) -> Option<AlbumObject> {
+        use gatefold_core::matching::{AlbumFacts, same_album};
+        let remote_artists: Vec<String> = album.artist.split(", ").map(str::to_owned).collect();
+        let remote = AlbumFacts {
+            title: &album.name,
+            artists: &remote_artists,
+            year: album.year,
+            tracks: album.total_tracks,
+            barcode: album.upc.as_deref(),
+        };
+        let aliases = self.aliases().clone();
+        let barcodes = self.imp().album_barcodes.borrow();
+        let store = self.albums();
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<AlbumObject>())
+            .find(|group| {
+                group.versions().iter().any(|version| {
+                    let artists = vec![version.artist_credit.clone()];
+                    let local = AlbumFacts {
+                        title: &version.title,
+                        artists: &artists,
+                        year: version.year,
+                        tracks: version.track_count,
+                        barcode: barcodes.get(&version.id).map(String::as_str),
+                    };
+                    same_album(&local, &remote, &aliases)
+                })
+            })
     }
 
     /// The album group containing the album with this ID.

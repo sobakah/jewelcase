@@ -75,6 +75,63 @@ pub fn compare(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> O
     }
 }
 
+/// What's compared to tell whether two albums are the same release.
+#[derive(Debug, Clone, Copy)]
+pub struct AlbumFacts<'a> {
+    pub title: &'a str,
+    pub artists: &'a [String],
+    pub year: Option<i32>,
+    pub tracks: u32,
+    /// The barcode (UPC/EAN).
+    pub barcode: Option<&'a str>,
+}
+
+/// The same release (§9.8: Spotify albums that are in the library): the
+/// same barcode; or an artist in common and the titles agree (a name in
+/// brackets counts, edition notes don't matter); or an artist in common,
+/// the same year and number of songs and a word of the title in common
+/// ("樂-STAR" is "ROCK-STAR" on Spotify).
+pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) -> bool {
+    let digits = |code: &str| code.trim_start_matches('0').to_owned();
+    if let (Some(a), Some(b)) = (local.barcode, remote.barcode)
+        && !a.is_empty()
+        && digits(a) == digits(b)
+    {
+        return true;
+    }
+    let keys = |names: &[String]| -> BTreeSet<String> {
+        names
+            .iter()
+            .flat_map(|a| {
+                let mut names = track_artist_names(a);
+                names.push(a.clone());
+                names
+            })
+            .map(|name| artist_key(&name, aliases))
+            .filter(|k| !k.is_empty())
+            .collect()
+    };
+    if keys(local.artists).is_disjoint(&keys(remote.artists)) {
+        return false;
+    }
+    if Title::parse(local.title).agrees(&Title::parse(remote.title)) {
+        return true;
+    }
+    let words = |title: &str| -> BTreeSet<String> {
+        title
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    local.year.is_some()
+        && local.year == remote.year
+        && local.tracks > 0
+        && local.tracks == remote.tracks
+        && !words(local.title).is_disjoint(&words(remote.title))
+}
+
 fn artists_agree(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> bool {
     let remote: BTreeSet<String> = remote
         .artists
@@ -504,6 +561,63 @@ mod tests {
         assert_eq!(search_title("Dynamite - Tropical Remix"), "Dynamite");
         assert_eq!(search_title("Song feat. X"), "Song");
         assert_eq!(search_title("(Intro)"), "(Intro)");
+    }
+
+    #[test]
+    fn albums_are_the_same_release() {
+        let aliases = Aliases::default();
+        let skz = vec!["Stray Kids".to_owned()];
+        let bts = vec!["BTS".to_owned()];
+        let facts = |title, artists: &'static [String], year, tracks, barcode| AlbumFacts {
+            title,
+            artists,
+            year: Some(year),
+            tracks,
+            barcode,
+        };
+        let skz: &'static [String] = Box::leak(skz.into_boxed_slice());
+        let bts: &'static [String] = Box::leak(bts.into_boxed_slice());
+        let local = facts("樂-STAR", skz, 2023, 8, Some("196922597626"));
+        // Spotify's name for it, from an artist's list (no barcode).
+        assert!(same_album(
+            &local,
+            &facts("ROCK-STAR", skz, 2023, 8, None),
+            &aliases
+        ));
+        assert!(same_album(
+            &local,
+            &facts("樂-STAR", skz, 2023, 8, None),
+            &aliases
+        ));
+        // By barcode, whatever the names.
+        assert!(same_album(
+            &local,
+            &facts("Rock Star", bts, 2020, 1, Some("0196922597626")),
+            &aliases
+        ));
+        // Another album of the year.
+        assert!(!same_album(
+            &local,
+            &facts("5-STAR", skz, 2023, 12, None),
+            &aliases
+        ));
+        assert!(!same_album(
+            &local,
+            &facts("GIANT", skz, 2023, 8, None),
+            &aliases
+        ));
+        // Another artist's album with the same name.
+        assert!(!same_album(
+            &local,
+            &facts("樂-STAR", bts, 2023, 8, None),
+            &aliases
+        ));
+        let answer = facts("LOVE YOURSELF 結 ‘Answer’", bts, 2018, 25, None);
+        assert!(same_album(
+            &answer,
+            &facts("LOVE YOURSELF 結 'Answer'", bts, 2018, 26, None),
+            &aliases
+        ));
     }
 
     #[test]

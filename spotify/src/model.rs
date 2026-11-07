@@ -117,6 +117,103 @@ impl Track {
     }
 }
 
+/// An album as lists show it: saved albums, an artist's releases.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Album {
+    pub id: String,
+    pub name: String,
+    /// (Spotify ID, name) of each artist.
+    pub artists: Vec<(Option<String>, String)>,
+    /// "album", "single" (singles and EPs) or "compilation".
+    pub album_type: String,
+    pub year: Option<i32>,
+    pub total_tracks: u32,
+    /// The largest image (640 px).
+    pub image_url: Option<String>,
+    /// The barcode; only in full album objects (saved albums, one album).
+    pub upc: Option<String>,
+}
+
+impl Album {
+    pub(crate) fn parse(value: &Value) -> Option<Self> {
+        Some(Self {
+            id: value["id"].as_str()?.to_owned(),
+            name: string(&value["name"]).unwrap_or_default(),
+            artists: value["artists"]
+                .as_array()
+                .map(|artists| {
+                    artists
+                        .iter()
+                        .filter_map(|a| Some((string(&a["id"]), string(&a["name"])?)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            album_type: string(&value["album_type"])
+                .unwrap_or_else(|| "album".into())
+                .to_lowercase(),
+            // "2018", "2018-08", "2018-08-24".
+            year: string(&value["release_date"])
+                .and_then(|d| d.get(..4).and_then(|y| y.parse().ok())),
+            total_tracks: value["total_tracks"].as_u64().unwrap_or(0) as u32,
+            image_url: image(&value["images"]),
+            upc: string(&value["external_ids"]["upc"]),
+        })
+    }
+
+    /// "Artist, Artist".
+    pub fn artist_line(&self) -> String {
+        self.artists
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    pub fn uri(&self) -> String {
+        format!("spotify:album:{}", self.id)
+    }
+
+    pub fn web_url(&self) -> String {
+        format!("https://open.spotify.com/album/{}", self.id)
+    }
+}
+
+/// A song of an album, in album order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlbumTrack {
+    /// With the album's name and cover filled in.
+    pub track: Track,
+    pub disc: u32,
+    pub number: u32,
+}
+
+/// An artist (`GET /me/following`, `GET /artists/{id}`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Artist {
+    pub id: String,
+    pub name: String,
+    pub image_url: Option<String>,
+    pub genres: Vec<String>,
+}
+
+impl Artist {
+    pub(crate) fn parse(value: &Value) -> Option<Self> {
+        Some(Self {
+            id: value["id"].as_str()?.to_owned(),
+            name: string(&value["name"]).unwrap_or_default(),
+            image_url: image(&value["images"]),
+            genres: value["genres"]
+                .as_array()
+                .map(|g| g.iter().filter_map(string).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub fn web_url(&self) -> String {
+        format!("https://open.spotify.com/artist/{}", self.id)
+    }
+}
+
 /// One of the user's playlists (`GET /me/playlists`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaylistSummary {

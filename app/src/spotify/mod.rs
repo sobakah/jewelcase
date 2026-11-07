@@ -6,6 +6,7 @@
 //! the main thread.
 
 mod keyring;
+mod library;
 pub mod preferences;
 mod remote;
 mod soloist;
@@ -81,6 +82,7 @@ mod imp {
         pub cancel_login: RefCell<Option<Arc<AtomicBool>>>,
         pub sync: RefCell<sync::SyncState>,
         pub remote: RefCell<remote::RemoteState>,
+        pub library: RefCell<library::LibraryState>,
     }
 
     #[glib::object_subclass]
@@ -99,6 +101,9 @@ mod imp {
                     Signal::builder("message")
                         .param_types([String::static_type()])
                         .build(),
+                    // Saved albums or followed artists changed, or their
+                    // covers arrived (§9.8).
+                    Signal::builder("library-changed").build(),
                 ]
             })
         }
