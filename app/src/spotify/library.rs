@@ -71,6 +71,9 @@ impl Spotify {
     pub(super) async fn sync_library(&self) {
         let albums = self.call(|client| client.saved_albums()).await;
         let artists = self.call(|client| client.followed_artists()).await;
+        if !self.is_connected() {
+            return;
+        }
         let denied = |err: Option<&Error>| matches!(err, Some(Error::Status { status: 403, .. }));
         let needs_permission = denied(albums.as_ref().err()) || denied(artists.as_ref().err());
         let library = GatefoldApplication::get().library();
@@ -99,6 +102,10 @@ impl Spotify {
         }
         self.imp().library.borrow_mut().needs_permission = needs_permission;
         self.emit_by_name::<()>("library-changed", &[]);
+        // Only covers not downloaded yet: each batch that arrives shows the
+        // sections again, which is wasted work for covers already there.
+        let covers = gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+        urls.retain(|url| !covers.has(&super::image_cover_key(url)));
         let spotify = self.downgrade();
         super::fetch_covers_in_batches(urls, move |_| {
             if let Some(spotify) = spotify.upgrade() {

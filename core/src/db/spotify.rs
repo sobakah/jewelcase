@@ -229,6 +229,13 @@ impl Database {
     pub fn forget_spotify(&mut self) -> Result<()> {
         self.forget_spotify_playlists(&[])?;
         self.conn.execute("DELETE FROM spotify_track", [])?;
+        // The account's saved albums, followed artists and the
+        // discographies read for it.
+        self.conn.execute("DELETE FROM spotify_discography", [])?;
+        self.conn
+            .execute("DELETE FROM spotify_discography_read", [])?;
+        self.conn.execute("DELETE FROM spotify_album", [])?;
+        self.conn.execute("DELETE FROM spotify_artist", [])?;
         Ok(())
     }
 
@@ -349,20 +356,32 @@ impl Database {
     ) -> Result<()> {
         // What to keep from before.
         let mut choices: HashMap<String, (String, Option<i64>)> = HashMap::new();
+        // Suggestions answered with No, by URI.
+        let mut declined: HashMap<String, i64> = HashMap::new();
         let mut kept = Vec::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, spotify_uri, match_state, local_track_id FROM playlist_item
-                 WHERE playlist_id = ?1 ORDER BY position",
+                "SELECT id, spotify_uri, match_state, local_track_id, declined_track_id
+                 FROM playlist_item WHERE playlist_id = ?1 ORDER BY position",
             )?;
-            let rows: Vec<(i64, Option<String>, String, Option<i64>)> = stmt
+            type Row = (i64, Option<String>, String, Option<i64>, Option<i64>);
+            let rows: Vec<Row> = stmt
                 .query_map([id], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
             let mut anchor: Option<(String, usize)> = None;
             let mut seen: HashMap<String, usize> = HashMap::new();
-            for (item, uri, state, track) in rows {
+            for (item, uri, state, track, no) in rows {
+                if let (Some(uri), Some(no)) = (&uri, no) {
+                    declined.insert(uri.clone(), no);
+                }
                 match uri {
                     Some(uri) => {
                         if state == "user_matched" || state == "user_pinned_spotify" {
@@ -396,8 +415,8 @@ impl Database {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO playlist_item (playlist_id, position, local_track_id, spotify_uri,
                    isrc, title, artist, album, duration_ms, match_state, suggested_track_id,
-                   image_url)
-                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                   image_url, declined_track_id)
+                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             let exists = |track: i64| -> rusqlite::Result<bool> {
                 tx.query_row(
@@ -426,6 +445,8 @@ impl Database {
                     },
                     (None, _) => ("unavailable", None, None),
                 };
+                let no = declined.get(uri).copied();
+                let suggested = suggested.filter(|s| Some(*s) != no);
                 let track = entry.track.as_ref();
                 insert.execute(params![
                     id,
@@ -439,6 +460,7 @@ impl Database {
                     state,
                     suggested,
                     entry.image_url,
+                    no,
                 ])?;
                 order.push(tx.last_insert_rowid());
                 let count = seen.entry(uri).or_default();
@@ -476,9 +498,12 @@ impl Database {
     /// newly imported CD takes over its entries (§9.5). The user's choices
     /// stay. Returns how many entries changed.
     pub fn rematch_spotify_items(&mut self, index: &MatchIndex) -> Result<usize> {
-        let rows: Vec<(i64, String, Option<i64>, RemoteTrack)> = {
+        // Entry, state, library song, the Spotify song, declined song.
+        type Row = (i64, String, Option<i64>, RemoteTrack, Option<i64>);
+        let rows: Vec<Row> = {
             let mut stmt = self.conn.prepare(
-                "SELECT id, match_state, local_track_id, title, artist, album, duration_ms, isrc
+                "SELECT id, match_state, local_track_id, title, artist, album, duration_ms, isrc,
+                   declined_track_id
                  FROM playlist_item
                  WHERE spotify_uri IS NOT NULL AND title IS NOT NULL
                    AND (match_state IN ('matched', 'spotify_only')
@@ -499,15 +524,20 @@ impl Database {
                         duration_ms: row.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u64,
                         isrc: row.get(7)?,
                     },
+                    row.get(8)?,
                 ))
             })?
             .collect::<rusqlite::Result<_>>()?
         };
         let mut changed = 0;
         let tx = self.conn.transaction()?;
-        for (item, state, local, remote) in rows {
+        for (item, state, local, remote, declined) in rows {
             let (new_state, new_local, suggested) = match index.find(&remote) {
                 Some((track, Confidence::Sure)) => ("matched", Some(track), None),
+                // Not again once answered with No.
+                Some((track, Confidence::Likely)) if Some(track) == declined => {
+                    ("spotify_only", None, None)
+                }
                 Some((track, Confidence::Likely)) => ("spotify_only", None, Some(track)),
                 None => ("spotify_only", None, None),
             };
@@ -545,7 +575,8 @@ impl Database {
     /// "Not this song": drops a suggestion without choosing.
     pub fn dismiss_suggestion(&mut self, item_id: i64) -> Result<()> {
         self.conn.execute(
-            "UPDATE playlist_item SET suggested_track_id = NULL, suggested_spotify = NULL
+            "UPDATE playlist_item SET declined_track_id = suggested_track_id,
+               suggested_track_id = NULL, suggested_spotify = NULL
              WHERE id = ?1",
             [item_id],
         )?;
@@ -979,6 +1010,36 @@ mod tests {
             Some("snap2")
         );
         assert_eq!(db.spotify_uris(id).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn a_declined_suggestion_isnt_suggested_again() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/25/2.flac", "25", "Send My Love", 2)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let aliases = Aliases::default();
+        let index = MatchIndex::new(db.match_tracks().unwrap(), &aliases);
+        let id = db.upsert_spotify_playlist(&info("sp1"), 5).unwrap();
+        // 6 s longer: a suggestion, not a match.
+        let entries = vec![remote(
+            "spotify:track:love",
+            "Send My Love (To Your New Lover)",
+            186,
+        )];
+        db.set_spotify_items(id, &entries, &index, "snap1", 7)
+            .unwrap();
+        let item = db.playlist_items(id).unwrap()[0].clone();
+        assert!(item.suggested_track.is_some());
+        db.dismiss_suggestion(item.id).unwrap();
+        // Neither a rematch (library changed) nor a re-read asks again.
+        db.rematch_spotify_items(&index).unwrap();
+        assert!(db.playlist_items(id).unwrap()[0].suggested_track.is_none());
+        db.set_spotify_items(id, &entries, &index, "snap2", 8)
+            .unwrap();
+        assert!(db.playlist_items(id).unwrap()[0].suggested_track.is_none());
+        db.rematch_spotify_items(&index).unwrap();
+        assert!(db.playlist_items(id).unwrap()[0].suggested_track.is_none());
     }
 
     #[test]

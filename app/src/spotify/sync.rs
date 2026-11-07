@@ -45,6 +45,19 @@ pub struct SyncState {
     resolve: Vec<(i64, bool)>,
     flush_timer: Option<glib::SourceId>,
     retry_timer: Option<glib::SourceId>,
+    /// A full sync / these playlists' searches are to be tried again
+    /// (one retry each, not one per failure).
+    full_retry: bool,
+    resolve_retry: std::collections::HashSet<i64>,
+}
+
+/// How long to wait before trying again: what Spotify asked for (it can be
+/// hours after many searches), at least a minute.
+fn retry_delay(err: &Error) -> u32 {
+    match err {
+        Error::RateLimited(wait) => (wait.as_secs().min(6 * 3600) as u32).max(RETRY_DELAY_S),
+        _ => RETRY_DELAY_S,
+    }
 }
 
 /// A change waiting in the outbox; positions are Spotify's (§9.6).
@@ -328,36 +341,48 @@ impl Spotify {
     }
 
     /// Searches failed for a temporary reason: try the playlist again later.
-    fn retry_resolve_later(&self, id: i64) {
+    fn retry_resolve_later(&self, id: i64, err: &Error) {
+        if !self.imp().sync.borrow_mut().resolve_retry.insert(id) {
+            return;
+        }
         glib::timeout_add_seconds_local_once(
-            RETRY_DELAY_S,
+            retry_delay(err),
             glib::clone!(
                 #[weak(rename_to = spotify)]
                 self,
-                move || spotify.resolve_soon(id, false)
+                move || {
+                    spotify.imp().sync.borrow_mut().resolve_retry.remove(&id);
+                    spotify.resolve_soon(id, false);
+                }
             ),
         );
     }
 
     /// Reading playlists stopped (offline, too many requests): try again.
-    fn retry_later_full(&self) {
+    fn retry_later_full(&self, err: &Error) {
+        if std::mem::replace(&mut self.imp().sync.borrow_mut().full_retry, true) {
+            return;
+        }
         glib::timeout_add_seconds_local_once(
-            RETRY_DELAY_S,
+            retry_delay(err),
             glib::clone!(
                 #[weak(rename_to = spotify)]
                 self,
-                move || spotify.sync_soon()
+                move || {
+                    spotify.imp().sync.borrow_mut().full_retry = false;
+                    spotify.sync_soon();
+                }
             ),
         );
     }
 
-    fn retry_later(&self) {
+    fn retry_later(&self, err: &Error) {
         let mut state = self.imp().sync.borrow_mut();
         if state.retry_timer.is_some() {
             return;
         }
         state.retry_timer = Some(glib::timeout_add_seconds_local_once(
-            RETRY_DELAY_S,
+            retry_delay(err),
             glib::clone!(
                 #[weak(rename_to = spotify)]
                 self,
@@ -378,12 +403,18 @@ impl Spotify {
             Ok(list) => list,
             Err(err) => {
                 tracing::warn!("Cannot read the Spotify playlists: {err}");
+                // The whole sync again (playlists, saved albums, artists),
+                // not only the waiting changes.
                 if err.is_temporary() {
-                    self.retry_later();
+                    self.retry_later_full(&err);
                 }
                 return;
             }
         };
+        // Disconnected while asking: nothing of that account comes back.
+        if !self.is_connected() {
+            return;
+        }
         let user = self.user_id().unwrap_or_default();
         let show_mirrors = self.settings().boolean("spotify-playlists");
         let library = GatefoldApplication::get().library();
@@ -432,6 +463,9 @@ impl Spotify {
         }
         library.reload_playlists();
         for (id, spotify_id, snapshot) in to_read {
+            if !self.is_connected() {
+                return;
+            }
             match self
                 .read_items(id, &spotify_id, Some(snapshot.clone()), false)
                 .await
@@ -449,7 +483,7 @@ impl Spotify {
                     tracing::warn!("Cannot read a Spotify playlist: {err}");
                     // Too many requests or offline: the rest waits.
                     if err.is_temporary() {
-                        self.retry_later_full();
+                        self.retry_later_full(&err);
                         break;
                     }
                 }
@@ -574,13 +608,18 @@ impl Spotify {
         }
         let mut snapshot = linked.snapshot_id.clone();
         let mut refused = Vec::new();
+        let mut parsed = Vec::new();
         for (op_id, text) in ops {
-            let Some(op) = Op::parse(&text) else {
-                if let Some(mut db) = library.db() {
-                    let _ = db.remove_spotify_op(op_id);
+            match Op::parse(&text) {
+                Some(op) => parsed.push((vec![op_id], op)),
+                None => {
+                    if let Some(mut db) = library.db() {
+                        let _ = db.remove_spotify_op(op_id);
+                    }
                 }
-                continue;
-            };
+            }
+        }
+        for (op_ids, op) in merge_adds(parsed) {
             let (sid, snap, job) = (linked.spotify_id.clone(), snapshot.clone(), op.clone());
             match self
                 .call(move |client| job.apply(client, &sid, snap.as_deref()))
@@ -591,7 +630,9 @@ impl Spotify {
                         snapshot = new_snapshot;
                     }
                     if let Some(mut db) = library.db() {
-                        let _ = db.remove_spotify_op(op_id);
+                        for op_id in &op_ids {
+                            let _ = db.remove_spotify_op(*op_id);
+                        }
                     }
                 }
                 Err(Error::LoggedOut) => return,
@@ -603,14 +644,16 @@ impl Spotify {
                         let _ = db.set_snapshot(id, snapshot);
                     }
                     library.reload_playlists();
-                    self.retry_later();
+                    self.retry_later(&err);
                     return;
                 }
                 Err(err) => {
                     tracing::warn!("Spotify refused a playlist change: {err}");
                     refused.push(op);
                     if let Some(mut db) = library.db() {
-                        let _ = db.remove_spotify_op(op_id);
+                        for op_id in &op_ids {
+                            let _ = db.remove_spotify_op(*op_id);
+                        }
                     }
                 }
             }
@@ -912,7 +955,7 @@ impl Spotify {
                 self.message(&search_error(&err));
             }
             if err.is_temporary() {
-                self.retry_resolve_later(id);
+                self.retry_resolve_later(id, &err);
             }
         } else if announce && missing > 0 {
             self.message(
@@ -1149,6 +1192,39 @@ impl Spotify {
     }
 }
 
+/// Songs added one after another (each queued on its own) go as one call
+/// of up to 100: at the end, or at positions that follow each other.
+fn merge_adds(ops: Vec<(Vec<i64>, Op)>) -> Vec<(Vec<i64>, Op)> {
+    const MAX_URIS: usize = 100;
+    let mut merged: Vec<(Vec<i64>, Op)> = Vec::new();
+    for (ids, op) in ops {
+        if let (
+            Some((
+                last_ids,
+                Op::Add {
+                    uris: last,
+                    position: last_position,
+                },
+            )),
+            Op::Add { uris, position },
+        ) = (merged.last_mut(), &op)
+        {
+            let follows = match (*last_position, *position) {
+                (None, None) => true,
+                (Some(a), Some(b)) => b as usize == a as usize + last.len(),
+                _ => false,
+            };
+            if follows && last.len() + uris.len() <= MAX_URIS {
+                last.extend(uris.iter().cloned());
+                last_ids.extend(ids);
+                continue;
+            }
+        }
+        merged.push((ids, op));
+    }
+    merged
+}
+
 /// Spotify said no to the change itself (not to the login, not busy).
 fn refused_change(err: &Error) -> bool {
     matches!(
@@ -1259,6 +1335,40 @@ fn boxed_list() -> gtk::ListBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn songs_added_one_after_another_go_together() {
+        let add = |uri: &str, position| Op::Add {
+            uris: vec![uri.to_owned()],
+            position,
+        };
+        let merged = merge_adds(vec![
+            (vec![1], add("a", None)),
+            (vec![2], add("b", None)),
+            (vec![3], add("c", Some(5))),
+            (vec![4], add("d", Some(6))),
+            (vec![5], add("e", Some(9))),
+            (vec![6], Op::Rename { name: "x".into() }),
+            (vec![7], add("f", None)),
+        ]);
+        let shapes: Vec<(Vec<i64>, Vec<String>)> = merged
+            .into_iter()
+            .map(|(ids, op)| match op {
+                Op::Add { uris, .. } => (ids, uris),
+                _ => (ids, Vec::new()),
+            })
+            .collect();
+        assert_eq!(
+            shapes,
+            [
+                (vec![1, 2], vec!["a".to_owned(), "b".to_owned()]),
+                (vec![3, 4], vec!["c".to_owned(), "d".to_owned()]),
+                (vec![5], vec!["e".to_owned()]),
+                (vec![6], vec![]),
+                (vec![7], vec!["f".to_owned()]),
+            ]
+        );
+    }
 
     #[test]
     fn only_spotify_refusing_a_change_drops_it() {

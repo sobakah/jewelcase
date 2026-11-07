@@ -283,16 +283,20 @@ impl PlaylistEntry {
         } else {
             &row["track"]
         };
+        // A song replaced for the user's country ("relinked") comes as the
+        // replacement; the playlist holds the original, which removing must
+        // name (and which plays as the replacement anyway).
+        let uri = string(&object["linked_from"]["uri"]).or_else(|| string(&object["uri"]));
         let track = Track::parse(object).map(|mut track| {
             if row["is_local"].as_bool() == Some(true) {
                 track.is_local = true;
             }
+            if let Some(uri) = &uri {
+                track.uri.clone_from(uri);
+            }
             track
         });
-        Self {
-            uri: string(&object["uri"]),
-            track,
-        }
+        Self { uri, track }
     }
 }
 
@@ -350,6 +354,18 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_relinked_entry_keeps_the_playlists_uri() {
+        let row = json!({"item": {
+            "type": "track", "uri": "spotify:track:replacement", "id": "replacement",
+            "name": "Song", "duration_ms": 1000, "artists": [{"name": "A"}],
+            "linked_from": {"uri": "spotify:track:original", "id": "original"}
+        }});
+        let entry = PlaylistEntry::parse(&row);
+        assert_eq!(entry.uri.as_deref(), Some("spotify:track:original"));
+        assert_eq!(entry.track.unwrap().uri, "spotify:track:original");
+    }
 
     fn track_json() -> Value {
         json!({

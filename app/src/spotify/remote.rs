@@ -76,6 +76,10 @@ pub struct RemoteState {
     queue_stale: bool,
     last_uri: Option<String>,
     polls: u32,
+    /// The device's last state and queue as Spotify gave them, to show
+    /// them again (covers arrived) without asking again.
+    last_state: Option<gatefold_spotify::PlaybackState>,
+    last_queue: Vec<gatefold_spotify::Track>,
 }
 
 impl Spotify {
@@ -446,7 +450,12 @@ impl Spotify {
         if !player.is_remote() {
             return;
         }
-        match self.call(|client| client.playback()).await {
+        let result = self.call(|client| client.playback()).await;
+        // "Play Here" while asking: the answer is for a mode that ended.
+        if !player.is_remote() {
+            return;
+        }
+        match result {
             Ok(Some(state)) => {
                 if let Some(device) = &state.device {
                     // Playback moved to another device (e.g. the phone).
@@ -478,6 +487,7 @@ impl Spotify {
                         Ok(queue) => {
                             let mut tracks: Vec<TrackObject> = track.iter().cloned().collect();
                             tracks.extend(self.track_objects(&queue).await);
+                            self.imp().remote.borrow_mut().last_queue = queue;
                             if player.is_remote() {
                                 player.set_remote_queue(tracks);
                             }
@@ -490,23 +500,54 @@ impl Spotify {
                     state.is_playing,
                     state.progress_ms,
                     state.shuffle,
-                    match state.repeat.as_str() {
-                        "context" => RepeatMode::All,
-                        "track" => RepeatMode::One,
-                        _ => RepeatMode::Off,
-                    },
+                    repeat_mode(&state.repeat),
                 );
+                self.imp().remote.borrow_mut().last_state = Some(state);
             }
             Ok(None) => {
                 self.imp().remote.borrow_mut().playing = false;
                 player.show_remote(None, false, 0, false, RepeatMode::Off);
             }
             Err(Error::LoggedOut) => return,
+            // Too many requests: as long as Spotify asks, not every 3 s.
+            Err(Error::RateLimited(wait)) => {
+                tracing::info!("Spotify asks to wait {wait:?} before asking what plays");
+                self.poll_soon(wait.max(POLL_INTERVAL));
+                return;
+            }
             Err(err) => tracing::info!("Cannot ask Spotify what plays: {err}"),
         }
         if player.is_remote() {
             self.poll_soon(POLL_INTERVAL);
         }
+    }
+
+    /// The device's song and queue again, from the last answers (their
+    /// covers arrived): no new requests.
+    async fn show_remote_again(&self) {
+        let player = GatefoldApplication::get().player();
+        let (state, queue) = {
+            let remote = self.imp().remote.borrow();
+            (remote.last_state.clone(), remote.last_queue.clone())
+        };
+        let Some(state) = state else { return };
+        let track = match &state.track {
+            Some(track) => self.track_objects(std::slice::from_ref(track)).await.pop(),
+            None => None,
+        };
+        let mut tracks: Vec<TrackObject> = track.iter().cloned().collect();
+        tracks.extend(self.track_objects(&queue).await);
+        if !player.is_remote() || self.soloist_receiving() {
+            return;
+        }
+        player.set_remote_queue(tracks);
+        player.show_remote(
+            track,
+            state.is_playing,
+            player.position(),
+            state.shuffle,
+            repeat_mode(&state.repeat),
+        );
     }
 
     /// Library songs where the library has them (lyrics, cover, details),
@@ -685,12 +726,21 @@ impl Spotify {
                     if spotify.soloist_receiving() {
                         spotify.receiver_show(true);
                     } else if GatefoldApplication::get().player().is_remote() {
-                        spotify.imp().remote.borrow_mut().queue_stale = true;
-                        spotify.poll_soon(Duration::ZERO);
+                        glib::spawn_future_local(async move {
+                            spotify.show_remote_again().await;
+                        });
                     }
                 }
             ),
         );
+    }
+}
+
+fn repeat_mode(repeat: &str) -> RepeatMode {
+    match repeat {
+        "context" => RepeatMode::All,
+        "track" => RepeatMode::One,
+        _ => RepeatMode::Off,
     }
 }
 
