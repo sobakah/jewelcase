@@ -142,7 +142,28 @@ pub fn scan(
     }
 
     summary.covers_made = make_covers(db, covers, progress)?;
+    clean_covers(db, covers)?;
     Ok(summary)
+}
+
+/// About once a week: cached covers nothing refers to any more (replaced
+/// covers, removed albums, Spotify songs no longer listed) are removed.
+fn clean_covers(db: &mut Database, covers: &CoverCache) -> Result<(), DbError> {
+    const KEY: &str = "cover-cache-cleaned";
+    const EVERY_S: i64 = 7 * 24 * 3600;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let last: i64 = db.app_state(KEY)?.and_then(|v| v.parse().ok()).unwrap_or(0);
+    if now - last < EVERY_S {
+        return Ok(());
+    }
+    let keep = db.cover_keys_in_use()?;
+    let removed = covers.remove_unused(&keep);
+    if removed > 0 {
+        tracing::info!("Removed {removed} unused covers from the cache");
+    }
+    db.set_app_state(KEY, &now.to_string())
 }
 
 fn walk(

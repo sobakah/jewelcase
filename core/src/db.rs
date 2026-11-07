@@ -317,6 +317,40 @@ impl Database {
         Ok(())
     }
 
+    /// Every cover key something refers to: songs, albums, playlists, and
+    /// the Spotify images of entries, songs to stream, saved albums and
+    /// followed artists (their keys derive from the image address).
+    pub fn cover_keys_in_use(&self) -> Result<HashSet<String>> {
+        let mut keys = HashSet::new();
+        for sql in [
+            "SELECT cover_key FROM track",
+            "SELECT cover_key FROM album",
+            "SELECT custom_cover_key FROM playlist",
+            "SELECT spotify_cover_key FROM playlist",
+            "SELECT cover_key FROM stream_track",
+        ] {
+            let mut stmt = self.conn.prepare(sql)?;
+            for key in stmt.query_map([], |row| row.get::<_, Option<String>>(0))? {
+                keys.extend(key?);
+            }
+        }
+        for sql in [
+            "SELECT spotify_image_url FROM playlist",
+            "SELECT image_url FROM playlist_item",
+            "SELECT image_url FROM stream_track",
+            "SELECT image_url FROM spotify_album",
+            "SELECT image_url FROM spotify_artist",
+        ] {
+            let mut stmt = self.conn.prepare(sql)?;
+            for url in stmt.query_map([], |row| row.get::<_, Option<String>>(0))? {
+                if let Some(url) = url? {
+                    keys.insert(crate::library::covers::cover_key('s', url.as_bytes()));
+                }
+            }
+        }
+        Ok(keys)
+    }
+
     pub fn app_state(&self, key: &str) -> Result<Option<String>> {
         Ok(self
             .conn

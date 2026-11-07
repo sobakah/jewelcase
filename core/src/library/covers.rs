@@ -59,6 +59,33 @@ impl CoverCache {
         Self { dir: dir.into() }
     }
 
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Removes the cached album covers ('e', 'f') and Spotify images ('s')
+    /// whose key isn't in `keep` (all can be made again: from the files,
+    /// or downloaded). Mosaics and other kinds stay. Returns how many.
+    pub fn remove_unused(&self, keep: &std::collections::HashSet<String>) -> usize {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return 0;
+        };
+        let mut removed = std::collections::HashSet::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            // "<key>-<size>.jpg" or "<key>.color".
+            let key = name.split(['-', '.']).next().unwrap_or_default();
+            if !key.starts_with(['e', 'f', 's']) || keep.contains(key) {
+                continue;
+            }
+            if fs::remove_file(entry.path()).is_ok() {
+                removed.insert(key.to_owned());
+            }
+        }
+        removed.len()
+    }
+
     pub fn path(&self, key: &str, size: CoverSize) -> PathBuf {
         self.dir.join(format!("{key}-{}.jpg", size.pixels()))
     }
@@ -280,6 +307,40 @@ pub fn find_folder_cover(folder: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unused_covers_are_removed_and_others_kept() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = CoverCache::new(dir.path());
+        for name in [
+            "eused-360.jpg",
+            "eused.color",
+            "eold-360.jpg",
+            "eold-720.jpg",
+            "eold.color",
+            "sgone-360.jpg",
+            "mmosaic-360.jpg",
+            "cchosen-360.jpg",
+        ] {
+            fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let keep: std::collections::HashSet<String> = ["eused".to_owned()].into();
+        assert_eq!(cache.remove_unused(&keep), 2);
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "cchosen-360.jpg",
+                "eused-360.jpg",
+                "eused.color",
+                "mmosaic-360.jpg"
+            ]
+        );
+    }
 
     #[test]
     fn keys_are_stable() {
