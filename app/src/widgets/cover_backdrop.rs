@@ -31,6 +31,8 @@ mod imp {
         /// The cover's dominant color (from the scan), as the player's
         /// tint: a blurred cover of many colors alone turns grey.
         pub tint: std::cell::Cell<Option<[u8; 3]>>,
+        /// Height and blur other than the defaults (see `set_shape`).
+        pub shape: std::cell::Cell<Option<(f32, f32)>>,
         pub followed: RefCell<Option<(glib::WeakRef<gtk::Picture>, glib::SignalHandlerId)>>,
     }
 
@@ -55,12 +57,13 @@ mod imp {
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
             if let Some(texture) = self.texture.borrow().as_ref() {
+                let (max_height, blur) = self.shape.get().unwrap_or((MAX_HEIGHT, BLUR));
                 let width = obj.width() as f32;
                 let height = (width * HEIGHT_PER_WIDTH)
-                    .min(MAX_HEIGHT)
+                    .min(max_height)
                     .min(obj.height() as f32);
                 if width > 0.0 && height > 0.0 {
-                    draw(snapshot, texture, self.tint.get(), width, height);
+                    draw(snapshot, texture, self.tint.get(), blur, width, height);
                 }
             }
             self.parent_snapshot(snapshot);
@@ -77,6 +80,13 @@ glib::wrapper! {
 }
 
 impl CoverBackdrop {
+    /// At most `max_height` px tall, blurred by `blur` px (wide panels
+    /// like the artist page: lower and softer, so no shapes show).
+    pub fn set_shape(&self, max_height: f32, blur: f32) {
+        self.imp().shape.set(Some((max_height, blur)));
+        self.queue_draw();
+    }
+
     /// Shows what `cover` shows, also when it changes later (covers that
     /// arrive after a download).
     pub fn follow(&self, cover: &CoverImage) {
@@ -114,6 +124,7 @@ fn draw(
     snapshot: &gtk::Snapshot,
     texture: &gdk::Texture,
     tint: Option<[u8; 3]>,
+    blur: f32,
     width: f32,
     height: f32,
 ) {
@@ -133,10 +144,10 @@ fn draw(
     snapshot.pop();
     snapshot.push_opacity(f64::from(OPACITY));
     snapshot.push_color_matrix(&saturation(1.3), &graphene::Vec4::zero());
-    snapshot.push_blur(f64::from(BLUR));
+    snapshot.push_blur(f64::from(blur));
     // Larger than the area, so the blur doesn't fade at the edges; square
     // like the cover, centered.
-    let side = width.max(height) + 4.0 * BLUR;
+    let side = width.max(height) + 4.0 * blur;
     snapshot.append_texture(
         texture,
         &graphene::Rect::new((width - side) / 2.0, (height - side) / 2.0, side, side),

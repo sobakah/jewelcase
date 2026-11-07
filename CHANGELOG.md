@@ -6,7 +6,7 @@
 - A playlist's songs have the same actions as an album's: Add to Queue, Play Next, Add to Playlist, Go to Album and Go to Artist; the playlist's menu adds all of it to the queue or another playlist.
 - The artist and album of a Spotify song in the player open their pages, like for your own songs.
 - Preferences → Library → Start: open with the last view or a fixed one. Preferences → Playback → Player: whether lyrics and queue are shown when Gatefold starts.
-- Artist pages cover less of the artist grid; a grip on their left edge, like the one on top of the player, closes them.
+- Artist pages cover less of the artist grid. Side panels (albums, playlists, artists) close with a grip on their left edge, like the one on top of the player, instead of a close button.
 - Album, playlist and artist panels show their cover blurred behind the top, like the player.
 - Artist photos come from Spotify (while it's connected) and Deezer, then Wikimedia Commons; fanart.tv is gone, and its API key with it. Artists looked up before get their photos looked up once more.
 - Fixed: searching Spotify always failed with "403: Insufficient client scope". Matching a playlist's songs then asked Spotify once for every song, again at every sync, which could get Gatefold blocked for hours ("too many requests"). Searches now stop at the first error, and while Spotify asks to wait for a long time, Gatefold doesn't ask again.

@@ -7,246 +7,268 @@ template $GatefoldPlaylistPanel: Adw.Bin {
     "album-panel",
   ]
 
-  // The cover, blurred, behind the top of the panel (like the player).
-  child: $GatefoldCoverBackdrop backdrop {
-    child: Adw.ToolbarView {
-      [top]
-      Adw.HeaderBar {
-        show-title: false;
-        show-start-title-buttons: false;
-        show-end-title-buttons: false;
+  // A grip on the left edge, like the one on top of the player, closes
+  // the panel (CONCEPT.md §4.1).
+  child: Gtk.Overlay {
+    // The cover, blurred, behind the top of the panel (like the player).
+    child: $GatefoldCoverBackdrop backdrop {
+      child: Adw.ToolbarView {
+        [top]
+        Adw.HeaderBar {
+          show-title: false;
+          show-start-title-buttons: false;
+          show-end-title-buttons: false;
 
-        [end]
-        Gtk.Button {
-          icon-name: "window-close-symbolic";
-          tooltip-text: _("Close");
-          action-name: "playlist.close";
+          styles [
+            "flat",
+          ]
         }
 
-        styles [
-          "flat",
-        ]
-      }
+        content: Gtk.ScrolledWindow {
+          hscrollbar-policy: never;
 
-      content: Gtk.ScrolledWindow {
-        hscrollbar-policy: never;
+          child: Adw.Clamp {
+            styles [
+              "bottom-room",
+            ]
 
-        child: Adw.Clamp {
-          styles [
-            "bottom-room",
-          ]
+            maximum-size: 560;
+            margin-start: 18;
+            margin-end: 18;
+            margin-bottom: 24;
 
-          maximum-size: 560;
-          margin-start: 18;
-          margin-end: 18;
-          margin-bottom: 24;
-
-          child: Gtk.Box {
-            orientation: vertical;
-            spacing: 6;
-
-            Adw.Clamp {
-              maximum-size: 360;
-              margin-bottom: 12;
-
-              child: $GatefoldCoverImage cover {
-                min-size: 160;
-                natural-size: 360;
-                kind: "panel";
-              };
-            }
-
-            // The name wraps (a long one mustn't widen the panel); click it
-            // to rename: the text field shows, Enter or clicking away saves,
-            // Escape cancels.
-            Gtk.Stack name_stack {
-              hhomogeneous: false;
-              vhomogeneous: false;
-              interpolate-size: true;
-
-              Gtk.StackPage {
-                name: "label";
-
-                child: Gtk.Label name {
-                  wrap: true;
-                  wrap-mode: word_char;
-                  xalign: 0;
-                  width-chars: 1;
-                  max-width-chars: 1;
-                  hexpand: true;
-                  tooltip-text: _("Rename");
-
-                  styles [
-                    "title-2",
-                    "playlist-name",
-                  ]
-                };
-              }
-
-              Gtk.StackPage {
-                name: "entry";
-
-                child: Gtk.Entry name_entry {
-                  width-chars: 1;
-                  hexpand: true;
-
-                  styles [
-                    "title-2",
-                  ]
-                };
-              }
-            }
-
-            Gtk.Label meta {
-              wrap: true;
-              xalign: 0;
-
-              styles [
-                "dim-label",
-                "caption",
-              ]
-            }
-
-            Gtk.Label availability {
-              wrap: true;
-              xalign: 0;
-              visible: false;
-
-              styles [
-                "caption",
-              ]
-            }
-
-            // Spotify playlists (CONCEPT.md §9.5): whose, and changes not
-            // sent yet.
-            Gtk.Label source {
-              wrap: true;
-              xalign: 0;
-              visible: false;
-
-              styles [
-                "dim-label",
-                "caption",
-              ]
-            }
-
-            Gtk.Box {
+            child: Gtk.Box {
+              orientation: vertical;
               spacing: 6;
-              margin-top: 12;
-              margin-bottom: 12;
 
-              Gtk.Button {
-                action-name: "playlist.play";
+              Adw.Clamp {
+                maximum-size: 360;
+                margin-bottom: 12;
 
-                child: Adw.ButtonContent {
-                  icon-name: "media-playback-start-symbolic";
-                  label: _("_Play");
+                child: $GatefoldCoverImage cover {
+                  min-size: 160;
+                  natural-size: 360;
+                  kind: "panel";
+                };
+              }
+
+              // The name wraps (a long one mustn't widen the panel); click it
+              // to rename: the text field shows, Enter or clicking away saves,
+              // Escape cancels.
+              Gtk.Stack name_stack {
+                hhomogeneous: false;
+                vhomogeneous: false;
+                interpolate-size: true;
+
+                Gtk.StackPage {
+                  name: "label";
+
+                  child: Gtk.Label name {
+                    wrap: true;
+                    wrap-mode: word_char;
+                    xalign: 0;
+                    width-chars: 1;
+                    max-width-chars: 1;
+                    hexpand: true;
+                    tooltip-text: _("Rename");
+
+                    styles [
+                      "title-2",
+                      "playlist-name",
+                    ]
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "entry";
+
+                  child: Gtk.Entry name_entry {
+                    width-chars: 1;
+                    hexpand: true;
+
+                    styles [
+                      "title-2",
+                    ]
+                  };
+                }
+              }
+
+              Gtk.Label meta {
+                wrap: true;
+                xalign: 0;
+
+                styles [
+                  "dim-label",
+                  "caption",
+                ]
+              }
+
+              Gtk.Label availability {
+                wrap: true;
+                xalign: 0;
+                visible: false;
+
+                styles [
+                  "caption",
+                ]
+              }
+
+              // Spotify playlists (CONCEPT.md §9.5): whose, and changes not
+              // sent yet.
+              Gtk.Label source {
+                wrap: true;
+                xalign: 0;
+                visible: false;
+
+                styles [
+                  "dim-label",
+                  "caption",
+                ]
+              }
+
+              Gtk.Box {
+                spacing: 6;
+                margin-top: 12;
+                margin-bottom: 12;
+
+                Gtk.Button {
+                  action-name: "playlist.play";
+
+                  child: Adw.ButtonContent {
+                    icon-name: "media-playback-start-symbolic";
+                    label: _("_Play");
+                    use-underline: true;
+                  };
+
+                  styles [
+                    "pill",
+                    "suggested-action",
+                  ]
+                }
+
+                Gtk.Button {
+                  icon-name: "media-playlist-shuffle-symbolic";
+                  tooltip-text: _("Shuffle");
+                  action-name: "playlist.shuffle";
+                  valign: center;
+
+                  styles [
+                    "circular",
+                  ]
+                }
+
+                // Sorted like on Spotify; only the view, remembered per
+                // playlist.
+                Gtk.MenuButton {
+                  icon-name: "view-sort-descending-symbolic";
+                  tooltip-text: _("Sort");
+                  menu-model: sort_menu;
+                  valign: center;
+
+                  styles [
+                    "circular",
+                  ]
+                }
+
+                Gtk.MenuButton {
+                  icon-name: "view-more-symbolic";
+                  tooltip-text: _("More");
+                  menu-model: playlist_menu;
+                  valign: center;
+
+                  styles [
+                    "circular",
+                  ]
+                }
+              }
+
+              // Find songs in the library and add them right here.
+              Gtk.SearchEntry add_search {
+                placeholder-text: _("Add Songs…");
+                margin-bottom: 6;
+              }
+
+              Gtk.ListBox add_results {
+                selection-mode: none;
+                visible: false;
+                margin-bottom: 12;
+
+                styles [
+                  "boxed-list",
+                ]
+              }
+
+              Adw.StatusPage hidden {
+                icon-name: "gatefold-spotify-symbolic";
+                title: _("Spotify Doesn’t Show These Songs");
+                description: _("Spotify only shows the songs of playlists you own or collaborate on to apps like Gatefold. With Soloist, Play starts it there.");
+                visible: false;
+
+                child: Gtk.Button {
+                  label: _("_Open in Spotify");
                   use-underline: true;
+                  action-name: "playlist.open-spotify";
+                  halign: center;
+
+                  styles [
+                    "pill",
+                  ]
                 };
 
                 styles [
-                  "pill",
-                  "suggested-action",
+                  "compact",
                 ]
               }
 
-              Gtk.Button {
-                icon-name: "media-playlist-shuffle-symbolic";
-                tooltip-text: _("Shuffle");
-                action-name: "playlist.shuffle";
-                valign: center;
+              Adw.StatusPage empty {
+                icon-name: "view-list-bullet-symbolic";
+                title: _("Empty Playlist");
+                description: _("Search above to add songs, or use “Add to Playlist…” on an album or song.");
+                visible: false;
 
                 styles [
-                  "circular",
+                  "compact",
                 ]
               }
 
-              // Sorted like on Spotify; only the view, remembered per
-              // playlist.
-              Gtk.MenuButton {
-                icon-name: "view-sort-descending-symbolic";
-                tooltip-text: _("Sort");
-                menu-model: sort_menu;
-                valign: center;
+              Gtk.ListBox items {
+                selection-mode: none;
 
                 styles [
-                  "circular",
+                  "boxed-list",
+                  "reorderable",
                 ]
               }
-
-              Gtk.MenuButton {
-                icon-name: "view-more-symbolic";
-                tooltip-text: _("More");
-                menu-model: playlist_menu;
-                valign: center;
-
-                styles [
-                  "circular",
-                ]
-              }
-            }
-
-            // Find songs in the library and add them right here.
-            Gtk.SearchEntry add_search {
-              placeholder-text: _("Add Songs…");
-              margin-bottom: 6;
-            }
-
-            Gtk.ListBox add_results {
-              selection-mode: none;
-              visible: false;
-              margin-bottom: 12;
-
-              styles [
-                "boxed-list",
-              ]
-            }
-
-            Adw.StatusPage hidden {
-              icon-name: "gatefold-spotify-symbolic";
-              title: _("Spotify Doesn’t Show These Songs");
-              description: _("Spotify only shows the songs of playlists you own or collaborate on to apps like Gatefold. With Soloist, Play starts it there.");
-              visible: false;
-
-              child: Gtk.Button {
-                label: _("_Open in Spotify");
-                use-underline: true;
-                action-name: "playlist.open-spotify";
-                halign: center;
-
-                styles [
-                  "pill",
-                ]
-              };
-
-              styles [
-                "compact",
-              ]
-            }
-
-            Adw.StatusPage empty {
-              icon-name: "view-list-bullet-symbolic";
-              title: _("Empty Playlist");
-              description: _("Search above to add songs, or use “Add to Playlist…” on an album or song.");
-              visible: false;
-
-              styles [
-                "compact",
-              ]
-            }
-
-            Gtk.ListBox items {
-              selection-mode: none;
-
-              styles [
-                "boxed-list",
-                "reorderable",
-              ]
-            }
+            };
           };
         };
       };
     };
+
+    [overlay]
+    Gtk.Button {
+      tooltip-text: _("Close");
+      action-name: "playlist.close";
+      halign: start;
+      valign: center;
+
+      accessibility {
+        label: _("Close");
+      }
+
+      child: Gtk.Box {
+        halign: center;
+        valign: center;
+
+        styles [
+          "grip",
+        ]
+      };
+
+      styles [
+        "panel-close-handle",
+      ]
+    }
   };
 }
 

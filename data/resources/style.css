@@ -297,9 +297,10 @@ button.smart-shuffle {
   text-decoration-line: underline;
 }
 
-/* The grip on an artist page's left edge closes it (§4.2); it looks like
-   the bottom sheet's drag handle on top of the player, turned upright. */
-.artist-close-handle {
+/* The grip on a side panel's left edge (album, playlist, artist page)
+   closes it (§4.1, §4.2); it looks like the bottom sheet's drag handle on
+   top of the player, turned upright. */
+.panel-close-handle {
   min-width: 20px;
   min-height: 96px;
   padding: 0;
@@ -309,7 +310,7 @@ button.smart-shuffle {
   box-shadow: none;
 }
 
-.artist-close-handle .grip {
+.panel-close-handle .grip {
   min-width: 4px;
   min-height: 36px;
   border-radius: 999px;
@@ -317,11 +318,11 @@ button.smart-shuffle {
   transition: background-color 150ms ease-out, min-height 150ms ease-out;
 }
 
-.artist-close-handle:hover .grip {
+.panel-close-handle:hover .grip {
   min-height: 48px;
   background-color: color-mix(in srgb, currentColor 35%, transparent);
 }
 
-.artist-close-handle:active .grip {
+.panel-close-handle:active .grip {
   background-color: color-mix(in srgb, currentColor 50%, transparent);
 }
