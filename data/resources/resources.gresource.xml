@@ -14,5 +14,6 @@
     <file compressed="true">style.css</file>
     <!-- Added to the icon theme automatically by GtkApplication. -->
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/gatefold-lyrics-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/gatefold-smart-shuffle-symbolic.svg</file>
   </gresource>
 </gresources>

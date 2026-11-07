@@ -241,3 +241,8 @@
 .boxed-list > row .unavailable {
   opacity: 0.6;
 }
+
+/* Mixing in similar songs is on (smart shuffle, §7). */
+button.smart-shuffle {
+  color: var(--accent-color);
+}

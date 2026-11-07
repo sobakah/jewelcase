@@ -52,20 +52,28 @@ impl Spotify {
         if wanted.is_empty() {
             return;
         }
-        gtk::gio::spawn_blocking(move || {
-            let covers =
-                gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
-            for (_, url) in wanted {
-                let key = gatefold_core::library::covers::cover_key('s', url.as_bytes());
-                if covers.has(&key) {
-                    continue;
-                }
-                match gatefold_spotify::download_image(&url) {
-                    Ok(data) => {
-                        let _ = covers.generate(&key, data);
+        gtk::glib::spawn_future_local(async move {
+            let made = gtk::gio::spawn_blocking(move || {
+                let covers =
+                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                let mut made = 0;
+                for (_, url) in wanted {
+                    let key = gatefold_core::library::covers::cover_key('s', url.as_bytes());
+                    if covers.has(&key) {
+                        continue;
                     }
-                    Err(err) => tracing::info!("Cannot load a cover: {err}"),
+                    match gatefold_spotify::download_image(&url) {
+                        Ok(data) => made += usize::from(covers.generate(&key, data).is_ok()),
+                        Err(err) => tracing::info!("Cannot load a cover: {err}"),
+                    }
                 }
+                made
+            })
+            .await
+            .unwrap_or(0);
+            // Shown before they arrived: show them now.
+            if made > 0 {
+                GatefoldApplication::get().player().covers_arrived();
             }
         });
     }

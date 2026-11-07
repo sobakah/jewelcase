@@ -103,6 +103,8 @@ mod imp {
         #[template_child]
         pub devices_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub shuffle_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub devices_popover: TemplateChild<gtk::Popover>,
         #[template_child]
         pub remote_banner: TemplateChild<adw::Banner>,
@@ -265,6 +267,7 @@ impl PlayerView {
             ),
         );
 
+        super::mini_player::show_mixing(&imp.shuffle_button);
         imp.shuffle_options
             .set_popover(Some(&super::shuffle_options::shuffle_popover()));
         imp.repeat_options

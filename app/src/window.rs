@@ -1437,6 +1437,8 @@ impl GatefoldWindow {
 /// longer messages stay a bit longer.
 fn imp_toast(window: &GatefoldWindow, message: &str) {
     let toast = adw::Toast::new(message);
+    // Song titles like "A & B" are text, not markup.
+    toast.set_use_markup(false);
     toast.set_timeout(if message.chars().count() <= 40 { 2 } else { 4 });
     window.imp().toast_overlay.add_toast(toast);
 }

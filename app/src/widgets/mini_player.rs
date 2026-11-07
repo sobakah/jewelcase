@@ -33,6 +33,8 @@ mod imp {
         #[template_child]
         pub repeat_button: TemplateChild<gtk::Button>,
         #[template_child]
+        pub shuffle_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub queue_popover: TemplateChild<gtk::Popover>,
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
@@ -127,6 +129,7 @@ mod imp {
             });
             obj.update_track(&player);
             update_repeat_button(&self.repeat_button, &player);
+            show_mixing(&self.shuffle_button);
             super::update_play_button(&self.play_button, player.playing());
         }
     }
@@ -222,6 +225,30 @@ pub(super) fn update_repeat_button(button: &gtk::Button, player: &Player) {
     };
     button.set_icon_name(icon);
     button.set_tooltip_text(Some(&tooltip));
+}
+
+/// Smart shuffle (mixing in similar songs, §7) shows on the shuffle
+/// button: its own icon, highlighted even while plain shuffle is off.
+pub(super) fn show_mixing(button: &gtk::ToggleButton) {
+    let settings = GatefoldApplication::get().player().settings().clone();
+    let update = glib::clone!(
+        #[weak]
+        button,
+        move |settings: &gtk::gio::Settings| {
+            let mixing = settings.boolean("mix-similar");
+            if mixing {
+                button.set_icon_name("gatefold-smart-shuffle-symbolic");
+                button.set_tooltip_text(Some(&gettext("Shuffle (Mixing In Similar Songs)")));
+                button.add_css_class("smart-shuffle");
+            } else {
+                button.set_icon_name("media-playlist-shuffle-symbolic");
+                button.set_tooltip_text(Some(&gettext("Shuffle")));
+                button.remove_css_class("smart-shuffle");
+            }
+        }
+    );
+    update(&settings);
+    settings.connect_changed(Some("mix-similar"), move |settings, _| update(settings));
 }
 
 pub(super) fn update_play_button(button: &gtk::Button, playing: bool) {

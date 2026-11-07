@@ -50,8 +50,10 @@ fn init_i18n() {
 
 /// Log level comes from `GATEFOLD_LOG` (e.g. `GATEFOLD_LOG=debug`).
 fn init_logging() {
+    // librespot's own messages say why streaming fails (CONCEPT.md §9.4).
     let default = if config::is_development() {
-        "gatefold=debug,gatefold_core=debug"
+        "gatefold=debug,gatefold_core=debug,gatefold_stream=debug,librespot_core=info,\
+         librespot_playback=info,librespot_audio=info,librespot_metadata=info"
     } else {
         "warn"
     };

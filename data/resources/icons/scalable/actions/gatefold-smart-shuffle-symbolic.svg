@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Smart shuffle: crossing arrows with sparkles (mixing in similar songs) -->
+  <path fill="#222222" d="M0.60 7.69 L12.00 14.21 L11.25 15.51 L15.00 15.00 L13.54 11.51 L12.79 12.82 L1.40 6.31 Z"/>
+  <path fill="#222222" d="M1.40 15.69 L12.79 9.18 L13.54 10.49 L15.00 7.00 L11.25 6.49 L12.00 7.79 L0.60 14.31 Z"/>
+  <path fill="#222222" d="M4.50 0.20 L5.14 2.56 L7.50 3.20 L5.14 3.84 L4.50 6.20 L3.86 3.84 L1.50 3.20 L3.86 2.56 Z"/>
+  <path fill="#222222" d="M10.20 0.20 L10.58 1.62 L12.00 2.00 L10.58 2.38 L10.20 3.80 L9.82 2.38 L8.40 2.00 L9.82 1.62 Z"/>
+</svg>

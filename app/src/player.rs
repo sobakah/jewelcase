@@ -27,6 +27,9 @@ const SAVE_DELAY: Duration = Duration::from_secs(2);
 /// A song counts as played (for the history) after half of it, or this long.
 const HISTORY_MIN_MS: u64 = 30_000;
 
+/// After this many streamed songs fail in a row, playback stops.
+const STREAM_FAILURES_TO_STOP: u32 = 3;
+
 /// Songs handed to a Spotify device when something is started remotely.
 pub const REMOTE_HAND_OVER: usize = 20;
 
@@ -72,6 +75,8 @@ mod imp {
         pub remote: RefCell<Option<RemoteHandler>>,
         /// The current song plays from the Spotify stream (§9.4).
         pub streaming: Cell<bool>,
+        /// Streamed songs that failed in a row.
+        pub stream_failures: Cell<u32>,
         /// The local position, kept while remote.
         pub local_position: Cell<u64>,
         /// Remote position and when it was reported, to move it along.
@@ -975,6 +980,7 @@ impl Player {
         }
         match note {
             StreamNote::Playing => {
+                imp.stream_failures.set(0);
                 if imp.state.get() != State::Playing {
                     self.set_state(State::Playing);
                 }
@@ -984,10 +990,39 @@ impl Player {
                     self.set_state(State::Paused);
                 }
             }
-            StreamNote::Ended => self.handle_event(PlayerEvent::EndOfStream),
+            StreamNote::Ended => {
+                imp.stream_failures.set(0);
+                self.handle_event(PlayerEvent::EndOfStream);
+            }
             StreamNote::Unavailable => {
+                // Several in a row: streaming itself fails; stop instead of
+                // racing through the queue.
+                let failures = imp.stream_failures.get() + 1;
+                imp.stream_failures.set(failures);
+                if failures >= STREAM_FAILURES_TO_STOP {
+                    imp.stream_failures.set(0);
+                    self.stop();
+                    self.emit_by_name::<()>(
+                        "message",
+                        &[&gettext(
+                            "Spotify streaming can't play songs right now; Gatefold stopped",
+                        )],
+                    );
+                    return;
+                }
                 self.handle_event(PlayerEvent::Error("Spotify can't play this song".into()))
             }
+        }
+    }
+
+    /// Covers of streamed songs were downloaded: the player and the queue
+    /// show them.
+    pub fn covers_arrived(&self) {
+        if self.current_track().is_some_and(|t| t.is_stand_in()) {
+            self.notify_current_track();
+        }
+        if !self.is_remote() {
+            self.queue_changed();
         }
     }
 
