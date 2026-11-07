@@ -226,6 +226,14 @@ impl PlaybackState {
     }
 }
 
+/// The upcoming tracks of `GET /me/player/queue` (episodes left out).
+pub(crate) fn parse_queue(value: &Value) -> Vec<Track> {
+    value["queue"]
+        .as_array()
+        .map(|items| items.iter().filter_map(Track::parse).collect())
+        .unwrap_or_default()
+}
+
 fn string(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
@@ -316,6 +324,16 @@ mod tests {
         assert_eq!(followed.owner_name.as_deref(), Some("spotify"));
         let old = PlaylistSummary::parse(&json!({"id": "p3", "tracks": {"total": 3}})).unwrap();
         assert_eq!(old.total, Some(3));
+    }
+
+    #[test]
+    fn queues_parse() {
+        let queue = parse_queue(&json!({
+            "currently_playing": track_json(),
+            "queue": [track_json(), {"type": "episode", "uri": "spotify:episode:e"}]
+        }));
+        assert_eq!(queue.len(), 1);
+        assert!(parse_queue(&json!({})).is_empty());
     }
 
     #[test]

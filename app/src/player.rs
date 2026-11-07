@@ -27,6 +27,9 @@ const SAVE_DELAY: Duration = Duration::from_secs(2);
 /// A song counts as played (for the history) after half of it, or this long.
 const HISTORY_MIN_MS: u64 = 30_000;
 
+/// Songs handed to a Spotify device when something is started remotely.
+pub const REMOTE_HAND_OVER: usize = 20;
+
 /// "Previous" restarts the track instead when it has played this long.
 const RESTART_THRESHOLD_MS: u64 = 3000;
 
@@ -72,6 +75,8 @@ mod imp {
         /// Remote position and when it was reported, to move it along.
         pub remote_clock: Cell<Option<(std::time::Instant, u64)>>,
         pub remote_tick: RefCell<Option<glib::SourceId>>,
+        /// What the remote device plays next, for the queue view.
+        pub remote_queue: OnceCell<gio::ListStore>,
 
         pub engine: OnceCell<playback::Player>,
         pub library: OnceCell<Library>,
@@ -123,6 +128,9 @@ mod imp {
             self.parent_constructed();
             self.repeat.replace(RepeatMode::Off.as_str().to_owned());
             self.queue_model
+                .set(gio::ListStore::new::<QueueEntry>())
+                .expect("set once");
+            self.remote_queue
                 .set(gio::ListStore::new::<QueueEntry>())
                 .expect("set once");
         }
@@ -375,6 +383,10 @@ impl Player {
     /// Inserts tracks after the current one.
     pub fn play_next(&self, tracks: Vec<TrackObject>) {
         let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();
+        // Spotify's queue only takes songs at its end, which plays next.
+        if self.forward(RemoteCommand::Queue(ids.clone())) {
+            return;
+        }
         let was_empty = self.imp().queue.borrow().current().is_none();
         self.cache_tracks(tracks);
         self.imp().queue.borrow_mut().play_next(&ids);
@@ -384,6 +396,9 @@ impl Player {
     /// Adds tracks to the end of "Next up".
     pub fn add_to_queue(&self, tracks: Vec<TrackObject>) {
         let ids: Vec<i64> = tracks.iter().map(TrackObject::id).collect();
+        if self.forward(RemoteCommand::Queue(ids.clone())) {
+            return;
+        }
         let was_empty = self.imp().queue.borrow().current().is_none();
         self.cache_tracks(tracks);
         self.imp().queue.borrow_mut().add(&ids);
@@ -783,6 +798,23 @@ impl Player {
         }
     }
 
+    /// The device's current song and queue (remote mode).
+    pub fn remote_queue(&self) -> &gio::ListStore {
+        self.imp().remote_queue.get().expect("set in constructed()")
+    }
+
+    pub fn set_remote_queue(&self, tracks: Vec<TrackObject>) {
+        let entries: Vec<QueueEntry> = tracks
+            .into_iter()
+            .enumerate()
+            .map(|(offset, track)| {
+                QueueEntry::new(offset, track, gatefold_core::queue::Origin::Context)
+            })
+            .collect();
+        let model = self.remote_queue();
+        model.splice(0, model.n_items(), &entries);
+    }
+
     /// Back to playing here, paused where the local queue was.
     pub fn leave_remote(&self) {
         let imp = self.imp();
@@ -793,6 +825,7 @@ impl Player {
             source.remove();
         }
         imp.remote_clock.set(None);
+        self.remote_queue().remove_all();
         self.set_remote_device(None);
         let current = imp.queue.borrow().current().copied();
         let track = current.and_then(|item| self.track(item.track_id));
@@ -831,13 +864,14 @@ impl Player {
 
     /// Loads the queue's current track into GStreamer.
     fn load_current(&self, play: bool, start_ms: u64) {
-        // Playing something here ends remote mode (the device pauses).
+        // Remote mode: what was started plays on the device; the local
+        // queue only feeds it.
         if self.is_remote() {
-            self.forward(RemoteCommand::Pause);
-            self.leave_remote();
             if play {
-                self.emit_by_name::<()>("message", &[&gettext("Playing on this computer")]);
+                let ids = self.upcoming_track_ids(REMOTE_HAND_OVER);
+                self.forward(RemoteCommand::Play(ids));
             }
+            return;
         }
         let imp = self.imp();
         imp.pending_next.set(None);

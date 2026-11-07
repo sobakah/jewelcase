@@ -369,6 +369,13 @@ impl Client {
             .map(drop)
     }
 
+    /// What the device plays after the current song (Spotify's queue
+    /// and then its context, about 20 songs).
+    pub fn queue(&self) -> Result<Vec<Track>> {
+        let value = self.get("/me/player/queue", &[])?;
+        Ok(model::parse_queue(&value))
+    }
+
     /// Adds a track to the device's queue (after the current song).
     pub fn add_to_queue(&self, uri: &str) -> Result<()> {
         self.call(

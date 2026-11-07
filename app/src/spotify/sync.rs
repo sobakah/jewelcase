@@ -747,20 +747,10 @@ impl Spotify {
         };
         let local = local_track(&track);
         let isrc = local.isrc.clone();
-        let query = format!(
-            "track:\"{}\" artist:\"{}\"",
-            matching::search_title(&local.title),
-            local
-                .artist
-                .as_deref()
-                .or(local.album_artist.as_deref())
-                .map(|a| gatefold_core::library::artists::track_artist_names(a)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| a.to_owned()))
-                .unwrap_or_default()
-        );
+        let queries = search_queries(&local);
         let title = local.title.clone();
+        let aliases = library.aliases().clone();
+        let wanted = local.clone();
         let results = self
             .call(move |client| {
                 // Too many requests: wait as long as Spotify asks (on this
@@ -773,14 +763,25 @@ impl Spotify {
                     }
                     result => result,
                 };
+                // From the most exact query to the most forgiving; stop at
+                // a sure match.
                 let mut results = Vec::new();
-                if let Some(isrc) = isrc {
-                    results.extend(search(&format!("isrc:{isrc}"), 5)?);
+                let isrc_query = isrc.map(|isrc| (format!("isrc:{isrc}"), 5));
+                for (query, limit) in isrc_query
+                    .into_iter()
+                    .chain(queries.into_iter().map(|q| (q, 10)))
+                {
+                    let found = search(&query, limit)?;
+                    tracing::debug!("Spotify search {query:?}: {} results", found.len());
                     std::thread::sleep(SEARCH_PAUSE);
-                }
-                if results.is_empty() {
-                    results.extend(search(&query, 10)?);
-                    std::thread::sleep(SEARCH_PAUSE);
+                    let sure = found.iter().any(|t| {
+                        matching::compare(&wanted, &remote_track(t), &aliases)
+                            == Some(Confidence::Sure)
+                    });
+                    results.extend(found);
+                    if sure {
+                        break;
+                    }
                 }
                 Ok(results)
             })
@@ -836,9 +837,13 @@ impl Spotify {
             let version = match self.find_version(track).await {
                 Ok(version) => version,
                 Err(err) => {
-                    // Spotify can't be asked now: the rest waits too.
+                    // Offline or too many requests: the rest waits too.
+                    let stop = err.is_temporary();
                     failed = Some(err);
-                    break;
+                    if stop {
+                        break;
+                    }
+                    continue;
                 }
             };
             let Some(mut db) = library.db() else { break };
@@ -911,10 +916,6 @@ impl Spotify {
         let mut unchecked = Vec::new();
         let mut failure = None;
         for (item, track) in &entries {
-            if failure.is_some() {
-                unchecked.push(*track);
-                continue;
-            }
             match self.find_version(*track).await {
                 Ok(SpotifyVersion {
                     uri: Some(uri),
@@ -930,7 +931,17 @@ impl Spotify {
                 Ok(_) => missing.push(*track),
                 Err(err) => {
                     unchecked.push(*track);
+                    // Offline or too many requests: the rest waits; other
+                    // errors are about this song.
+                    let stop = err.is_temporary();
                     failure = Some(err);
+                    if !stop {
+                        continue;
+                    }
+                    for (_, rest) in entries.iter().skip_while(|(i, _)| i != item).skip(1) {
+                        unchecked.push(*rest);
+                    }
+                    break;
                 }
             }
         }
@@ -1114,7 +1125,51 @@ pub fn search_error(err: &Error) -> String {
             gettext("Spotify is busy (too many requests); Gatefold tries again later.")
         }
         Error::Http(_) => gettext("Spotify can't be reached; Gatefold tries again later."),
-        _ => gettext("Spotify couldn't be searched."),
+        // Translators: {} is Spotify's own error message.
+        _ => gettext("Spotify couldn't be searched ({}).").replace("{}", &err.to_string()),
+    }
+}
+
+/// Searches for a library song, most exact first: title and artist as
+/// fields, then as plain words (forgiving with punctuation and
+/// spellings), then the title alone.
+fn search_queries(local: &LocalTrack) -> Vec<String> {
+    let title = matching::search_title(&local.title);
+    let artists: Vec<String> = [local.artist.as_deref(), local.album_artist.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            gatefold_core::library::artists::track_artist_names(a)
+                .into_iter()
+                .next()
+        })
+        .fold(Vec::new(), |mut list, name| {
+            if !list.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
+                list.push(name);
+            }
+            list
+        });
+    let artist = artists.first().cloned().unwrap_or_default();
+    let mut queries = vec![
+        format!("track:{} artist:{}", quote(&title), quote(&artist)),
+        format!("{title} {artist}"),
+    ];
+    // "TOMORROW X TOGETHER" on the album, "Yeonjun" on the track.
+    if let Some(other) = artists.get(1) {
+        queries.push(format!("{title} {other}"));
+    }
+    queries.push(title);
+    queries.dedup();
+    queries
+}
+
+/// A field value for Spotify's search: quoted when it has spaces.
+fn quote(value: &str) -> String {
+    let value = value.replace('"', "");
+    if value.contains(' ') {
+        format!("\"{value}\"")
+    } else {
+        value
     }
 }
 

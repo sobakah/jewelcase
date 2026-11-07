@@ -10,7 +10,7 @@ use gatefold_core::library::tags::TrackTags;
 use gatefold_core::matching::{Confidence, MatchIndex, RemoteTrack};
 use gatefold_core::queue::RepeatMode;
 use gatefold_spotify::{Device, Error, PlayRequest};
-use gettextrs::gettext;
+use gettextrs::{gettext, ngettext};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -25,12 +25,16 @@ const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const AFTER_COMMAND: Duration = Duration::from_millis(700);
 /// Volume changes are sent once the slider rests this long.
 const VOLUME_DELAY: Duration = Duration::from_millis(300);
-/// Songs taken along when moving playback to a device.
-const HAND_OVER_SONGS: usize = 20;
+/// The device's queue is read again after this many reports.
+const QUEUE_EVERY: u32 = 5;
 
 /// What the player's controls do in remote mode.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RemoteCommand {
+    /// Library songs to play on the device (the first one now).
+    Play(Vec<i64>),
+    /// Library songs for the device's queue.
+    Queue(Vec<i64>),
     PlayPause,
     Pause,
     Next,
@@ -52,6 +56,12 @@ pub struct RemoteState {
     matches: HashMap<String, Option<i64>>,
     /// Covers being downloaded, by URL.
     loading: HashSet<String>,
+    /// Counts started hand-overs; an older one stops queueing.
+    generation: u64,
+    /// The device's queue needs reading again.
+    queue_stale: bool,
+    last_uri: Option<String>,
+    polls: u32,
 }
 
 impl Spotify {
@@ -70,89 +80,29 @@ impl Spotify {
             return;
         };
         let player = GatefoldApplication::get().player();
-        let mut uris = Vec::new();
-        let mut later = Vec::new();
+        let previous = self
+            .imp()
+            .remote
+            .borrow_mut()
+            .device_id
+            .replace(device_id.clone());
+        let mut started = false;
         if player.playing() && !player.is_remote() {
-            let ids = player.upcoming_track_ids(HAND_OVER_SONGS);
-            let title = player
-                .current_track()
-                .map(|t| t.title())
-                .unwrap_or_default();
-            if let Some(first) = ids.first() {
-                // Playing isn't editing: a likely match is good enough.
-                match self.find_version(*first).await {
-                    Ok(SpotifyVersion { uri: Some(uri), .. }) => {
-                        uris.push(uri);
-                        later = ids[1..].to_vec();
-                    }
-                    Ok(_) => {
-                        // Translators: {} is a song title.
-                        self.message(
-                            &gettext("“{}” isn't on Spotify; the device plays what Spotify had")
-                                .replace("{}", &title),
-                        );
-                    }
-                    Err(err) => {
-                        self.message(&format!(
-                            "{} {}",
-                            super::sync::search_error(&err),
-                            gettext("The device plays what Spotify had.")
-                        ));
-                    }
-                }
+            let ids = player.upcoming_track_ids(crate::player::REMOTE_HAND_OVER);
+            started = self.play_ids(ids, player.position()).await;
+        }
+        if !started {
+            let id = device_id.clone();
+            let was_playing = player.playing();
+            if let Err(err) = self
+                .call(move |client| client.transfer(&id, was_playing))
+                .await
+            {
+                tracing::warn!("Cannot play on {}: {err}", device.name);
+                self.message(&device_error(&err, &device.name));
+                self.imp().remote.borrow_mut().device_id = previous;
+                return;
             }
-        }
-        let position = player.position();
-        let was_playing = player.playing();
-        let id = device_id.clone();
-        let result = self
-            .call(move |client| {
-                if uris.is_empty() {
-                    client.transfer(&id, was_playing)
-                } else {
-                    client.play(
-                        Some(&id),
-                        Some(PlayRequest::Tracks {
-                            uris,
-                            offset: 0,
-                            position_ms: position,
-                        }),
-                    )
-                }
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!("Cannot play on {}: {err}", device.name);
-            self.message(&device_error(&err, &device.name));
-            return;
-        }
-        self.imp().remote.borrow_mut().device_id = Some(device_id.clone());
-        // What follows goes into the device's queue, as it's found.
-        if !later.is_empty() {
-            glib::spawn_future_local(glib::clone!(
-                #[weak(rename_to = spotify)]
-                self,
-                async move {
-                    for id in later {
-                        if spotify.remote_device_id().as_deref() != Some(device_id.as_str()) {
-                            break;
-                        }
-                        let uri = match spotify.find_version(id).await {
-                            Ok(SpotifyVersion {
-                                uri: Some(uri),
-                                confidence: Some(Confidence::Sure),
-                                ..
-                            }) => uri,
-                            Ok(_) => continue,
-                            Err(_) => break,
-                        };
-                        if let Err(err) = spotify.call(move |c| c.add_to_queue(&uri)).await {
-                            tracing::info!("Cannot queue on the device: {err}");
-                            break;
-                        }
-                    }
-                }
-            ));
         }
         let weak = self.downgrade();
         player.enter_remote(&device.name, move |command| {
@@ -160,6 +110,159 @@ impl Spotify {
                 spotify.remote_command(command);
             }
         });
+        self.poll_soon(AFTER_COMMAND);
+    }
+
+    /// Plays library songs on the device: the first one Spotify has right
+    /// away, the rest go into the device's queue as they're found. Returns
+    /// whether something started.
+    async fn play_ids(&self, ids: Vec<i64>, position_ms: u64) -> bool {
+        let generation = {
+            let mut state = self.imp().remote.borrow_mut();
+            state.generation += 1;
+            state.generation
+        };
+        let library = GatefoldApplication::get().library();
+        let title_of = |id: i64| {
+            library
+                .tracks(&[id])
+                .remove(&id)
+                .and_then(|t| t.record.tags.title)
+                .unwrap_or_default()
+        };
+        let mut start = None;
+        let mut skipped = Vec::new();
+        for (index, id) in ids.iter().enumerate().take(10) {
+            // Playing isn't editing: a likely match is good enough.
+            match self.find_version(*id).await {
+                Ok(SpotifyVersion { uri: Some(uri), .. }) => {
+                    start = Some((index, uri));
+                    break;
+                }
+                Ok(_) => skipped.push(title_of(*id)),
+                Err(err) => {
+                    self.message(&super::sync::search_error(&err));
+                    return false;
+                }
+            }
+        }
+        let Some((index, uri)) = start else {
+            if let Some(first) = skipped.first() {
+                // Translators: {} is a song title.
+                self.message(&gettext("“{}” isn't on Spotify").replace("{}", first));
+            }
+            return false;
+        };
+        if let Some(first) = skipped.first() {
+            // Translators: {} is a song title.
+            self.message(&gettext("“{}” isn't on Spotify; skipped").replace("{}", first));
+        }
+        let device = self.remote_device_id();
+        let position = if index == 0 { position_ms } else { 0 };
+        let result = self
+            .call(move |client| {
+                client.play(
+                    device.as_deref(),
+                    Some(PlayRequest::Tracks {
+                        uris: vec![uri],
+                        offset: 0,
+                        position_ms: position,
+                    }),
+                )
+            })
+            .await;
+        if let Err(err) = result {
+            tracing::warn!("Cannot play on the device: {err}");
+            let device = GatefoldApplication::get()
+                .player()
+                .remote_device()
+                .unwrap_or_default();
+            self.message(&device_error(&err, &device));
+            return false;
+        }
+        self.poll_soon(AFTER_COMMAND);
+        // What follows goes into the device's queue, unless something else
+        // is started meanwhile.
+        let later = ids[index + 1..].to_vec();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = spotify)]
+            self,
+            async move {
+                for id in later {
+                    if spotify.imp().remote.borrow().generation != generation {
+                        break;
+                    }
+                    let uri = match spotify.find_version(id).await {
+                        Ok(SpotifyVersion { uri: Some(uri), .. }) => uri,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    if spotify.imp().remote.borrow().generation != generation {
+                        break;
+                    }
+                    if let Err(err) = spotify.call(move |c| c.add_to_queue(&uri)).await {
+                        tracing::info!("Cannot queue on the device: {err}");
+                        break;
+                    }
+                    spotify.imp().remote.borrow_mut().queue_stale = true;
+                }
+            }
+        ));
+        true
+    }
+
+    /// "Play Next" / "Add to Queue" in remote mode: into the device's
+    /// queue (Spotify only adds at its end, which plays next).
+    async fn queue_ids(&self, ids: Vec<i64>) {
+        let mut added = 0;
+        let mut missing = 0;
+        for id in ids {
+            let uri = match self.find_version(id).await {
+                Ok(SpotifyVersion { uri: Some(uri), .. }) => uri,
+                Ok(_) => {
+                    missing += 1;
+                    continue;
+                }
+                Err(err) => {
+                    self.message(&super::sync::search_error(&err));
+                    break;
+                }
+            };
+            match self.call(move |c| c.add_to_queue(&uri)).await {
+                Ok(()) => added += 1,
+                Err(err) => {
+                    tracing::warn!("Cannot queue on the device: {err}");
+                    self.message(&device_error(&err, ""));
+                    break;
+                }
+            }
+        }
+        let device = GatefoldApplication::get()
+            .player()
+            .remote_device()
+            .unwrap_or_default();
+        if added > 0 {
+            self.message(
+                &ngettext(
+                    "Added {n} song to the queue on {device}",
+                    "Added {n} songs to the queue on {device}",
+                    added,
+                )
+                .replace("{n}", &added.to_string())
+                .replace("{device}", &device),
+            );
+        }
+        if missing > 0 {
+            self.message(
+                &ngettext(
+                    "{} song isn't on Spotify",
+                    "{} songs aren't on Spotify",
+                    missing,
+                )
+                .replace("{}", &missing.to_string()),
+            );
+        }
+        self.imp().remote.borrow_mut().queue_stale = true;
         self.poll_soon(AFTER_COMMAND);
     }
 
@@ -216,6 +319,27 @@ impl Spotify {
 
     fn remote_command(&self, command: RemoteCommand) {
         let playing = self.imp().remote.borrow().playing;
+        match command {
+            RemoteCommand::Play(ids) => {
+                glib::spawn_future_local(glib::clone!(
+                    #[weak(rename_to = spotify)]
+                    self,
+                    async move {
+                        spotify.play_ids(ids, 0).await;
+                    }
+                ));
+                return;
+            }
+            RemoteCommand::Queue(ids) => {
+                glib::spawn_future_local(glib::clone!(
+                    #[weak(rename_to = spotify)]
+                    self,
+                    async move { spotify.queue_ids(ids).await }
+                ));
+                return;
+            }
+            _ => {}
+        }
         if let RemoteCommand::Volume(volume) = command {
             let mut state = self.imp().remote.borrow_mut();
             if let Some(timer) = state.volume_timer.take() {
@@ -253,7 +377,7 @@ impl Spotify {
                 RepeatMode::All => "context",
                 RepeatMode::One => "track",
             }),
-            RemoteCommand::Volume(_) => Ok(()),
+            RemoteCommand::Volume(_) | RemoteCommand::Play(_) | RemoteCommand::Queue(_) => Ok(()),
         });
     }
 
@@ -312,11 +436,35 @@ impl Spotify {
                 }
                 self.imp().remote.borrow_mut().playing = state.is_playing;
                 let track = match &state.track {
-                    Some(track) => Some(self.track_object(track).await),
+                    Some(track) => self.track_objects(std::slice::from_ref(track)).await.pop(),
                     None => None,
                 };
                 if !player.is_remote() {
                     return;
+                }
+                // The queue, when the song changed, after adding, and now
+                // and then.
+                let uri = state.track.as_ref().map(|t| t.uri.clone());
+                let read_queue = {
+                    let mut remote = self.imp().remote.borrow_mut();
+                    remote.polls += 1;
+                    let read = remote.last_uri != uri
+                        || std::mem::take(&mut remote.queue_stale)
+                        || remote.polls.is_multiple_of(QUEUE_EVERY);
+                    remote.last_uri = uri;
+                    read
+                };
+                if read_queue {
+                    match self.call(|client| client.queue()).await {
+                        Ok(queue) => {
+                            let mut tracks: Vec<TrackObject> = track.iter().cloned().collect();
+                            tracks.extend(self.track_objects(&queue).await);
+                            if player.is_remote() {
+                                player.set_remote_queue(tracks);
+                            }
+                        }
+                        Err(err) => tracing::info!("Cannot read the device's queue: {err}"),
+                    }
                 }
                 player.show_remote(
                     track,
@@ -342,46 +490,79 @@ impl Spotify {
         }
     }
 
-    /// The library song when it's in the library (lyrics, cover, details),
-    /// else a stand-in with Spotify's cover.
-    async fn track_object(&self, track: &gatefold_spotify::Track) -> TrackObject {
+    /// Library songs where the library has them (lyrics, cover, details),
+    /// else stand-ins with Spotify's covers.
+    async fn track_objects(&self, tracks: &[gatefold_spotify::Track]) -> Vec<TrackObject> {
         let library = GatefoldApplication::get().library();
-        let known = self.imp().remote.borrow().matches.get(&track.uri).copied();
-        let local = match known {
-            Some(local) => local,
-            None => {
-                let aliases = library.aliases().clone();
-                let local = library.db().and_then(|db| {
-                    let index = MatchIndex::new(db.match_tracks().ok()?, &aliases);
-                    index
-                        .find(&RemoteTrack {
-                            title: track.name.clone(),
-                            artists: track.artists.clone(),
-                            album: track.album.clone(),
-                            duration_ms: track.duration_ms,
-                            isrc: track.isrc.clone(),
+        let unknown: Vec<&gatefold_spotify::Track> = tracks
+            .iter()
+            .filter(|t| !self.imp().remote.borrow().matches.contains_key(&t.uri))
+            .collect();
+        if !unknown.is_empty() {
+            let aliases = library.aliases().clone();
+            let found: Vec<(String, Option<i64>)> = library
+                .db()
+                .and_then(|db| db.match_tracks().ok())
+                .map(|local| {
+                    let index = MatchIndex::new(local, &aliases);
+                    unknown
+                        .iter()
+                        .map(|track| {
+                            let id = index
+                                .find(&RemoteTrack {
+                                    title: track.name.clone(),
+                                    artists: track.artists.clone(),
+                                    album: track.album.clone(),
+                                    duration_ms: track.duration_ms,
+                                    isrc: track.isrc.clone(),
+                                })
+                                .filter(|(_, confidence)| *confidence == Confidence::Sure)
+                                .map(|(id, _)| id);
+                            (track.uri.clone(), id)
                         })
-                        .filter(|(_, confidence)| *confidence == Confidence::Sure)
-                        .map(|(id, _)| id)
-                });
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.imp().remote.borrow_mut().matches.extend(found);
+        }
+        let ids: Vec<i64> = tracks
+            .iter()
+            .filter_map(|t| {
                 self.imp()
                     .remote
-                    .borrow_mut()
+                    .borrow()
                     .matches
-                    .insert(track.uri.clone(), local);
+                    .get(&t.uri)
+                    .copied()
+                    .flatten()
+            })
+            .collect();
+        let mut local = library.tracks(&ids);
+        let mut objects = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            let id = self
+                .imp()
+                .remote
+                .borrow()
+                .matches
+                .get(&track.uri)
+                .copied()
+                .flatten();
+            if let Some(found) = id.and_then(|id| {
                 local
+                    .remove(&id)
+                    .or_else(|| library.tracks(&[id]).remove(&id))
+            }) {
+                objects.push(TrackObject::new(found));
+                continue;
             }
-        };
-        if let Some(id) = local
-            && let Some(found) = library.tracks(&[id]).remove(&id)
-        {
-            return TrackObject::new(found);
+            let cover_key = match &track.image_url {
+                Some(url) => self.remote_cover(url).await,
+                None => None,
+            };
+            objects.push(TrackObject::new(stand_in(track, cover_key)));
         }
-        let cover_key = match &track.image_url {
-            Some(url) => self.remote_cover(url).await,
-            None => None,
-        };
-        TrackObject::new(stand_in(track, cover_key))
+        objects
     }
 
     /// Spotify's cover in the cover cache; `None` while it can't be had.

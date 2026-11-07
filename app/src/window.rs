@@ -1331,6 +1331,20 @@ impl GatefoldWindow {
                     }
                 });
             }
+            // `GATEFOLD_SCREENSHOT_QUEUE=title`: add that song to the queue
+            // 5 s in (after a device took over, it goes to the device).
+            if let Ok(title) = std::env::var("GATEFOLD_SCREENSHOT_QUEUE") {
+                glib::timeout_add_seconds_local_once(5, move || {
+                    let library = GatefoldApplication::get().library();
+                    let ids = library.search(&title, 1).tracks;
+                    let tracks = library
+                        .tracks(&ids)
+                        .into_values()
+                        .map(crate::objects::TrackObject::new)
+                        .collect();
+                    GatefoldApplication::get().player().add_to_queue(tracks);
+                });
+            }
             // `GATEFOLD_SCREENSHOT_PUBLISH=1`: "Create on Spotify" for the
             // open playlist once connected, without asking.
             if std::env::var_os("GATEFOLD_SCREENSHOT_PUBLISH").is_some() {

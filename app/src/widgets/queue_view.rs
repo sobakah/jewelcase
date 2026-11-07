@@ -20,6 +20,8 @@ mod imp {
     #[derive(Debug, Default)]
     pub struct QueueView {
         pub list: gtk::ListBox,
+        /// What a Spotify device plays next (remote mode, §9.3).
+        pub remote_list: gtk::ListBox,
         pub history: gtk::ListBox,
         pub history_box: gtk::Box,
         pub scroller: gtk::ScrolledWindow,
@@ -58,14 +60,14 @@ impl QueueView {
         self.add_css_class("queue-view");
 
         let header = gtk::Box::builder().spacing(6).build();
-        header.append(
-            &gtk::Label::builder()
-                .label(gettext("Queue"))
-                .xalign(0.0)
-                .hexpand(true)
-                .css_classes(["heading"])
-                .build(),
-        );
+        let title = gtk::Label::builder()
+            .label(gettext("Queue"))
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .css_classes(["heading"])
+            .build();
+        header.append(&title);
         let save = gtk::Button::builder()
             .label(gettext("_Save"))
             .use_underline(true)
@@ -107,15 +109,14 @@ impl QueueView {
             }
         ));
         header.append(&save);
-        header.append(
-            &gtk::Button::builder()
-                .label(gettext("_Clear"))
-                .use_underline(true)
-                .tooltip_text(gettext("Clear Upcoming Songs"))
-                .action_name("player.clear-queue")
-                .css_classes(["flat"])
-                .build(),
-        );
+        let clear = gtk::Button::builder()
+            .label(gettext("_Clear"))
+            .use_underline(true)
+            .tooltip_text(gettext("Clear Upcoming Songs"))
+            .action_name("player.clear-queue")
+            .css_classes(["flat"])
+            .build();
+        header.append(&clear);
 
         imp.list.set_selection_mode(gtk::SelectionMode::None);
         imp.list.set_valign(gtk::Align::Start);
@@ -204,6 +205,73 @@ impl QueueView {
             .build();
         lists.append(&imp.history_box);
         lists.append(&imp.list);
+        // Remote mode: Spotify's queue, read-only (the API can only add).
+        imp.remote_list.set_selection_mode(gtk::SelectionMode::None);
+        imp.remote_list.set_valign(gtk::Align::Start);
+        imp.remote_list.add_css_class("boxed-list");
+        imp.remote_list
+            .bind_model(Some(player.remote_queue()), |item| {
+                let entry = item.downcast_ref::<QueueEntry>().expect("queue entries");
+                remote_row(entry)
+            });
+        imp.remote_list.set_header_func(|row, before| {
+            let label = match (row.index(), before) {
+                (0, _) => gettext("Now Playing"),
+                (_, Some(before)) if before.index() > 0 => {
+                    row.set_header(None::<&gtk::Widget>);
+                    return;
+                }
+                _ => gettext("Next on Spotify"),
+            };
+            row.set_header(Some(&section_label(&label)));
+        });
+        lists.append(&imp.remote_list);
+        let remote_note = gtk::Label::builder()
+            .label(gettext(
+                "Songs added with “Play Next” or “Add to Queue” go to the end of Spotify's queue; Spotify doesn't let apps remove or reorder them.",
+            ))
+            .wrap(true)
+            .xalign(0.0)
+            .margin_start(12)
+            .margin_end(12)
+            .css_classes(["dim-label", "caption"])
+            .build();
+        lists.append(&remote_note);
+        let switch = glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[weak]
+            title,
+            #[weak]
+            save,
+            #[weak]
+            clear,
+            #[weak]
+            remote_note,
+            move |player: &Player| {
+                let imp = view.imp();
+                let remote = player.remote_device();
+                title.set_label(&match &remote {
+                    // Translators: {} is a Spotify device, e.g. "Kitchen".
+                    Some(device) => gettext("Queue on {}").replace("{}", device),
+                    None => gettext("Queue"),
+                });
+                let local = remote.is_none();
+                for widget in [
+                    save.upcast_ref::<gtk::Widget>(),
+                    clear.upcast_ref(),
+                    imp.list.upcast_ref(),
+                ] {
+                    widget.set_visible(local);
+                }
+                imp.history_box
+                    .set_visible(local && !imp.history_tracks.borrow().is_empty());
+                imp.remote_list.set_visible(!local);
+                remote_note.set_visible(!local);
+            }
+        );
+        switch(&player);
+        player.connect_remote_device_notify(move |player| switch(player));
         imp.scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
         imp.scroller.set_vexpand(true);
         imp.scroller.set_child(Some(&lists));
@@ -244,7 +312,8 @@ impl QueueView {
         for track in &tracks {
             imp.history.append(&history_row(track));
         }
-        imp.history_box.set_visible(!tracks.is_empty());
+        let remote = GatefoldApplication::get().player().is_remote();
+        imp.history_box.set_visible(!tracks.is_empty() && !remote);
         imp.history_tracks.replace(tracks);
     }
 
@@ -383,6 +452,74 @@ fn section_header(player: &Player, row: &gtk::ListBoxRow, before: Option<&gtk::L
             .css_classes(["dim-label", "caption-heading"])
             .build(),
     ));
+}
+
+fn section_label(text: &str) -> gtk::Label {
+    gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(12)
+        .margin_bottom(6)
+        .css_classes(["dim-label", "caption-heading"])
+        .build()
+}
+
+/// A song in a Spotify device's queue: shown, not changed.
+fn remote_row(entry: &QueueEntry) -> gtk::Widget {
+    let track = &entry.entry().track;
+    let cover: CoverImage = glib::Object::builder()
+        .property("min-size", 40)
+        .property("natural-size", 40)
+        .build();
+    cover.set_cover(track.cover_key());
+    let text = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .hexpand(true)
+        .build();
+    text.append(
+        &gtk::Label::builder()
+            .label(track.title())
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build(),
+    );
+    if let Some(artist) = track.artist() {
+        text.append(
+            &gtk::Label::builder()
+                .label(artist)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .css_classes(["dim-label", "caption"])
+                .build(),
+        );
+    }
+    let line = gtk::Box::builder()
+        .spacing(12)
+        .margin_start(6)
+        .margin_end(6)
+        .margin_top(9)
+        .margin_bottom(9)
+        .build();
+    line.append(&cover);
+    line.append(&text);
+    line.append(
+        &gtk::Label::builder()
+            .label(format::duration(track.duration_ms()))
+            .css_classes(["dim-label", "numeric"])
+            .build(),
+    );
+    let row = gtk::ListBoxRow::builder()
+        .child(&line)
+        .activatable(false)
+        .build();
+    if entry.entry().offset == 0 {
+        row.add_css_class("now-playing");
+    }
+    row.upcast()
 }
 
 fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
