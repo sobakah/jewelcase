@@ -403,6 +403,22 @@ impl Spotify {
     }
 }
 
+/// Something on Spotify (`kind`: "artist", "album", "track", "playlist"):
+/// in the Spotify app when that's chosen in Preferences and installed,
+/// else on the web.
+pub fn open_on_spotify(kind: &str, id: &str) {
+    let in_app = GatefoldApplication::get()
+        .player()
+        .settings()
+        .boolean("spotify-links-in-app");
+    let uri = if in_app && gio::AppInfo::default_for_uri_scheme("spotify").is_some() {
+        format!("spotify:{kind}:{id}")
+    } else {
+        format!("https://open.spotify.com/{kind}/{id}")
+    };
+    open_in_browser(&uri);
+}
+
 /// Opens a page in the browser (or, in headless tests, only logs it).
 pub(crate) fn open_in_browser(url: &str) {
     if std::env::var_os("GATEFOLD_NO_BROWSER").is_some() {

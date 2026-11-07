@@ -110,9 +110,7 @@ mod imp {
             });
             klass.install_action("playlist.open-spotify", None, |panel, _, _| {
                 if let Some(id) = panel.spotify_id() {
-                    crate::spotify::open_in_browser(&format!(
-                        "https://open.spotify.com/playlist/{id}"
-                    ));
+                    crate::spotify::open_on_spotify("playlist", &id);
                 }
             });
             klass.install_action("playlist.duplicate", None, |panel, _, _| {
@@ -1138,9 +1136,9 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         .as_deref()
         .and_then(|u| u.strip_prefix("spotify:track:"))
     {
-        let url = format!("https://open.spotify.com/track/{id}");
+        let id = id.to_owned();
         let open = gio::SimpleAction::new("open", None);
-        open.connect_activate(move |_, _| crate::spotify::open_in_browser(&url));
+        open.connect_activate(move |_, _| crate::spotify::open_on_spotify("track", &id));
         actions.add_action(&open);
         section.append(Some(&gettext("_Open in Spotify")), Some("entry.open"));
     }

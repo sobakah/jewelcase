@@ -95,10 +95,7 @@ mod imp {
             });
             klass.install_action("panel.open-spotify", None, |panel, _, _| {
                 if let Some(album) = panel.imp().spotify.borrow().as_ref() {
-                    crate::spotify::open_in_browser(&format!(
-                        "https://open.spotify.com/album/{}",
-                        album.spotify_id
-                    ));
+                    crate::spotify::open_on_spotify("album", &album.spotify_id);
                 }
             });
             klass.install_action("panel.add-to-queue", None, |panel, _, _| {

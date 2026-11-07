@@ -508,7 +508,7 @@ impl ArtistPage {
         });
         imp.portrait.set_label(&artist.name);
         imp.portrait.set_cover(artist.cover_key().as_deref());
-        let url = format!("https://open.spotify.com/artist/{}", artist.spotify_id);
+        let id = artist.spotify_id.clone();
         while let Some(child) = imp.links.first_child() {
             imp.links.remove(&child);
         }
@@ -516,7 +516,7 @@ impl ArtistPage {
             .label(gettext("Open in Spotify"))
             .css_classes(["pill", "small"])
             .build();
-        button.connect_clicked(move |_| crate::spotify::open_in_browser(&url));
+        button.connect_clicked(move |_| crate::spotify::open_on_spotify("artist", &id));
         imp.links.append(&button);
         imp.links.set_visible(true);
         if let Some(url) = artist.image_url.clone() {
