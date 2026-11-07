@@ -606,9 +606,14 @@ mod tests {
             path: locked.join("c.flac"),
             ..stored.clone()
         };
-        db.upsert_tracks(&[stored, gone, on_nas, in_locked], 0)
-            .unwrap();
         fs::set_permissions(&locked, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+        // Root (as in a CI container) reads it anyway; that case is left out.
+        let can_lock = fs::read_dir(&locked).is_err();
+        let mut tracks = vec![stored, gone, on_nas];
+        if can_lock {
+            tracks.push(in_locked);
+        }
+        db.upsert_tracks(&tracks, 0).unwrap();
         let summary = scan(
             &mut db,
             &[music, unmounted.clone(), mount_point.clone()],
@@ -628,11 +633,10 @@ mod tests {
             .map(|t| t.path)
             .collect();
         left.sort();
-        let mut expected = vec![
-            unmounted.join("a.flac"),
-            mount_point.join("b.flac"),
-            locked.join("c.flac"),
-        ];
+        let mut expected = vec![unmounted.join("a.flac"), mount_point.join("b.flac")];
+        if can_lock {
+            expected.push(locked.join("c.flac"));
+        }
         expected.sort();
         assert_eq!(left, expected);
     }
