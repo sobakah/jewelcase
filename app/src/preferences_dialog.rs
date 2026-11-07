@@ -76,9 +76,9 @@ mod imp {
         #[template_child]
         pub wikidata_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub fanart_row: TemplateChild<adw::SwitchRow>,
+        pub spotify_photos_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub fanart_key_row: TemplateChild<adw::PasswordEntryRow>,
+        pub deezer_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub spotify_app_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -150,10 +150,10 @@ mod imp {
                 .bind("metadata-wikidata", &*self.wikidata_row, "active")
                 .build();
             settings
-                .bind("metadata-fanart", &*self.fanart_row, "active")
+                .bind("metadata-spotify", &*self.spotify_photos_row, "active")
                 .build();
             settings
-                .bind("fanart-api-key", &*self.fanart_key_row, "text")
+                .bind("metadata-deezer", &*self.deezer_row, "active")
                 .build();
             settings
                 .bind("spotify-links-in-app", &*self.spotify_app_row, "active")

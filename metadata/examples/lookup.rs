@@ -1,5 +1,6 @@
 //! Looks up one artist online and prints what was found.
-//! `cargo run -p gatefold-metadata --example lookup -- NAME [MBID]`
+//! `cargo run -p gatefold-metadata --example lookup -- NAME [MBID]`;
+//! `ALBUMS="Title|Title"` tells artists of the same name apart on Deezer.
 
 use gatefold_metadata::{ArtistQuery, Client, Providers};
 
@@ -13,12 +14,15 @@ fn main() {
         name,
         mbid: args.next(),
         release_mbids: Vec::new(),
+        album_titles: std::env::var("ALBUMS")
+            .map(|a| a.split('|').map(str::to_owned).collect())
+            .unwrap_or_default(),
         language: "de".into(),
     };
     let providers = Providers {
         musicbrainz: true,
         wikidata: true,
-        fanart_key: std::env::var("FANART_KEY").ok(),
+        deezer: true,
     };
     let client = Client::new(env!("CARGO_PKG_VERSION"));
     match client.lookup(&query, &providers) {

@@ -231,7 +231,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     Adw.PreferencesGroup {
       title: _("Artist Information");
       description: _(
-        "Photos, links and short biographies of album artists. Only artist names and MusicBrainz IDs are sent."
+        "Photos, links and short biographies of album artists. Only artist names, album titles and the artists' IDs are sent."
       );
 
       Adw.SwitchRow online_row {
@@ -247,17 +247,18 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         sensitive: bind online_row.active;
       }
 
-      Adw.SwitchRow fanart_row {
-        title: _("_fanart.tv");
-        subtitle: _("Artist photos; needs a free API key from fanart.tv");
+      Adw.SwitchRow spotify_photos_row {
+        title: _("Photos from _Spotify");
+        subtitle: _("The artist’s Spotify picture, while Spotify is connected");
         use-underline: true;
         sensitive: bind online_row.active;
       }
 
-      Adw.PasswordEntryRow fanart_key_row {
-        title: _("fanart.tv API _Key");
+      Adw.SwitchRow deezer_row {
+        title: _("Photos from _Deezer");
+        subtitle: _("The artist’s Deezer picture, found by name and checked against your albums");
         use-underline: true;
-        sensitive: bind fanart_row.active;
+        sensitive: bind online_row.active;
       }
     }
 

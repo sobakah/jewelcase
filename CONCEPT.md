@@ -51,7 +51,7 @@ Non-goals for v1: tag editing inside the player (delegated to Ear Tag), online l
 | Image loading | **glycin** (GNOME's sandboxed image loader, used by Loupe) | Safe decoding of untrusted embedded covers. Fedora ships it. |
 | Color extraction | `kmeans_colors` / `color-thief` | Player accent and background colors taken from the cover. |
 | HTTP | **reqwest** on a background Tokio runtime, bridged to the GLib main loop with `async-channel` | Standard approach in gtk-rs apps. |
-| Metadata | **musicbrainz_rs**, Wikidata REST/SPARQL, Cover Art Archive, fanart.tv | Free, open and ID-based, with no scraping. |
+| Metadata | **musicbrainz_rs**, Wikidata REST/SPARQL, Cover Art Archive, Deezer, Spotify | Free, open and ID-based, with no scraping. |
 | Audio similarity | **bliss-audio** (bliss-rs) | Local song analysis (tempo, timbre, chroma, loudness) that gives a distance metric. Spotify's audio-features API is no longer available, so this replaces it. |
 | BPM detection | GStreamer **`bpmdetect`** (SoundTouch, installed on Fedora 45) | The reference library has **no BPM tags at all**, so BPM has to be measured. This runs in the same analysis pass as bliss. |
 | Desktop integration | **mpris-server** crate | Media keys, GNOME Shell media controls, KDE Connect. |
@@ -67,7 +67,7 @@ Non-goals for v1: tag editing inside the player (delegated to Ear Tag), online l
 gatefold/           # this repository (Cargo workspace root)
 ├── app/            # GTK UI: windows, widgets, Blueprint files, GObject wrappers
 ├── core/           # no GTK dependency: library DB, scanner, queue, playback engine
-├── metadata/       # MusicBrainz, Wikidata, fanart.tv, Cover Art Archive providers
+├── metadata/       # MusicBrainz, Wikidata, Deezer, Cover Art Archive providers
 ├── lyrics/         # LRC/embedded parsing, dual-line pairing
 ├── similarity/     # bliss analysis worker + "similar track" queries
 ├── tools/          # lyrembed / cdimport: detection, version probing, process control
@@ -342,10 +342,12 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 **Lookup chain**, run lazily when an artist appears on screen, rate-limited to 1 req/s for MusicBrainz, with a descriptive User-Agent and results cached in the DB:
 1. **Local**: `artist.jpg`/`folder.jpg` in the artist directory (Kodi/Jellyfin convention).
 2. **User override** (always wins once set).
-3. **fanart.tv** `artistthumb` by MBID (good quality, needs a free project API key).
-4. **Wikidata `P18`** → Wikimedia Commons image (freely licensed; attribution shown in a tooltip).
-5. **Spotify Get Artist** images (only when the user connected Spotify, §9).
+3. **Spotify Get Artist** image, while Spotify is connected (§9): by the Spotify ID from Wikidata or of a followed artist, else the artist search result of exactly that name. Covers nearly every artist, K-pop included, at 640 px.
+4. **Deezer** artist picture (no account or key; 1000 px): the search results of exactly that name; of several, the one whose albums share the most titles with the library's (else one with ten times the fans of the others, else none).
+5. **Wikidata `P18`** → Wikimedia Commons image (freely licensed; attribution shown in a tooltip).
 6. Fallback: generated initials avatar tinted with the color of their most common album cover.
+
+fanart.tv was dropped in 0.2: it needed a key and, being volunteer-made, rarely had more than Commons for this library. Lookups done before Spotify and Deezer were sources are repeated once.
 
 If tags have no MBIDs, the app searches MusicBrainz by name and album titles and auto-accepts only a high-confidence match. Otherwise the artist shows a small "Identify artist…" prompt where the user picks the right match.
 
@@ -614,7 +616,7 @@ For now the app is built as an **RPM for Fedora 45 and installed locally**. Ther
   | Cache (cover thumbnails) | `~/.cache/io.github.sobakah.Gatefold/` |
   | Keyring entries (Spotify tokens) | attribute `application = <app ID>` (the development build has its own; it copied the shared entries once when it got them) |
   | Rust crates | `gatefold` (app), `gatefold-core` (library, playback, analysis and similarity), `gatefold-metadata`, `gatefold-lyrics`, `gatefold-tools`, `gatefold-spotify`, `gatefold-soloist`, `gatefold-stream` (librespot, optional) |
-  | User-Agent for MusicBrainz/Wikidata/fanart.tv | `Gatefold/<version> ( https://github.com/sobakah/gatefold )` |
+  | User-Agent for MusicBrainz/Wikidata/Deezer | `Gatefold/<version> ( https://github.com/sobakah/gatefold )` |
 
 ---
 

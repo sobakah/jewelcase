@@ -561,12 +561,20 @@ impl Library {
 
     fn providers(&self) -> Providers {
         let settings = self.settings();
-        let key = settings.string("fanart-api-key").trim().to_owned();
         Providers {
             musicbrainz: true,
             wikidata: settings.boolean("metadata-wikidata"),
-            fanart_key: (settings.boolean("metadata-fanart") && !key.is_empty()).then_some(key),
+            deezer: settings.boolean("metadata-deezer"),
         }
+    }
+
+    /// The Spotify account for portraits, when connected and allowed.
+    fn portrait_spotify(&self) -> metadata::SpotifyClient {
+        if !self.settings().boolean("metadata-spotify") {
+            return None;
+        }
+        let spotify = GatefoldApplication::get().spotify();
+        spotify.is_connected().then(|| spotify.client()).flatten()
     }
 
     fn send_job(&self, job: Job) {
@@ -592,7 +600,11 @@ impl Library {
         let due = match meta.lookup_state.as_deref() {
             None => true,
             Some("offline") => online,
-            Some("done") => age > metadata::REFRESH_DONE,
+            // Done before Spotify and Deezer had portraits: again, once.
+            Some("done") => {
+                age > metadata::REFRESH_DONE
+                    || (online && meta.looked_up.unwrap_or(0) < metadata::PORTRAIT_SOURCES_SINCE)
+            }
             Some(_) => online && age > metadata::REFRESH_FAILED,
         };
         // Queued already (by its tile): an urgent request goes ahead of it.
@@ -602,6 +614,7 @@ impl Library {
                 artist_id: artist.id(),
                 online,
                 providers: self.providers(),
+                spotify: self.portrait_spotify(),
                 language: metadata::language(),
                 urgent,
                 again: false,
@@ -621,6 +634,7 @@ impl Library {
             artist_id,
             online: self.online_enabled(),
             providers: self.providers(),
+            spotify: self.portrait_spotify(),
             language: metadata::language(),
             urgent: true,
             again: true,
@@ -645,6 +659,7 @@ impl Library {
         self.send_job(Job::Candidates {
             artist_id,
             providers: self.providers(),
+            spotify: self.portrait_spotify(),
             reply,
         });
         answer.recv().await.map_err(|e| e.to_string())?

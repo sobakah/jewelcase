@@ -1,12 +1,13 @@
 //! Artist lookups on a background thread (CONCEPT.md §8).
 //!
 //! Portrait order: the user's own choice (stored separately, always wins),
-//! a local `artist.*`/`folder.*` in the artist's folder, fanart.tv, then
-//! Wikimedia Commons. Downloaded images are decoded in glycin's sandbox
-//! like covers.
+//! a local `artist.*`/`folder.*` in the artist's folder, Spotify (when
+//! connected), Deezer, then Wikimedia Commons. Downloaded images are
+//! decoded in glycin's sandbox like covers.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gatefold_core::db::{ArtistMeta, Database};
@@ -22,6 +23,13 @@ use crate::config;
 pub const REFRESH_DONE: i64 = 30 * 24 * 3600;
 /// Failed or unclear lookups are retried after this long.
 pub const REFRESH_FAILED: i64 = 7 * 24 * 3600;
+/// Lookups from before Spotify and Deezer were portrait sources
+/// (2026-11-08) are done again, for their better portraits.
+pub const PORTRAIT_SOURCES_SINCE: i64 = 1_794_096_000;
+
+/// The Spotify account, for portraits (`None`: not connected, or turned
+/// off in Preferences).
+pub type SpotifyClient = Option<Arc<gatefold_spotify::Client>>;
 
 const LOCAL_PORTRAIT_NAMES: &[&str] = &["artist", "folder"];
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
@@ -34,6 +42,7 @@ pub enum Job {
         artist_id: i64,
         online: bool,
         providers: Providers,
+        spotify: SpotifyClient,
         language: String,
         urgent: bool,
         again: bool,
@@ -48,6 +57,7 @@ pub enum Job {
     Candidates {
         artist_id: i64,
         providers: Providers,
+        spotify: SpotifyClient,
         reply: async_channel::Sender<Result<Vec<(String, PortraitCandidate)>, String>>,
     },
     /// An image file the user picked as the portrait.
@@ -149,10 +159,11 @@ impl Worker {
                 artist_id,
                 online,
                 providers,
+                spotify,
                 language,
                 ..
             } => {
-                if let Err(err) = self.lookup(artist_id, online, &providers, language) {
+                if let Err(err) = self.lookup(artist_id, online, &providers, &spotify, language) {
                     tracing::warn!("Lookup of artist {artist_id} failed: {err}");
                 }
                 let _ = self.updates.send_blocking(ArtistChanged(artist_id));
@@ -164,9 +175,10 @@ impl Worker {
             Job::Candidates {
                 artist_id,
                 providers,
+                spotify,
                 reply,
             } => {
-                let _ = reply.send_blocking(self.candidates(artist_id, &providers));
+                let _ = reply.send_blocking(self.candidates(artist_id, &providers, &spotify));
             }
             Job::SetCustom {
                 artist_id,
@@ -185,6 +197,7 @@ impl Worker {
         artist_id: i64,
         online: bool,
         providers: &Providers,
+        spotify: &SpotifyClient,
         language: String,
     ) -> Result<(), String> {
         let artist = self
@@ -221,10 +234,11 @@ impl Worker {
                     .db
                     .artist_release_mbids(artist_id)
                     .map_err(|e| e.to_string())?,
+                album_titles: self.album_titles(artist_id),
                 language,
             };
             match self.client.lookup(&query, providers) {
-                Ok(info) => {
+                Ok(mut info) => {
                     meta.lookup_state = Some(
                         match &info.identity {
                             Identity::Found(_) => "done",
@@ -235,6 +249,20 @@ impl Worker {
                     );
                     if let Identity::Found(mbid) = info.identity {
                         meta.lookup_mbid = Some(mbid);
+                    }
+                    // Spotify's picture first (by the ID Wikidata gave,
+                    // else by name).
+                    let known = info
+                        .links
+                        .spotify_id
+                        .clone()
+                        .or(artist.meta.spotify_id.clone());
+                    if let Some(client) = spotify
+                        && let Some((id, candidate)) =
+                            self.spotify_portrait(client, known.as_deref(), &artist.name)
+                    {
+                        info.links.spotify_id.get_or_insert(id);
+                        info.portraits.insert(0, candidate);
                     }
                     meta.wikidata_id = info.links.wikidata_id;
                     meta.spotify_id = info.links.spotify_id;
@@ -295,25 +323,93 @@ impl Worker {
         &self,
         artist_id: i64,
         providers: &Providers,
+        spotify: &SpotifyClient,
     ) -> Result<Vec<(String, PortraitCandidate)>, String> {
         let artist = self
             .db
             .artist(artist_id)
             .map_err(|e| e.to_string())?
             .ok_or("the artist is gone")?;
-        let Some(mbid) = artist.mbid.clone() else {
-            return Ok(Vec::new());
+        let query = ArtistQuery {
+            name: artist.name.clone(),
+            mbid: artist.mbid.clone(),
+            album_titles: self.album_titles(artist_id),
+            ..ArtistQuery::default()
         };
         let links = Links {
             wikidata_id: artist.meta.wikidata_id.clone(),
             ..Links::default()
         };
-        Ok(self
-            .client
-            .portrait_candidates(&mbid, &links, providers)
+        let mut candidates = Vec::new();
+        if let Some(client) = spotify
+            && let Some((_, candidate)) =
+                self.spotify_portrait(client, artist.meta.spotify_id.as_deref(), &artist.name)
+        {
+            candidates.push(candidate);
+        }
+        candidates.extend(self.client.portrait_candidates(&query, &links, providers));
+        Ok(candidates
             .into_iter()
             .filter_map(|candidate| Some((self.fetch_portrait(&candidate)?, candidate)))
             .collect())
+    }
+
+    /// The artist's album titles, to tell artists of the same name apart.
+    fn album_titles(&self, artist_id: i64) -> Vec<String> {
+        self.db
+            .artist_albums(artist_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(album, _)| album.title)
+            .collect()
+    }
+
+    /// The artist's picture on Spotify, with their Spotify ID: by `known`
+    /// ID (from Wikidata, or stored for followed artists), else the
+    /// search result of exactly that name.
+    fn spotify_portrait(
+        &self,
+        client: &gatefold_spotify::Client,
+        known: Option<&str>,
+        name: &str,
+    ) -> Option<(String, PortraitCandidate)> {
+        let found = match known {
+            // Followed artists are stored with their picture.
+            Some(id) => match self.db.spotify_artist(id).ok().flatten() {
+                Some(stored) if stored.image_url.is_some() => {
+                    Some((id.to_owned(), stored.image_url))
+                }
+                _ => client
+                    .artist(id)
+                    .map(|a| Some((a.id, a.image_url)))
+                    .unwrap_or_else(|err| {
+                        tracing::info!("Spotify artist {id}: {err}");
+                        None
+                    }),
+            },
+            None => {
+                let wanted = name.trim().to_lowercase();
+                match client.search_artists(name) {
+                    Ok(artists) => artists
+                        .into_iter()
+                        .find(|a| a.name.trim().to_lowercase() == wanted)
+                        .map(|a| (a.id, a.image_url)),
+                    Err(err) => {
+                        tracing::info!("Spotify search for the artist {name}: {err}");
+                        None
+                    }
+                }
+            }
+        };
+        let (id, url) = found?;
+        Some((
+            id,
+            PortraitCandidate {
+                url: url?,
+                source: "spotify",
+                attribution: Some("Spotify".to_owned()),
+            },
+        ))
     }
 
     fn set_custom(&mut self, artist_id: i64, data: Vec<u8>) -> Result<(), String> {

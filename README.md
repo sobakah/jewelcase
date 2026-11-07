@@ -8,7 +8,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 
 **Albums.** Gatefold scans your music folders and groups the songs into albums. Editions of the same album (deluxe, remastered, a Japanese version) are merged into one, with the edition as a subtitle. The album grid shows only covers, titles and artists, and fills the window at any width; sort it by artist, title, year or date added. Clicking an album opens its songs in a side panel, where each song unfolds to show its details. Changes to your files show up live, and folders that are temporarily missing (an unmounted drive, a NAS that's off) keep their songs.
 
-**Artists.** The artist list holds album artists only, so featured guests don't clutter it. An artist page groups the albums into albums, EPs & singles, soundtracks and collaborations, and lists under "Appears on" the artist's songs on other artists' albums. With online lookups turned on (you're asked at first start), Gatefold fetches portraits from fanart.tv and Wikimedia Commons, a short Wikipedia bio, and links to Wikipedia, MusicBrainz and Spotify. Portraits can be replaced with your own image or another online one.
+**Artists.** The artist list holds album artists only, so featured guests don't clutter it. An artist page groups the albums into albums, EPs & singles, soundtracks and collaborations, and lists under "Appears on" the artist's songs on other artists' albums. With online lookups turned on (you're asked at first start), Gatefold fetches portraits from Spotify (when connected), Deezer and Wikimedia Commons, a short Wikipedia bio, and links to Wikipedia, MusicBrainz and Spotify. Portraits can be replaced with your own image or another online one.
 
 **Player.** The mini player at the bottom slides up into a full player with the cover as large as possible, coloured by the cover. Lyrics and the queue open next to it on wide windows. Synced lyrics come from the files or `.lrc` files and follow the song; for Korean, Japanese and Chinese songs an original line and its romanization are shown together, and missing romanization is added automatically through lyrembed. Playback is gapless, with ReplayGain and loudness levelling for songs without ReplayGain tags. Crossfade (up to 12 s) follows where songs actually fade out and start, and albums played in order stay gapless. Media keys and GNOME's media controls work through MPRIS.
 
@@ -127,7 +127,7 @@ app/        GTK UI (crate `gatefold`)
 core/       library model, scanner, queue, playback; no GTK (crate `gatefold-core`)
 tools/      lyrembed, cdimport, tag editor: detection, commands, configs (crate `gatefold-tools`)
 lyrics/     LRC parsing, embedded and sidecar lyrics, dual-line pairing (crate `gatefold-lyrics`)
-metadata/   MusicBrainz, Wikidata, Commons, fanart.tv lookups (crate `gatefold-metadata`)
+metadata/   MusicBrainz, Wikidata, Commons, Deezer lookups (crate `gatefold-metadata`)
 spotify/    Spotify login (OAuth PKCE) and Web API: player, playlists, search (crate `gatefold-spotify`)
 soloist/    Spotify Soloist control over its local WebSocket API (crate `gatefold-soloist`)
 stream/     optional librespot streaming into GStreamer (crate `gatefold-stream`, feature `spotify-stream`)

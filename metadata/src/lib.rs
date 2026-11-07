@@ -1,6 +1,7 @@
 //! Online artist metadata (CONCEPT.md §8): MusicBrainz for identity and
 //! links, Wikidata for the Spotify ID, Wikipedia and the Commons portrait,
-//! fanart.tv for portraits (needs a free API key).
+//! Deezer for portraits (by name, checked against the artist's albums).
+//! Spotify's portraits come from the app, which has the account.
 //!
 //! Everything here is blocking and meant for a background thread. The
 //! parsing is separate from the HTTP calls, so it can be tested offline.
@@ -10,6 +11,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+/// Deezer artists of the same name whose albums are compared.
+const DEEZER_COMPARED: usize = 3;
 /// MusicBrainz allows one request per second.
 const MUSICBRAINZ_INTERVAL: Duration = Duration::from_millis(1100);
 /// Downloads larger than this are refused.
@@ -31,8 +34,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Providers {
     pub musicbrainz: bool,
     pub wikidata: bool,
-    /// The fanart.tv project API key; `None` disables fanart.tv.
-    pub fanart_key: Option<String>,
+    /// Deezer's artist pictures (no account or key needed).
+    pub deezer: bool,
 }
 
 /// What we know about an artist before looking them up.
@@ -43,6 +46,9 @@ pub struct ArtistQuery {
     pub mbid: Option<String>,
     /// Release MBIDs of the artist's albums.
     pub release_mbids: Vec<String>,
+    /// The artist's album titles in the library, to tell artists of the
+    /// same name apart on Deezer.
+    pub album_titles: Vec<String>,
     /// Wikipedia language, e.g. "de"; English is the fallback.
     pub language: String,
 }
@@ -71,7 +77,7 @@ pub struct Links {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortraitCandidate {
     pub url: String,
-    /// "fanart.tv" or "wikimedia".
+    /// "spotify", "deezer" or "wikimedia".
     pub source: &'static str,
     /// Author and license, shown in a tooltip (Commons images).
     pub attribution: Option<String>,
@@ -90,7 +96,7 @@ pub struct ArtistInfo {
     pub identity: Identity,
     pub links: Links,
     pub bio: Option<String>,
-    /// In priority order: fanart.tv, then Wikimedia Commons.
+    /// In priority order: Deezer, then Wikimedia Commons.
     pub portraits: Vec<PortraitCandidate>,
 }
 
@@ -123,16 +129,27 @@ impl Client {
             bio: None,
             portraits: Vec::new(),
         };
-        if !providers.musicbrainz {
-            return Ok(info);
+        if providers.musicbrainz {
+            info.identity = match &query.mbid {
+                Some(mbid) => Identity::Found(mbid.clone()),
+                None => self.identify(query)?,
+            };
+            if let Identity::Found(mbid) = info.identity.clone() {
+                self.links_and_bio(&mbid, query, providers, &mut info)?;
+            }
         }
-        info.identity = match &query.mbid {
-            Some(mbid) => Identity::Found(mbid.clone()),
-            None => self.identify(query)?,
-        };
-        let Identity::Found(mbid) = &info.identity else {
-            return Ok(info);
-        };
+        // Deezer goes by name: also for artists MusicBrainz doesn't know.
+        info.portraits = self.portrait_candidates(query, &info.links, providers);
+        Ok(info)
+    }
+
+    fn links_and_bio(
+        &self,
+        mbid: &str,
+        query: &ArtistQuery,
+        providers: &Providers,
+        info: &mut ArtistInfo,
+    ) -> Result<()> {
         info.links = self.musicbrainz_links(mbid)?;
         // MusicBrainz often lacks the Wikidata link that Wikidata itself
         // has (its "MusicBrainz artist ID", P434): look it up that way.
@@ -142,15 +159,14 @@ impl Client {
                 Err(err) => tracing::info!("Wikidata search for {mbid} failed: {err}"),
             }
         }
-        info.portraits = self.portrait_candidates(mbid, &info.links, providers);
-
         if providers.wikidata
             && let Some(qid) = info.links.wikidata_id.clone()
         {
             match self.wikidata(&qid, &query.language) {
                 Ok(wikidata) => {
-                    info.links.spotify_id = info.links.spotify_id.or(wikidata.spotify_id);
-                    info.links.wikipedia_url = wikidata.wikipedia_url.or(info.links.wikipedia_url);
+                    info.links.spotify_id = info.links.spotify_id.take().or(wikidata.spotify_id);
+                    info.links.wikipedia_url =
+                        wikidata.wikipedia_url.or(info.links.wikipedia_url.take());
                 }
                 Err(err) => tracing::info!("Wikidata lookup of {qid} failed: {err}"),
             }
@@ -161,7 +177,7 @@ impl Client {
                 });
             }
         }
-        Ok(info)
+        Ok(())
     }
 
     /// The MBID via the artist's releases (exact), else a confident search.
@@ -193,19 +209,16 @@ impl Client {
     /// Portrait candidates from every provider, best first.
     pub fn portrait_candidates(
         &self,
-        mbid: &str,
+        query: &ArtistQuery,
         links: &Links,
         providers: &Providers,
     ) -> Vec<PortraitCandidate> {
         let mut candidates = Vec::new();
-        if let Some(key) = &providers.fanart_key {
-            match self.json(
-                &format!("https://webservice.fanart.tv/v3/music/{mbid}"),
-                &[("api_key", key)],
-            ) {
-                Ok(json) => candidates.extend(parse_fanart(&json)),
-                // 404: fanart.tv has nothing for this artist.
-                Err(err) => tracing::debug!("fanart.tv: {err}"),
+        if providers.deezer {
+            match self.deezer_portrait(query) {
+                Ok(Some(candidate)) => candidates.push(candidate),
+                Ok(None) => {}
+                Err(err) => tracing::info!("Deezer portrait of {} failed: {err}", query.name),
             }
         }
         if providers.wikidata
@@ -218,6 +231,38 @@ impl Client {
             }
         }
         candidates
+    }
+
+    /// The artist's picture on Deezer: an artist of exactly this name,
+    /// and of several, the one with the library's albums.
+    fn deezer_portrait(&self, query: &ArtistQuery) -> Result<Option<PortraitCandidate>> {
+        let json = self.json(
+            "https://api.deezer.com/search/artist",
+            &[("q", &query.name), ("limit", "10")],
+        )?;
+        deezer_error(&json)?;
+        let found = parse_deezer_artists(&json, &query.name);
+        let wanted: Vec<String> = query.album_titles.iter().map(|t| album_key(t)).collect();
+        let mut ranked = Vec::new();
+        for artist in found.iter().take(DEEZER_COMPARED) {
+            // One of that name: no need to compare.
+            let overlap = if found.len() == 1 || wanted.is_empty() {
+                0
+            } else {
+                let albums = self.json(
+                    &format!("https://api.deezer.com/artist/{}/albums", artist.id),
+                    &[("limit", "100")],
+                )?;
+                deezer_error(&albums)?;
+                album_overlap(&albums, &wanted)
+            };
+            ranked.push((overlap, artist));
+        }
+        Ok(pick_deezer(&ranked).map(|artist| PortraitCandidate {
+            url: artist.picture.clone(),
+            source: "deezer",
+            attribution: Some("Deezer".to_owned()),
+        }))
     }
 
     /// The Wikidata item that names this MusicBrainz artist (P434), if
@@ -550,28 +595,98 @@ pub fn parse_commons(json: &Value) -> Option<PortraitCandidate> {
     })
 }
 
-pub fn parse_fanart(json: &Value) -> Vec<PortraitCandidate> {
-    let mut thumbs: Vec<(u64, String)> = json
-        .get("artistthumb")
+/// A Deezer artist from a search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeezerArtist {
+    pub id: u64,
+    pub fans: u64,
+    /// The largest picture (1000 px).
+    pub picture: String,
+}
+
+/// Deezer answers errors (e.g. "Quota limit exceeded") with HTTP 200 and
+/// an `error` object.
+fn deezer_error(json: &Value) -> Result<()> {
+    match json.get("error") {
+        Some(error) => {
+            tracing::info!("Deezer: {error}");
+            Err(Error::Format("Deezer"))
+        }
+        None => Ok(()),
+    }
+}
+
+/// The artists of exactly this name (ignoring case) that have a picture,
+/// in Deezer's order.
+pub fn parse_deezer_artists(json: &Value, name: &str) -> Vec<DeezerArtist> {
+    let wanted = name.trim().to_lowercase();
+    json.get("data")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|thumb| {
-            let likes = text(thumb, "likes")
-                .and_then(|l| l.parse().ok())
-                .unwrap_or(0);
-            Some((likes, text(thumb, "url")?))
-        })
-        .collect();
-    thumbs.sort_by_key(|t| std::cmp::Reverse(t.0));
-    thumbs
-        .into_iter()
-        .map(|(_, url)| PortraitCandidate {
-            url,
-            source: "fanart.tv",
-            attribution: Some("fanart.tv".to_owned()),
+        .filter(|artist| text(artist, "name").is_some_and(|n| n.trim().to_lowercase() == wanted))
+        .filter_map(|artist| {
+            let picture = text(artist, "picture_xl").or_else(|| text(artist, "picture_big"))?;
+            // Artists without a picture have an empty image ID here.
+            if picture.contains("/images/artist//") {
+                return None;
+            }
+            Some(DeezerArtist {
+                id: artist.get("id")?.as_u64()?,
+                fans: artist.get("nb_fan").and_then(Value::as_u64).unwrap_or(0),
+                picture,
+            })
         })
         .collect()
+}
+
+/// How many of the library's albums (`wanted`, see `album_key`) a Deezer
+/// album list has.
+pub fn album_overlap(json: &Value, wanted: &[String]) -> usize {
+    let titles: std::collections::HashSet<String> = json
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|album| text(album, "title"))
+        .map(|title| album_key(&title))
+        .collect();
+    wanted.iter().filter(|w| titles.contains(*w)).count()
+}
+
+/// The artist to use, from (shared albums, artist): with one of the name,
+/// that one; with several, the one sharing the most albums, or, sharing
+/// none, one that is far better known than the others. Else none (a wrong
+/// face is worse than none).
+pub fn pick_deezer<'a>(ranked: &[(usize, &'a DeezerArtist)]) -> Option<&'a DeezerArtist> {
+    if let [(_, only)] = ranked {
+        return Some(only);
+    }
+    let best = ranked
+        .iter()
+        .max_by_key(|(overlap, artist)| (*overlap, artist.fans))?;
+    if best.0 > 0 {
+        return Some(best.1);
+    }
+    let mut fans: Vec<u64> = ranked.iter().map(|(_, a)| a.fans).collect();
+    fans.sort_unstable_by(|a, b| b.cmp(a));
+    (fans.len() > 1 && fans[0] >= 10 * fans[1].max(1)).then_some(best.1)
+}
+
+/// An album title for comparing: lowercase, without "(Deluxe)"-style
+/// additions and punctuation.
+pub fn album_key(title: &str) -> String {
+    let mut depth = 0u32;
+    let mut key = String::new();
+    for c in title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 && c.is_alphanumeric() => key.extend(c.to_lowercase()),
+            _ => {}
+        }
+    }
+    key
 }
 
 /// "Ushio, Kensuke" → "Kensuke Ushio".
@@ -754,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn commons_and_fanart() {
+    fn commons_portrait_with_attribution() {
         let commons = json!({"query": {"pages": {"123": {"imageinfo": [{
             "url": "https://upload.wikimedia.org/full.jpg",
             "thumburl": "https://upload.wikimedia.org/800px.jpg",
@@ -769,12 +884,42 @@ mod tests {
             portrait.attribution.as_deref(),
             Some("Jane Doe, CC BY-SA 4.0, Wikimedia Commons")
         );
+    }
 
-        let fanart = json!({"artistthumb": [
-            {"url": "https://a/1.jpg", "likes": "1"},
-            {"url": "https://a/2.jpg", "likes": "5"}
+    #[test]
+    fn deezer_artists_are_matched_by_name_and_albums() {
+        let search = json!({"data": [
+            {"id": 1, "name": "Stray Kids", "nb_fan": 1_000_000,
+             "picture_xl": "https://cdn/images/artist/aaa/1000x1000.jpg"},
+            {"id": 2, "name": "Stray Kids (스트레이 키즈)", "nb_fan": 1700,
+             "picture_xl": "https://cdn/images/artist/bbb/1000x1000.jpg"},
+            {"id": 3, "name": "stray kids", "nb_fan": 300,
+             "picture_xl": "https://cdn/images/artist/ccc/1000x1000.jpg"},
+            {"id": 4, "name": "Stray Kids", "nb_fan": 5,
+             "picture_xl": "https://cdn/images/artist//1000x1000.jpg"}
         ]});
-        let urls: Vec<_> = parse_fanart(&fanart).into_iter().map(|c| c.url).collect();
-        assert_eq!(urls, ["https://a/2.jpg", "https://a/1.jpg"]);
+        let found = parse_deezer_artists(&search, "Stray Kids");
+        // Exact names only, and only with a picture.
+        assert_eq!(found.iter().map(|a| a.id).collect::<Vec<_>>(), [1, 3]);
+
+        let wanted = vec![album_key("ODDINARY"), album_key("5-STAR (Deluxe)")];
+        let real = json!({"data": [{"title": "5-STAR"}, {"title": "THE SOUND"}]});
+        let other = json!({"data": [{"title": "Dejavu"}]});
+        assert_eq!(album_overlap(&real, &wanted), 1);
+        assert_eq!(album_overlap(&other, &wanted), 0);
+
+        let (big, small) = (&found[0], &found[1]);
+        // Shared albums decide, even against fame.
+        assert_eq!(pick_deezer(&[(0, big), (1, small)]).unwrap().id, 3);
+        // None shared: the far better known one.
+        assert_eq!(pick_deezer(&[(0, big), (0, small)]).unwrap().id, 1);
+        // None shared, both alike: neither.
+        let alike = DeezerArtist {
+            fans: 250,
+            ..small.clone()
+        };
+        assert!(pick_deezer(&[(0, small), (0, &alike)]).is_none());
+        // The only one of that name.
+        assert_eq!(pick_deezer(&[(0, small)]).unwrap().id, 3);
     }
 }

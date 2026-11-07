@@ -114,7 +114,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist_id: i64) {
                     "image-missing-symbolic",
                     gettext("No Images Found"),
                     Some(gettext(
-                        "Online sources need the artist's MusicBrainz ID. Adding a fanart.tv API key in Preferences finds more images.",
+                        "Neither Spotify, Deezer nor Wikimedia Commons has a photo of this artist. With Spotify connected, more artists have one.",
                     )),
                 ),
                 Err(err) => {

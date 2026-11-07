@@ -127,7 +127,7 @@
     <key name="online-metadata" type="b">
       <default>false</default>
       <summary>Look up artists online</summary>
-      <description>Artist photos, links and short biographies from MusicBrainz, Wikidata, Wikipedia and fanart.tv. Asked on first use of the Artists view.</description>
+      <description>Artist photos, links and short biographies from MusicBrainz, Wikidata, Wikipedia, Deezer and (when connected) Spotify. Asked on first use of the Artists view.</description>
     </key>
     <key name="online-metadata-asked" type="b">
       <default>false</default>
@@ -137,13 +137,14 @@
       <default>true</default>
       <summary>Use Wikidata, Wikimedia Commons and Wikipedia</summary>
     </key>
-    <key name="metadata-fanart" type="b">
+    <key name="metadata-spotify" type="b">
       <default>true</default>
-      <summary>Use fanart.tv (needs an API key)</summary>
+      <summary>Artist photos from Spotify</summary>
+      <description>Used while Spotify is connected.</description>
     </key>
-    <key name="fanart-api-key" type="s">
-      <default>""</default>
-      <summary>fanart.tv project API key</summary>
+    <key name="metadata-deezer" type="b">
+      <default>true</default>
+      <summary>Artist photos from Deezer</summary>
     </key>
     <key name="lyrembed-path" type="s">
       <default>""</default>
