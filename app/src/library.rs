@@ -59,6 +59,8 @@ mod imp {
         pub lookups: RefCell<HashSet<i64>>,
         /// Each album's genres, most common first (filter, album panel).
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
+        /// See `match_index()`; dropped when the library is read again.
+        pub match_index: RefCell<Option<std::rc::Rc<gatefold_core::matching::MatchIndex>>>,
         /// Barcodes by album, to recognize albums on Spotify (§9.8).
         pub album_barcodes: RefCell<HashMap<i64, String>>,
         /// lyrembed's alias groups, from the last scan (search, artist pages).
@@ -291,6 +293,8 @@ impl Library {
         self.imp().album_barcodes.replace(barcodes);
 
         crate::covers::clear();
+        // Songs or aliases changed: matched afresh.
+        self.imp().match_index.replace(None);
         self.reload_artists();
         self.rematch_spotify();
         self.reload_playlists();
@@ -334,6 +338,25 @@ impl Library {
         }
         counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         counts.into_iter().map(|(g, _)| g).collect()
+    }
+
+    /// The library indexed for matching Spotify songs (§9.5): built once
+    /// per library load, not for every search, album or remote song. Get
+    /// it before borrowing the database (building it reads the songs).
+    pub fn match_index(&self) -> std::rc::Rc<gatefold_core::matching::MatchIndex> {
+        if let Some(index) = self.imp().match_index.borrow().as_ref() {
+            return index.clone();
+        }
+        let tracks = self
+            .db()
+            .and_then(|db| db.match_tracks().ok())
+            .unwrap_or_default();
+        let index = std::rc::Rc::new(gatefold_core::matching::MatchIndex::new(
+            tracks,
+            &self.aliases(),
+        ));
+        self.imp().match_index.replace(Some(index.clone()));
+        index
     }
 
     /// lyrembed's alias groups (empty without lyrembed).
@@ -630,13 +653,15 @@ impl Library {
 
     /// New or removed songs: Spotify entries are matched again (§9.5).
     fn rematch_spotify(&self) {
-        let aliases = self.aliases().clone();
-        let Some(mut db) = self.db() else { return };
-        if db.linked_playlists().map_or(true, |l| l.is_empty()) {
+        let linked = self
+            .db()
+            .and_then(|db| db.linked_playlists().ok())
+            .is_some_and(|l| !l.is_empty());
+        if !linked {
             return;
         }
-        let tracks = db.match_tracks().unwrap_or_default();
-        let index = gatefold_core::matching::MatchIndex::new(tracks, &aliases);
+        let index = self.match_index();
+        let Some(mut db) = self.db() else { return };
         match db.rematch_spotify_items(&index) {
             Ok(0) => {}
             Ok(changed) => tracing::info!("{changed} Spotify playlist entries matched again"),

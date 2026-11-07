@@ -392,15 +392,23 @@ fn version_note(extra: &str) -> Option<String> {
 }
 
 /// The library, indexed for matching many entries at once.
-pub struct MatchIndex<'a> {
+/// It keeps its own copy of the aliases, so it can be kept and shared
+/// (the app builds it once per library load).
+pub struct MatchIndex {
     by_isrc: HashMap<String, Vec<usize>>,
     by_title: HashMap<String, Vec<usize>>,
     tracks: Vec<LocalTrack>,
-    aliases: &'a Aliases,
+    aliases: Aliases,
 }
 
-impl<'a> MatchIndex<'a> {
-    pub fn new(tracks: Vec<LocalTrack>, aliases: &'a Aliases) -> Self {
+impl std::fmt::Debug for MatchIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MatchIndex({} songs)", self.tracks.len())
+    }
+}
+
+impl MatchIndex {
+    pub fn new(tracks: Vec<LocalTrack>, aliases: &Aliases) -> Self {
         let mut by_isrc: HashMap<String, Vec<usize>> = HashMap::new();
         let mut by_title: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, track) in tracks.iter().enumerate() {
@@ -416,7 +424,7 @@ impl<'a> MatchIndex<'a> {
             by_isrc,
             by_title,
             tracks,
-            aliases,
+            aliases: aliases.clone(),
         }
     }
 
@@ -441,7 +449,7 @@ impl<'a> MatchIndex<'a> {
             .into_iter()
             .filter_map(|i| {
                 let track = &self.tracks[i];
-                let confidence = compare(track, remote, self.aliases)?;
+                let confidence = compare(track, remote, &self.aliases)?;
                 let same_album =
                     remote_album.is_some() && track.album.as_deref().map(album_key) == remote_album;
                 Some((

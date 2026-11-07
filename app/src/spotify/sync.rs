@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gatefold_core::db::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, Track};
-use gatefold_core::matching::{self, Confidence, LocalTrack, MatchIndex, RemoteTrack};
+use gatefold_core::matching::{self, Confidence, LocalTrack, RemoteTrack};
 use gatefold_spotify::{Client, Error, PlaylistEntry};
 use gettextrs::{gettext, ngettext};
 use gtk::glib;
@@ -559,7 +559,7 @@ impl Spotify {
             })
             .await?;
         let library = GatefoldApplication::get().library();
-        let aliases = library.aliases().clone();
+        let index = library.match_index();
         let Some(mut db) = library.db() else {
             return Ok(false);
         };
@@ -569,7 +569,6 @@ impl Spotify {
             let _ = db.set_snapshot(id, &snapshot);
             return Ok(false);
         }
-        let index = MatchIndex::new(db.match_tracks().unwrap_or_default(), &aliases);
         if let Err(err) =
             db.set_spotify_items(id, &remote_entries(&entries), &index, &snapshot, now())
         {

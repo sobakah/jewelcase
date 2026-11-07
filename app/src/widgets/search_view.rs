@@ -189,29 +189,22 @@ impl SearchView {
         }
         // In the library? Then it's the library's song (§9.5).
         let library = app.library();
-        let aliases = library.aliases().clone();
-        let local: Vec<Option<i64>> = library
-            .db()
-            .and_then(|db| db.match_tracks().ok())
-            .map(|all| {
-                let index = gatefold_core::matching::MatchIndex::new(all, &aliases);
-                tracks
-                    .iter()
-                    .map(|t| {
-                        index
-                            .find(&gatefold_core::matching::RemoteTrack {
-                                title: t.name.clone(),
-                                artists: t.artists.clone(),
-                                album: t.album.clone(),
-                                duration_ms: t.duration_ms,
-                                isrc: t.isrc.clone(),
-                            })
-                            .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
-                            .map(|(id, _)| id)
+        let index = library.match_index();
+        let local: Vec<Option<i64>> = tracks
+            .iter()
+            .map(|t| {
+                index
+                    .find(&gatefold_core::matching::RemoteTrack {
+                        title: t.name.clone(),
+                        artists: t.artists.clone(),
+                        album: t.album.clone(),
+                        duration_ms: t.duration_ms,
+                        isrc: t.isrc.clone(),
                     })
-                    .collect()
+                    .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
+                    .map(|(id, _)| id)
             })
-            .unwrap_or_else(|| vec![None; tracks.len()]);
+            .collect();
         let mut covers = Vec::new();
         let mut urls = Vec::new();
         for (track, local) in tracks.iter().zip(local) {

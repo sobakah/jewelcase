@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use gatefold_core::db::{SpotifyVersion, Track};
 use gatefold_core::library::TrackRecord;
 use gatefold_core::library::tags::TrackTags;
-use gatefold_core::matching::{Confidence, MatchIndex, RemoteTrack};
+use gatefold_core::matching::{Confidence, RemoteTrack};
 use gatefold_core::queue::RepeatMode;
 use gatefold_spotify::{Device, Error, PlayRequest};
 use gettextrs::{gettext, ngettext};
@@ -562,30 +562,23 @@ impl Spotify {
             .filter(|t| !self.imp().remote.borrow().matches.contains_key(&t.uri))
             .collect();
         if !unknown.is_empty() {
-            let aliases = library.aliases().clone();
-            let found: Vec<(String, Option<i64>)> = library
-                .db()
-                .and_then(|db| db.match_tracks().ok())
-                .map(|local| {
-                    let index = MatchIndex::new(local, &aliases);
-                    unknown
-                        .iter()
-                        .map(|track| {
-                            let id = index
-                                .find(&RemoteTrack {
-                                    title: track.name.clone(),
-                                    artists: track.artists.clone(),
-                                    album: track.album.clone(),
-                                    duration_ms: track.duration_ms,
-                                    isrc: track.isrc.clone(),
-                                })
-                                .filter(|(_, confidence)| *confidence == Confidence::Sure)
-                                .map(|(id, _)| id);
-                            (track.uri.clone(), id)
+            let index = library.match_index();
+            let found: Vec<(String, Option<i64>)> = unknown
+                .iter()
+                .map(|track| {
+                    let id = index
+                        .find(&RemoteTrack {
+                            title: track.name.clone(),
+                            artists: track.artists.clone(),
+                            album: track.album.clone(),
+                            duration_ms: track.duration_ms,
+                            isrc: track.isrc.clone(),
                         })
-                        .collect()
+                        .filter(|(_, confidence)| *confidence == Confidence::Sure)
+                        .map(|(id, _)| id);
+                    (track.uri.clone(), id)
                 })
-                .unwrap_or_default();
+                .collect();
             self.imp().remote.borrow_mut().matches.extend(found);
         }
         let ids: Vec<i64> = tracks

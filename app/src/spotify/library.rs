@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use gatefold_core::db::{SpotifyAlbum, SpotifyArtist, StreamInfo};
-use gatefold_core::matching::{Confidence, MatchIndex, RemoteTrack};
+use gatefold_core::matching::{Confidence, RemoteTrack};
 use gatefold_spotify::Error;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -227,9 +227,8 @@ impl Spotify {
             }
         };
         let library = GatefoldApplication::get().library();
-        let aliases = library.aliases().clone();
+        let index = library.match_index();
         let mut db = library.db()?;
-        let index = MatchIndex::new(db.match_tracks().unwrap_or_default(), &aliases);
         let ids: Vec<(i64, &gatefold_spotify::AlbumTrack)> = tracks
             .iter()
             .filter_map(|entry| {
