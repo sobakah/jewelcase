@@ -453,6 +453,15 @@ impl Library {
 
     /// Looks the artist up (lazily, when shown) unless that was done recently.
     pub fn request_lookup(&self, artist: &ArtistObject) {
+        self.request_lookup_with(artist, false);
+    }
+
+    /// The artist whose page is open: before the lookups tiles queued.
+    pub fn request_lookup_now(&self, artist: &ArtistObject) {
+        self.request_lookup_with(artist, true);
+    }
+
+    fn request_lookup_with(&self, artist: &ArtistObject, urgent: bool) {
         let meta = &artist.artist().meta;
         let online = self.online_enabled();
         let age = metadata::now() - meta.looked_up.unwrap_or(0);
@@ -462,12 +471,16 @@ impl Library {
             Some("done") => age > metadata::REFRESH_DONE,
             Some(_) => online && age > metadata::REFRESH_FAILED,
         };
-        if due && self.imp().lookups.borrow_mut().insert(artist.id()) {
+        // Queued already (by its tile): an urgent request goes ahead of it.
+        let new = self.imp().lookups.borrow_mut().insert(artist.id());
+        if due && (new || urgent) {
             self.send_job(Job::Lookup {
                 artist_id: artist.id(),
                 online,
                 providers: self.providers(),
                 language: metadata::language(),
+                urgent,
+                again: false,
             });
         }
     }
@@ -485,6 +498,8 @@ impl Library {
             online: self.online_enabled(),
             providers: self.providers(),
             language: metadata::language(),
+            urgent: true,
+            again: true,
         });
     }
 

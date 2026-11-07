@@ -328,7 +328,7 @@ impl ArtistPage {
             // The artist left the library; the window pops the page.
             return;
         };
-        library.request_lookup(&artist);
+        library.request_lookup_now(&artist);
         self.imp().artist.replace(Some(artist));
         self.refresh_header();
         self.fill_sections();

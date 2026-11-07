@@ -27,12 +27,16 @@ const LOCAL_PORTRAIT_NAMES: &[&str] = &["artist", "folder"];
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
 pub enum Job {
-    /// Local portrait, plus the online lookup if `online`.
+    /// Local portrait, plus the online lookup if `online`. `urgent`: an
+    /// open artist page or "Look Up Again" (before tiles' lookups);
+    /// `again`: run even if this artist was looked up this session.
     Lookup {
         artist_id: i64,
         online: bool,
         providers: Providers,
         language: String,
+        urgent: bool,
+        again: bool,
     },
     /// MusicBrainz search for "Identify Artist…".
     Search {
@@ -52,6 +56,17 @@ pub enum Job {
         data: Vec<u8>,
         reply: async_channel::Sender<Result<(), String>>,
     },
+}
+
+fn sort_job(
+    job: Job,
+    urgent: &mut std::collections::VecDeque<Job>,
+    background: &mut std::collections::VecDeque<Job>,
+) {
+    match &job {
+        Job::Lookup { urgent: false, .. } => background.push_back(job),
+        _ => urgent.push_back(job),
+    }
 }
 
 /// Sent to the main thread when an artist's data changed.
@@ -80,7 +95,34 @@ impl MetadataService {
                     portraits: CoverCache::new(config::portrait_dir()),
                     updates,
                 };
-                while let Ok(job) = queue.recv_blocking() {
+                // Dialogs and the open artist page go before the lookups
+                // that artist tiles queue (one at a time, each a few
+                // seconds with MusicBrainz' rate limit).
+                let mut urgent = std::collections::VecDeque::new();
+                let mut background = std::collections::VecDeque::new();
+                let mut looked_up = std::collections::HashSet::new();
+                loop {
+                    if urgent.is_empty() && background.is_empty() {
+                        match queue.recv_blocking() {
+                            Ok(job) => sort_job(job, &mut urgent, &mut background),
+                            Err(_) => break,
+                        }
+                    }
+                    while let Ok(job) = queue.try_recv() {
+                        sort_job(job, &mut urgent, &mut background);
+                    }
+                    let Some(job) = urgent.pop_front().or_else(|| background.pop_front()) else {
+                        continue;
+                    };
+                    if let Job::Lookup {
+                        artist_id, again, ..
+                    } = &job
+                        && !looked_up.insert(*artist_id)
+                        && !again
+                    {
+                        // Done already (an urgent one before this queued one).
+                        continue;
+                    }
                     worker.run(job);
                 }
             })
@@ -108,6 +150,7 @@ impl Worker {
                 online,
                 providers,
                 language,
+                ..
             } => {
                 if let Err(err) = self.lookup(artist_id, online, &providers, language) {
                     tracing::warn!("Lookup of artist {artist_id} failed: {err}");
