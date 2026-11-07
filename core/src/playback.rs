@@ -4,7 +4,8 @@
 //!   `about-to-finish`, so it starts without a gap. [`PlayerEvent::NextQueued`]
 //!   says which queue item that was; the following
 //!   [`PlayerEvent::StreamStarted`] means it is now audible.
-//! - **ReplayGain:** `rgvolume ! rglimiter` as playbin's audio filter.
+//! - **ReplayGain:** `rgvolume ! rglimiter` as playbin's audio filter;
+//!   ReplayGain tags win over R128 ones (`prefer_replaygain_tags`).
 //!   Album or track gain can switch at any time; turning ReplayGain on or
 //!   off applies from the next [`Player::load`].
 //!
@@ -89,6 +90,10 @@ impl Player {
             .downcast_ref::<gst::Bin>()
             .and_then(|bin| bin.by_name("rgvolume"))
             .ok_or_else(|| gst::glib::bool_error!("rgvolume"))?;
+        prefer_replaygain_tags(&rgvolume);
+        // Room above the peak for positive gains (the pre-amp, quiet
+        // songs); rglimiter keeps the result from clipping.
+        rgvolume.set_property("headroom", 6.0f64);
         playbin.set_property("audio-filter", &filter);
 
         let (tx, rx) = async_channel::unbounded();
@@ -276,4 +281,91 @@ pub fn file_uri(path: &std::path::Path) -> Option<String> {
     gst::glib::filename_to_uri(path, None)
         .ok()
         .map(|u| u.to_string())
+}
+
+/// rgvolume prefers R128 gain tags over ReplayGain ones. When a file has
+/// both, the ReplayGain ones are used: R128 tags belong to Opus, and
+/// cyanrip writes them into FLAC files 10 dB off (its ReplayGain gain
+/// plus 5 dB instead of minus).
+fn prefer_replaygain_tags(rgvolume: &gst::Element) {
+    const R128: [&str; 2] = ["r128-track-gain", "r128-album-gain"];
+    let Some(pad) = rgvolume.static_pad("sink") else {
+        return;
+    };
+    pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, |_, info| {
+        let Some(gst::PadProbeData::Event(event)) = &mut info.data else {
+            return gst::PadProbeReturn::Ok;
+        };
+        let gst::EventView::Tag(tag) = event.view() else {
+            return gst::PadProbeReturn::Ok;
+        };
+        let tags = tag.tag();
+        let has_replaygain = tags.generic("replaygain-track-gain").is_some()
+            || tags.generic("replaygain-album-gain").is_some();
+        if !has_replaygain || R128.iter().all(|name| tags.generic(*name).is_none()) {
+            return gst::PadProbeReturn::Ok;
+        }
+        let mut cleaned = tags.to_owned();
+        {
+            let cleaned = cleaned.make_mut();
+            for name in R128 {
+                cleaned.remove_generic(name);
+            }
+        }
+        let seqnum = event.seqnum();
+        *event = gst::event::Tag::builder(cleaned).seqnum(seqnum).build();
+        gst::PadProbeReturn::Ok
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// rgvolume's target gain after a tag event with these tags.
+    fn target_gain(tags: &[(&str, f64)]) -> Option<f64> {
+        gst::init().ok()?;
+        // Not installed (e.g. in a build container): nothing to check.
+        let rgvolume = gst::ElementFactory::make("rgvolume").build().ok()?;
+        prefer_replaygain_tags(&rgvolume);
+        rgvolume.set_property("pre-amp", 0.0f64);
+        rgvolume.set_state(gst::State::Paused).ok()?;
+        let pad = rgvolume.static_pad("sink")?;
+        pad.send_event(gst::event::StreamStart::new("test"));
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "F32LE")
+            .field("layout", "interleaved")
+            .field("rate", 48_000i32)
+            .field("channels", 2i32)
+            .build();
+        pad.send_event(gst::event::Caps::new(&caps));
+        let mut list = gst::TagList::new();
+        {
+            let list = list.get_mut().unwrap();
+            for (name, value) in tags {
+                list.add_generic(*name, value, gst::TagMergeMode::Append)
+                    .unwrap();
+            }
+        }
+        pad.send_event(gst::event::Tag::new(list));
+        let gain = rgvolume.property::<f64>("target-gain");
+        let _ = rgvolume.set_state(gst::State::Null);
+        Some(gain)
+    }
+
+    #[test]
+    fn replaygain_tags_win_over_r128_ones() {
+        // LALALALA as cyanrip tagged it: R128 10 dB off.
+        let Some(both) = target_gain(&[
+            ("replaygain-track-gain", -11.79),
+            ("replaygain-track-peak", 0.99),
+            ("r128-track-gain", -6.79),
+        ]) else {
+            return;
+        };
+        assert!((both - -11.79).abs() < 0.01, "{both}");
+        // Only R128 (Opus): still used, as ReplayGain (+5 dB).
+        let r128 = target_gain(&[("r128-track-gain", -16.79)]).unwrap();
+        assert!((r128 - -11.79).abs() < 0.01, "{r128}");
+    }
 }
