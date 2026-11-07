@@ -23,9 +23,13 @@ mod imp {
     impl Default for PlaylistTile {
         fn default() -> Self {
             let label = |classes: &[&str]| {
+                // Narrow on its own: a flow box makes all tiles as wide as
+                // the widest one, and a long name mustn't decide that.
                 gtk::Label::builder()
                     .xalign(0.0)
                     .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .width_chars(1)
+                    .max_width_chars(1)
                     .css_classes(classes)
                     .build()
             };
