@@ -740,7 +740,9 @@ impl Database {
         {
             let mut insert = tx.prepare_cached(INSERT_ITEM)?;
             for (offset, track_id) in track_ids.iter().enumerate() {
-                let Some(track) = tracks.get(track_id) else {
+                // Spotify songs (negative IDs) go in with
+                // add_streams_to_playlist.
+                let Some(track) = tracks.get(track_id).filter(|_| *track_id > 0) else {
                     continue;
                 };
                 let tags = &track.record.tags;

@@ -343,6 +343,8 @@ impl PlaylistPanel {
             .replace("{local}", &info.local_count.to_string())
             .replace("{total}", &info.item_count.to_string()),
         );
+        // Spotify doesn't say what a followed playlist holds.
+        imp.meta.set_visible(info.readable);
         imp.source.set_label(&source_line(info));
         imp.source.set_visible(info.spotify_id.is_some());
         let editable = info.editable;
@@ -577,6 +579,28 @@ impl PlaylistPanel {
     fn play(&self, start: Option<usize>, shuffle: bool) {
         let imp = self.imp();
         let app = GatefoldApplication::get();
+        // A followed playlist: its songs aren't known here, but Soloist can
+        // play it whole (§9.4).
+        let hidden = imp
+            .playlist
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| !p.playlist().readable);
+        if hidden && !app.player().is_remote() {
+            let started = self.spotify_id().is_some_and(|id| {
+                app.spotify()
+                    .soloist_play_context(&format!("spotify:playlist:{id}"))
+            });
+            if !started {
+                app.library().emit_by_name::<()>(
+                    "message",
+                    &[&gettext(
+                        "Spotify doesn’t show this playlist’s songs; it can play in Soloist (Preferences → Spotify → Streaming)",
+                    )],
+                );
+            }
+            return;
+        }
         if app.player().is_remote()
             && let Some(spotify_id) = self.spotify_id()
         {

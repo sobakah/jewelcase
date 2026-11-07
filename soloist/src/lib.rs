@@ -434,6 +434,19 @@ impl Soloist {
         self.command("add_to_queue", json!({ "uri": uri }));
     }
 
+    pub fn skip_next(&self) {
+        self.command("skip_next", json!({}));
+    }
+
+    pub fn skip_previous(&self) {
+        self.command("skip_prev", json!({}));
+    }
+
+    /// Asks for the queue (answered with a `Queue` event).
+    pub fn request_queue(&self, limit: u32) {
+        self.command("get_queue", json!({ "limit": limit }));
+    }
+
     /// Makes Soloist the active Spotify Connect device.
     pub fn activate(&self) {
         self.command("activate", json!({}));

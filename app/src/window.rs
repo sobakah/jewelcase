@@ -519,9 +519,39 @@ impl GatefoldWindow {
     fn setup_playlists(&self) {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
+        // Followed Spotify playlists (Spotify doesn't show their songs) come
+        // last, and only when asked for.
+        let settings = self.settings();
+        let readable = gtk::CustomFilter::new(|item| {
+            item.downcast_ref::<PlaylistObject>()
+                .is_some_and(|p| p.playlist().readable)
+        });
+        let followed = gtk::CustomFilter::new(glib::clone!(
+            #[strong]
+            settings,
+            move |item| {
+                settings.boolean("show-followed-playlists")
+                    && item
+                        .downcast_ref::<PlaylistObject>()
+                        .is_some_and(|p| !p.playlist().readable)
+            }
+        ));
+        let parts = gio::ListStore::new::<gio::ListModel>();
+        parts.append(&gtk::FilterListModel::new(
+            Some(library.playlists().clone()),
+            Some(readable),
+        ));
+        parts.append(&gtk::FilterListModel::new(
+            Some(library.playlists().clone()),
+            Some(followed.clone()),
+        ));
+        settings.connect_changed(Some("show-followed-playlists"), move |_, _| {
+            followed.changed(gtk::FilterChange::Different);
+        });
+        self.add_action(&settings.create_action("show-followed-playlists"));
         imp.playlist_grid
             .set_model(Some(&gtk::NoSelection::new(Some(
-                library.playlists().clone(),
+                gtk::FlattenListModel::new(Some(parts)),
             ))));
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, item| {

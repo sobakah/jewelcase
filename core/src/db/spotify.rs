@@ -755,6 +755,43 @@ impl Database {
         Ok(missing)
     }
 
+    /// Adds Spotify songs (stream track IDs) to a playlist, at the end.
+    /// Returns the new entries' IDs.
+    pub fn add_streams_to_playlist(
+        &mut self,
+        id: i64,
+        stream_ids: &[i64],
+        now: i64,
+    ) -> Result<Vec<i64>> {
+        let tx = self.conn.transaction()?;
+        let mut position: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM playlist_item WHERE playlist_id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let mut added = Vec::new();
+        for stream in stream_ids.iter().filter(|s| **s < 0) {
+            let inserted = tx.execute(
+                "INSERT INTO playlist_item (playlist_id, position, spotify_uri, isrc, title,
+                   artist, album, duration_ms, image_url, match_state)
+                 SELECT ?1, ?2, uri, isrc, title, artist, album, duration_ms, image_url,
+                   'spotify_only'
+                 FROM stream_track WHERE id = ?3",
+                params![id, position, -stream],
+            )?;
+            if inserted > 0 {
+                added.push(tx.last_insert_rowid());
+                position += 1;
+            }
+        }
+        tx.execute(
+            "UPDATE playlist SET modified = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        tx.commit()?;
+        Ok(added)
+    }
+
     /// The song to stream for a Spotify entry of a playlist (`None` for
     /// entries that aren't tracks).
     pub fn stream_track_for_item(&mut self, item_id: i64) -> Result<Option<i64>> {
@@ -1094,6 +1131,27 @@ mod tests {
         // Not kept in the history.
         db.add_history(id, 1).unwrap();
         assert!(db.history(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn spotify_songs_go_into_local_playlists() {
+        let mut db = Database::open_in_memory().unwrap();
+        let stream = db
+            .stream_track_id(&StreamInfo {
+                uri: "spotify:track:s".into(),
+                title: "Only There".into(),
+                duration_ms: 1000,
+                ..StreamInfo::default()
+            })
+            .unwrap();
+        let id = db.create_playlist("Mixed", 1).unwrap();
+        let added = db.add_streams_to_playlist(id, &[stream], 2).unwrap();
+        assert_eq!(added.len(), 1);
+        let items = db.playlist_items(id).unwrap();
+        assert_eq!(items[0].spotify_uri.as_deref(), Some("spotify:track:s"));
+        assert_eq!(items[0].match_state, "spotify_only");
+        assert!(items[0].track.is_none());
+        assert_eq!(db.remote_position(added[0]).unwrap(), Some(0));
     }
 
     #[test]

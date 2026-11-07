@@ -291,6 +291,11 @@ impl Spotify {
 
     /// Back to this computer; `pause` stops the device.
     pub fn play_here(&self, pause: bool) {
+        // Showing what Soloist plays for someone else (§9.4).
+        if self.soloist_receiving() {
+            self.end_receiver(pause);
+            return;
+        }
         let player = GatefoldApplication::get().player();
         let was_remote = player.is_remote();
         {
@@ -317,7 +322,7 @@ impl Spotify {
         }
     }
 
-    fn remote_command(&self, command: RemoteCommand) {
+    pub(super) fn remote_command(&self, command: RemoteCommand) {
         let playing = self.imp().remote.borrow().playing;
         match command {
             RemoteCommand::Play(ids) => {
@@ -492,7 +497,10 @@ impl Spotify {
 
     /// Library songs where the library has them (lyrics, cover, details),
     /// else stand-ins with Spotify's covers.
-    async fn track_objects(&self, tracks: &[gatefold_spotify::Track]) -> Vec<TrackObject> {
+    pub(super) async fn track_objects(
+        &self,
+        tracks: &[gatefold_spotify::Track],
+    ) -> Vec<TrackObject> {
         let library = GatefoldApplication::get().library();
         let unknown: Vec<&gatefold_spotify::Track> = tracks
             .iter()

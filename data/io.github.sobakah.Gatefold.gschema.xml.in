@@ -154,6 +154,11 @@
       <summary>Spotify Soloist program</summary>
       <description>Empty: look in PATH, ~/.local/bin and /usr/local/bin.</description>
     </key>
+    <key name="show-followed-playlists" type="b">
+      <default>false</default>
+      <summary>Show followed Spotify playlists</summary>
+      <description>Others’ playlists, whose songs Spotify doesn’t show; at the end of the Playlists view.</description>
+    </key>
     <key name="spotify-playlists" type="b">
       <default>true</default>
       <summary>Show Spotify playlists</summary>

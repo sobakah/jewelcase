@@ -483,6 +483,14 @@ menu playlist_menu {
       action: "win.import-playlist";
     }
   }
+
+  // Others' Spotify playlists: Spotify doesn't show their songs (§9.5).
+  section {
+    item {
+      label: _("Show _Followed Playlists");
+      action: "win.show-followed-playlists";
+    }
+  }
 }
 
 menu sort_menu {

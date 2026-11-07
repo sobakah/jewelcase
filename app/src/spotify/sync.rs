@@ -717,6 +717,19 @@ impl Spotify {
     /// requests); nothing is remembered then, so it's tried again later.
     pub async fn find_version(&self, track_id: i64) -> gatefold_spotify::Result<SpotifyVersion> {
         let library = GatefoldApplication::get().library();
+        // A Spotify song already (one to stream).
+        if track_id < 0 {
+            let uri = library
+                .db()
+                .and_then(|db| db.stream_uri(track_id).ok().flatten());
+            return Ok(SpotifyVersion {
+                uri,
+                confidence: Some(Confidence::Sure),
+                title: None,
+                artist: None,
+                checked: now(),
+            });
+        }
         let not_found = || SpotifyVersion {
             uri: None,
             confidence: None,

@@ -600,8 +600,13 @@ impl Library {
         self.playlist_op(|db, now| {
             let id = db.create_playlist(name, now)?;
             created = Some(id);
-            if !tracks.is_empty() {
-                db.add_to_playlist(id, tracks, None, now)?;
+            // Library songs, and Spotify songs (negative IDs, §9.4).
+            let (local, streams): (Vec<i64>, Vec<i64>) = tracks.iter().partition(|t| **t > 0);
+            if !local.is_empty() {
+                db.add_to_playlist(id, &local, None, now)?;
+            }
+            if !streams.is_empty() {
+                db.add_streams_to_playlist(id, &streams, now)?;
             }
             Ok(())
         });
@@ -654,10 +659,38 @@ impl Library {
         if self.refuse_read_only(id) {
             return;
         }
-        self.playlist_op(|db, now| db.add_to_playlist(id, tracks, None, now));
-        // On Spotify too, once their Spotify versions are found.
+        // Library songs, and Spotify songs (negative IDs, §9.4).
+        let (local, streams): (Vec<i64>, Vec<i64>) = tracks.iter().partition(|t| **t > 0);
+        let mut added_streams = Vec::new();
+        self.playlist_op(|db, now| {
+            if !local.is_empty() {
+                db.add_to_playlist(id, &local, None, now)?;
+            }
+            if !streams.is_empty() {
+                added_streams = db.add_streams_to_playlist(id, &streams, now)?;
+            }
+            Ok(())
+        });
         if self.spotify_link(id).is_some() {
-            GatefoldApplication::get().spotify().resolve_soon(id, true);
+            // Spotify songs go to Spotify right away…
+            for item in added_streams {
+                let found = self.db().and_then(|db| {
+                    Some((db.item_uri(item).ok()??, db.remote_position(item).ok()??))
+                });
+                if let Some((uri, position)) = found {
+                    self.queue_spotify_op(
+                        id,
+                        crate::spotify::Op::Add {
+                            uris: vec![uri],
+                            position: Some(position),
+                        },
+                    );
+                }
+            }
+            // …library songs once their Spotify versions are found.
+            if !local.is_empty() {
+                GatefoldApplication::get().spotify().resolve_soon(id, true);
+            }
         }
         if !announce {
             return;

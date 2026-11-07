@@ -884,6 +884,11 @@ impl Player {
         self.queue_changed();
     }
 
+    /// Plays the queue's current song here (after remote mode ended).
+    pub fn play_current(&self) {
+        self.load_current(true, 0);
+    }
+
     /// The current track and up to `limit` after it (remote hand-over).
     pub fn upcoming_track_ids(&self, limit: usize) -> Vec<i64> {
         let queue = self.imp().queue.borrow();

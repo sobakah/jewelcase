@@ -87,7 +87,7 @@ impl PlaylistTile {
                 (true, true) => {
                     gettext("Spotify · {}").replace("{}", &format::song_count(info.item_count))
                 }
-                (true, false) => gettext("Spotify"),
+                (true, false) => gettext("Spotify · Followed"),
                 _ => format::song_count(info.item_count),
             });
         self.set_tooltip_text(Some(&info.name));

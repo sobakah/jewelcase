@@ -8,12 +8,14 @@
 
 use std::rc::Rc;
 
-use gatefold_soloist::{Config, Event, Position, Repeat, Soloist, Status};
+use gatefold_core::queue::RepeatMode;
+use gatefold_soloist::{Config, Event, Item, Position, Repeat, Soloist, Status};
 use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
+use super::remote::RemoteCommand;
 use super::stream::StreamNote;
 use super::{Spotify, keyring};
 use crate::application::GatefoldApplication;
@@ -53,7 +55,20 @@ pub struct SoloistState {
     /// Quiet attempts to reach a running Soloist again (soloistd restarts
     /// it after a settings change or an update).
     reconnects: u32,
+    /// What Soloist plays, as it reports it.
+    current: Option<Item>,
+    status: Option<Status>,
+    upcoming: Vec<Item>,
+    /// Showing what Soloist plays for someone else (started from the
+    /// Spotify app, or a followed playlist): the receiver (§9.4).
+    receiving: bool,
+    /// Soloist moving on right after Gatefold paused it isn't someone
+    /// else playing.
+    quiet_until: Option<std::time::Instant>,
 }
+
+/// How long after pausing Soloist its own moves are ignored.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Spotify {
     fn soloist(&self) -> Option<Rc<Soloist>> {
@@ -248,11 +263,17 @@ impl Spotify {
                 is_active,
                 ..
             } => {
-                if let Some(is_active) = is_active {
-                    self.imp().stream.borrow_mut().soloist.is_active = is_active;
-                }
-                if let Some(position) = position {
-                    self.imp().stream.borrow_mut().soloist.position = Some(position);
+                {
+                    let mut stream = self.imp().stream.borrow_mut();
+                    let state = &mut stream.soloist;
+                    if let Some(is_active) = is_active {
+                        state.is_active = is_active;
+                    }
+                    if position.is_some() {
+                        state.position = position;
+                    }
+                    state.current = item.clone();
+                    state.status = status;
                 }
                 if let Some(item) = item {
                     self.soloist_item(&item.uri);
@@ -260,17 +281,33 @@ impl Spotify {
                 if let Some(status) = status {
                     self.soloist_status(status);
                 }
+                self.receiver_check();
             }
             Event::TrackChanged(item) => {
+                self.imp().stream.borrow_mut().soloist.current = item.clone();
                 if let Some(item) = item {
                     self.soloist_item(&item.uri);
                 }
+                self.receiver_check();
             }
-            Event::Status(status) => self.soloist_status(status),
+            Event::Status(status) => {
+                self.imp().stream.borrow_mut().soloist.status = Some(status);
+                self.soloist_status(status);
+                self.receiver_check();
+            }
             Event::Position(position) => {
                 self.imp().stream.borrow_mut().soloist.position = Some(position);
+                if self.soloist_receiving() {
+                    self.receiver_show(false);
+                }
             }
-            Event::Volume(_) | Event::Queue(_) => {}
+            Event::Queue(items) => {
+                self.imp().stream.borrow_mut().soloist.upcoming = items;
+                if self.soloist_receiving() {
+                    self.receiver_show(true);
+                }
+            }
+            Event::Volume(_) => {}
             Event::CommandError(message) => {
                 tracing::warn!("Soloist: {message}");
                 let waiting = {
@@ -283,6 +320,9 @@ impl Spotify {
             }
             Event::Exited { code, expired } => {
                 tracing::warn!("Soloist exited ({code:?})");
+                if self.soloist_receiving() {
+                    self.end_receiver(false);
+                }
                 self.soloist_gone(if expired { "expired" } else { "error" });
                 self.message(&if expired {
                     gettext(
@@ -295,6 +335,9 @@ impl Spotify {
             Event::Disconnected => {
                 if self.soloist().is_none() {
                     return;
+                }
+                if self.soloist_receiving() {
+                    self.end_receiver(false);
                 }
                 // A running Soloist (soloistd's) restarts now and then: try
                 // again quietly a few times before saying so.
@@ -386,6 +429,7 @@ impl Spotify {
             let mut stream = self.imp().stream.borrow_mut();
             stream.soloist.wanted = None;
             stream.soloist.started = false;
+            stream.soloist.quiet_until = Some(std::time::Instant::now() + QUIET);
         }
         if let Some(soloist) = self.soloist() {
             soloist.pause();
@@ -493,6 +537,7 @@ impl Spotify {
             let state = &mut stream.soloist;
             state.pending = None;
             state.started = false;
+            state.quiet_until = Some(std::time::Instant::now() + QUIET);
             state.wanted.take().is_some()
         };
         if was_ours && let Some(soloist) = self.soloist() {
@@ -540,8 +585,220 @@ impl Spotify {
             .or_else(|| (state.source == Some("gatefold")).then(|| DEVICE_NAME.to_owned()))
     }
 
+    // The receiver (§9.4) ---------------------------------------------------
+
+    pub fn soloist_receiving(&self) -> bool {
+        self.imp().stream.borrow().soloist.receiving
+    }
+
+    /// Soloist plays something Gatefold didn't start: show it, and let the
+    /// controls steer it.
+    fn receiver_check(&self) {
+        if self.soloist_receiving() {
+            self.receiver_show(false);
+            return;
+        }
+        let start = {
+            let state = &self.imp().stream.borrow().soloist;
+            state.logged_in
+                && state.wanted.is_none()
+                && state.status == Some(Status::Playing)
+                && state.current.is_some()
+                && state
+                    .quiet_until
+                    .is_none_or(|until| std::time::Instant::now() >= until)
+        };
+        if start {
+            self.start_receiver();
+        }
+    }
+
+    fn start_receiver(&self) {
+        let player = GatefoldApplication::get().player();
+        if player.is_remote() {
+            // Already steering a Spotify device; that one is in charge.
+            return;
+        }
+        let name = {
+            let mut stream = self.imp().stream.borrow_mut();
+            stream.soloist.receiving = true;
+            stream
+                .soloist
+                .device_name
+                .clone()
+                .unwrap_or_else(|| DEVICE_NAME.to_owned())
+        };
+        tracing::info!("Soloist plays for someone else: showing it");
+        let weak = self.downgrade();
+        player.enter_remote(&name, move |command| {
+            if let Some(spotify) = weak.upgrade() {
+                spotify.receiver_command(command);
+            }
+        });
+        if let Some(soloist) = self.soloist() {
+            soloist.request_queue(20);
+        }
+        self.receiver_show(true);
+    }
+
+    /// Back to Gatefold's own playback; `pause` stops Soloist.
+    pub(super) fn end_receiver(&self, pause: bool) {
+        {
+            let mut stream = self.imp().stream.borrow_mut();
+            stream.soloist.receiving = false;
+            stream.soloist.quiet_until = Some(std::time::Instant::now() + QUIET);
+        }
+        if pause && let Some(soloist) = self.soloist() {
+            soloist.pause();
+        }
+        GatefoldApplication::get().player().leave_remote();
+    }
+
+    /// Shows Soloist's song (as the library song when it matches), its
+    /// position and, with `queue`, what comes next.
+    fn receiver_show(&self, queue: bool) {
+        let (current, status, position, upcoming) = {
+            let state = &self.imp().stream.borrow().soloist;
+            (
+                state.current.clone(),
+                state.status,
+                state.position,
+                state.upcoming.clone(),
+            )
+        };
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = spotify)]
+            self,
+            async move {
+                let track = match &current {
+                    Some(item) => spotify.track_objects(&[as_track(item)]).await.pop(),
+                    None => None,
+                };
+                let player = GatefoldApplication::get().player();
+                if !spotify.soloist_receiving() || !player.is_remote() {
+                    return;
+                }
+                player.show_remote(
+                    track.clone(),
+                    status == Some(Status::Playing),
+                    position.map_or(0, |p| p.now()),
+                    false,
+                    RepeatMode::Off,
+                );
+                if queue {
+                    let next: Vec<gatefold_spotify::Track> =
+                        upcoming.iter().map(as_track).collect();
+                    let mut tracks: Vec<_> = track.into_iter().collect();
+                    tracks.extend(spotify.track_objects(&next).await);
+                    if spotify.soloist_receiving() {
+                        player.set_remote_queue(tracks);
+                    }
+                }
+            }
+        ));
+    }
+
+    fn receiver_command(&self, command: RemoteCommand) {
+        let Some(soloist) = self.soloist() else {
+            return;
+        };
+        let playing = self.imp().stream.borrow().soloist.status == Some(Status::Playing);
+        match command {
+            RemoteCommand::PlayPause if playing => soloist.pause(),
+            RemoteCommand::PlayPause => soloist.play(None),
+            RemoteCommand::Pause => soloist.pause(),
+            RemoteCommand::Next => soloist.skip_next(),
+            RemoteCommand::Previous => soloist.skip_previous(),
+            RemoteCommand::Seek(ms) => soloist.seek(ms),
+            RemoteCommand::Volume(volume) => {
+                soloist.set_volume((volume.clamp(0.0, 1.0) * 100.0).round() as u8);
+            }
+            RemoteCommand::Shuffle(on) => soloist.set_shuffle(on),
+            RemoteCommand::Repeat(mode) => soloist.set_repeat(match mode {
+                RepeatMode::Off => Repeat::Off,
+                RepeatMode::All => Repeat::Context,
+                RepeatMode::One => Repeat::Track,
+            }),
+            RemoteCommand::Queue(ids) => {
+                glib::spawn_future_local(glib::clone!(
+                    #[weak(rename_to = spotify)]
+                    self,
+                    async move {
+                        let mut added = 0u32;
+                        for id in ids {
+                            if let Ok(gatefold_core::db::SpotifyVersion { uri: Some(uri), .. }) =
+                                spotify.find_version(id).await
+                                && let Some(soloist) = spotify.soloist()
+                            {
+                                soloist.add_to_queue(&uri);
+                                added += 1;
+                            }
+                        }
+                        if added > 0 {
+                            spotify.message(
+                                &gettextrs::ngettext(
+                                    "Added {} song to the queue",
+                                    "Added {} songs to the queue",
+                                    added,
+                                )
+                                .replace("{}", &added.to_string()),
+                            );
+                        }
+                        if let Some(soloist) = spotify.soloist() {
+                            soloist.request_queue(20);
+                        }
+                    }
+                ));
+            }
+            // Gatefold plays its own queue: the receiver ends.
+            RemoteCommand::Play(_) => {
+                glib::idle_add_local_once(glib::clone!(
+                    #[weak(rename_to = spotify)]
+                    self,
+                    move || {
+                        spotify.end_receiver(true);
+                        GatefoldApplication::get().player().play_current();
+                    }
+                ));
+            }
+        }
+    }
+
+    /// Plays a Spotify playlist, album or song in Soloist (e.g. a followed
+    /// playlist whose songs Spotify doesn't list); the receiver shows it.
+    pub fn soloist_play_context(&self, uri: &str) -> bool {
+        let Some(soloist) = self.soloist() else {
+            return false;
+        };
+        let active = {
+            let mut stream = self.imp().stream.borrow_mut();
+            stream.soloist.quiet_until = None;
+            std::mem::replace(&mut stream.soloist.is_active, true)
+        };
+        if !active {
+            soloist.activate();
+        }
+        soloist.play(Some(uri));
+        true
+    }
+
     /// Where the Soloist in use comes from (for Preferences).
     pub fn soloist_source(&self) -> Option<&'static str> {
         self.imp().stream.borrow().soloist.source
+    }
+}
+
+/// Soloist's song in the shape remote mode shows.
+fn as_track(item: &Item) -> gatefold_spotify::Track {
+    gatefold_spotify::Track {
+        uri: item.uri.clone(),
+        id: item.uri.strip_prefix("spotify:track:").map(str::to_owned),
+        name: item.name.clone(),
+        artists: item.artists.clone(),
+        album: item.album.clone(),
+        duration_ms: item.duration_ms.unwrap_or(0),
+        image_url: item.cover_url.clone(),
+        is_playable: true,
+        ..gatefold_spotify::Track::default()
     }
 }

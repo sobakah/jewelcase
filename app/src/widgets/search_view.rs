@@ -25,6 +25,11 @@ mod imp {
         pub stack: gtk::Stack,
         pub sections: gtk::Box,
         pub empty: adw::StatusPage,
+        /// Spotify results (§9.4): searched a moment after typing stops;
+        /// older answers are dropped.
+        pub spotify_generation: std::cell::Cell<u64>,
+        pub spotify_timer: std::cell::RefCell<Option<glib::SourceId>>,
+        pub last_query: std::cell::RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -57,6 +62,20 @@ mod imp {
             self.stack.add_named(&scroller, Some("results"));
             self.stack.add_named(&self.empty, Some("empty"));
             self.obj().set_child(Some(&self.stack));
+            // Spotify connected while a search shows: add its results.
+            let obj = self.obj();
+            GatefoldApplication::get()
+                .spotify()
+                .connect_status_notify(glib::clone!(
+                    #[weak]
+                    obj,
+                    move |spotify| {
+                        let query = obj.imp().last_query.borrow().clone();
+                        if spotify.is_connected() && !query.trim().is_empty() {
+                            obj.search(&query);
+                        }
+                    }
+                ));
         }
     }
 
@@ -73,12 +92,15 @@ glib::wrapper! {
 impl SearchView {
     pub fn search(&self, query: &str) {
         let imp = self.imp();
+        imp.last_query.replace(query.to_owned());
         while let Some(child) = imp.sections.first_child() {
             imp.sections.remove(&child);
         }
         let library = GatefoldApplication::get().library();
         let results = library.search(query, LIMIT);
-        if results.is_empty() {
+        let spotify = GatefoldApplication::get().spotify().is_connected()
+            && query.trim().chars().count() >= 2;
+        if results.is_empty() && !spotify {
             imp.empty
                 .set_description(Some(&gettext("Nothing in your library matches")));
             imp.stack.set_visible_child_name("empty");
@@ -89,6 +111,194 @@ impl SearchView {
         self.add_albums(&results);
         self.add_songs(&results);
         self.add_playlists(&results);
+        self.search_spotify(if spotify { Some(query.trim()) } else { None });
+    }
+
+    /// "On Spotify": songs from a Spotify search, to play, queue or add to
+    /// a playlist; ones in the library are the library's.
+    fn search_spotify(&self, query: Option<&str>) {
+        let imp = self.imp();
+        let generation = imp.spotify_generation.get() + 1;
+        imp.spotify_generation.set(generation);
+        if let Some(timer) = imp.spotify_timer.take() {
+            timer.remove();
+        }
+        let Some(query) = query.map(str::to_owned) else {
+            return;
+        };
+        let list = self.section(&gettext("On Spotify"));
+        let waiting = adw::ActionRow::builder()
+            .title(gettext("Searching…"))
+            .build();
+        list.append(&waiting);
+        let timer = glib::timeout_add_local_once(
+            std::time::Duration::from_millis(450),
+            glib::clone!(
+                #[weak(rename_to = view)]
+                self,
+                #[weak]
+                list,
+                move || {
+                    view.imp().spotify_timer.replace(None);
+                    glib::spawn_future_local(async move {
+                        view.fill_spotify(&list, &query, generation).await;
+                    });
+                }
+            ),
+        );
+        imp.spotify_timer.replace(Some(timer));
+    }
+
+    async fn fill_spotify(&self, list: &gtk::ListBox, query: &str, generation: u64) {
+        let app = GatefoldApplication::get();
+        let text = query.to_owned();
+        let result = app
+            .spotify()
+            .call(move |client| client.search_tracks(&text, 10))
+            .await;
+        if self.imp().spotify_generation.get() != generation {
+            return;
+        }
+        list.remove_all();
+        let tracks = match result {
+            Ok(tracks) => tracks,
+            Err(err) => {
+                tracing::warn!("Spotify search failed: {err}");
+                list.append(
+                    &adw::ActionRow::builder()
+                        .title(gettext("Spotify can’t be searched right now"))
+                        .build(),
+                );
+                return;
+            }
+        };
+        let tracks: Vec<_> = tracks.into_iter().filter(|t| !t.is_local).collect();
+        if tracks.is_empty() {
+            list.append(
+                &adw::ActionRow::builder()
+                    .title(gettext("Nothing on Spotify"))
+                    .build(),
+            );
+            return;
+        }
+        // In the library? Then it's the library's song (§9.5).
+        let library = app.library();
+        let aliases = library.aliases().clone();
+        let local: Vec<Option<i64>> = library
+            .db()
+            .and_then(|db| db.match_tracks().ok())
+            .map(|all| {
+                let index = gatefold_core::matching::MatchIndex::new(all, &aliases);
+                tracks
+                    .iter()
+                    .map(|t| {
+                        index
+                            .find(&gatefold_core::matching::RemoteTrack {
+                                title: t.name.clone(),
+                                artists: t.artists.clone(),
+                                album: t.album.clone(),
+                                duration_ms: t.duration_ms,
+                                isrc: t.isrc.clone(),
+                            })
+                            .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
+                            .map(|(id, _)| id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![None; tracks.len()]);
+        let mut covers = Vec::new();
+        let mut urls = Vec::new();
+        for (track, local) in tracks.iter().zip(local) {
+            // A library song, or the Spotify song as one to stream.
+            let id = local.or_else(|| {
+                library.db().and_then(|mut db| {
+                    db.stream_track_id(&gatefold_core::db::StreamInfo {
+                        uri: track.uri.clone(),
+                        title: track.name.clone(),
+                        artist: Some(track.artist_line()),
+                        album: track.album.clone(),
+                        duration_ms: track.duration_ms,
+                        isrc: track.isrc.clone(),
+                        image_url: track.image_url.clone(),
+                    })
+                    .ok()
+                })
+            });
+            let Some(object) = id
+                .and_then(|id| library.tracks(&[id]).remove(&id))
+                .map(TrackObject::new)
+            else {
+                continue;
+            };
+            let in_library = local.is_some();
+            let mut subtitle = [Some(track.artist_line()), track.album.clone()]
+                .into_iter()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" — ");
+            if in_library {
+                subtitle = format!("{subtitle} · {}", gettext("In your library"));
+            }
+            let cover_key = object.cover_key().map(str::to_owned).or_else(|| {
+                track
+                    .image_url
+                    .as_deref()
+                    .map(crate::spotify::image_cover_key)
+            });
+            let cover = Self::small_cover(cover_key.as_deref());
+            if !in_library && let Some(url) = &track.image_url {
+                urls.push(url.clone());
+                covers.push((cover.clone(), cover_key.clone()));
+            }
+            let row = Self::row(&track.name, &subtitle, &cover);
+            row.add_suffix(
+                &gtk::Label::builder()
+                    .label(format::duration(track.duration_ms))
+                    .css_classes(["dim-label", "numeric"])
+                    .build(),
+            );
+            let queue = gtk::Button::builder()
+                .icon_name("list-add-symbolic")
+                .tooltip_text(gettext("Add to Queue"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build();
+            let to_queue = object.clone();
+            queue.connect_clicked(move |_| {
+                GatefoldApplication::get()
+                    .player()
+                    .add_to_queue(vec![to_queue.clone()]);
+            });
+            row.add_suffix(&queue);
+            let playlist = gtk::Button::builder()
+                .icon_name("view-list-bullet-symbolic")
+                .tooltip_text(gettext("Add to Playlist…"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build();
+            let id = object.id();
+            playlist.connect_clicked(move |button| {
+                super::playlist_picker::show(button, vec![id]);
+            });
+            row.add_suffix(&playlist);
+            let to_play = object.clone();
+            row.connect_activated(move |_| {
+                GatefoldApplication::get().player().play_tracks(
+                    vec![to_play.clone()],
+                    Some(0),
+                    false,
+                    None,
+                );
+            });
+            list.append(&row);
+        }
+        // Covers arrive after the rows.
+        crate::spotify::fetch_covers(urls, move || {
+            for (cover, key) in &covers {
+                cover.set_cover(key.as_deref());
+            }
+        });
     }
 
     fn section(&self, title: &str) -> gtk::ListBox {
