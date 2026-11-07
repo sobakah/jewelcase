@@ -60,6 +60,9 @@ pub struct SoloistState {
     status: Option<Status>,
     /// Soloist's shuffle and repeat (shown in receiver mode).
     options: Options,
+    /// A repeat mode just chosen: Soloist sets it with two commands and
+    /// reports the state in between ("off"), which isn't shown.
+    pending_repeat: Option<(Repeat, std::time::Instant)>,
     upcoming: Vec<Item>,
     /// Showing what Soloist plays for someone else (started from the
     /// Spotify app, or a followed playlist): the receiver (§9.4).
@@ -87,6 +90,24 @@ pub struct SoloistState {
 const HAND_OVER_BEFORE_MS: u64 = 10_000;
 /// … or, with a local song next, Soloist is muted.
 const DUCK_BEFORE_MS: u64 = 400;
+
+impl SoloistState {
+    /// Soloist's reported shuffle and repeat; while a chosen repeat mode
+    /// is on its way, the steps in between are skipped.
+    fn take_options(&mut self, mut options: Options) {
+        if let Some((wanted, since)) = self.pending_repeat {
+            if options.repeat == wanted || since.elapsed() > REPEAT_SETTLE {
+                self.pending_repeat = None;
+            } else {
+                options.repeat = wanted;
+            }
+        }
+        self.options = options;
+    }
+}
+
+/// How long a chosen repeat mode wins over Soloist's reports.
+const REPEAT_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long after pausing Soloist its own moves are ignored.
 const QUIET: std::time::Duration = std::time::Duration::from_secs(3);
@@ -280,7 +301,7 @@ impl Spotify {
                 self.imp().stream.borrow_mut().soloist.is_active = is_active;
             }
             Event::Options(options) => {
-                self.imp().stream.borrow_mut().soloist.options = options;
+                self.imp().stream.borrow_mut().soloist.take_options(options);
                 if self.soloist_receiving() {
                     self.receiver_show(false);
                 }
@@ -297,7 +318,7 @@ impl Spotify {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
                     if let Some(options) = options {
-                        state.options = options;
+                        state.take_options(options);
                     }
                     if let Some(is_active) = is_active {
                         state.is_active = is_active;
@@ -897,7 +918,11 @@ impl Spotify {
                     RepeatMode::One => Repeat::Track,
                 };
                 soloist.set_repeat(repeat);
-                self.imp().stream.borrow_mut().soloist.options.repeat = repeat;
+                {
+                    let mut stream = self.imp().stream.borrow_mut();
+                    stream.soloist.options.repeat = repeat;
+                    stream.soloist.pending_repeat = Some((repeat, std::time::Instant::now()));
+                }
                 self.receiver_show(false);
             }
             RemoteCommand::Queue(ids) => {
@@ -981,5 +1006,43 @@ fn as_track(item: &Item) -> gatefold_spotify::Track {
         image_url: item.cover_url.clone(),
         is_playable: true,
         ..gatefold_spotify::Track::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chosen_repeat_mode_skips_the_step_in_between() {
+        let mut state = SoloistState::default();
+        let all = Options {
+            shuffle: false,
+            repeat: Repeat::Context,
+        };
+        state.take_options(all);
+        // Context → track: Soloist reports "off" in between.
+        state.pending_repeat = Some((Repeat::Track, std::time::Instant::now()));
+        state.take_options(Options {
+            repeat: Repeat::Off,
+            ..all
+        });
+        assert_eq!(state.options.repeat, Repeat::Track);
+        state.take_options(Options {
+            repeat: Repeat::Track,
+            ..all
+        });
+        assert_eq!(state.options.repeat, Repeat::Track);
+        assert!(state.pending_repeat.is_none());
+        // A wish that never came true stops counting.
+        state.pending_repeat = Some((
+            Repeat::Context,
+            std::time::Instant::now() - REPEAT_SETTLE * 2,
+        ));
+        state.take_options(Options {
+            repeat: Repeat::Off,
+            ..all
+        });
+        assert_eq!(state.options.repeat, Repeat::Off);
     }
 }
