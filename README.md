@@ -70,6 +70,11 @@ The account needs Spotify Premium. The login is stored in the keyring. Then:
   your files (ISRC, then title, artist and length). Your own playlists can be edited here
   and the changes are sent to Spotify; *Create on Spotify* publishes a local playlist.
 
+**Streaming** (optional, unofficial): with the `spotify-stream` feature (`meson -Dspotify_stream=true`,
+on in `make run` builds), Preferences → Spotify → Streaming plays songs that aren't in your
+library through librespot. It needs a second, one-time browser login. It's against Spotify's
+terms of use and may stop working at any time; your own files always play from the library.
+
 For development, debug builds talk to a stand-in server instead of Spotify when
 `GATEFOLD_SPOTIFY_TEST_SERVER=http://127.0.0.1:<port>` is set.
 

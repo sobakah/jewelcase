@@ -491,7 +491,8 @@ impl PlaylistPanel {
         }
         let row = gtk::ListBoxRow::builder().child(&content).build();
         let remote = GatefoldApplication::get().player().is_remote() && linked;
-        if track.is_none() && !(remote && entry.spotify_uri.is_some()) {
+        let streamable = streamable(entry);
+        if track.is_none() && !((remote || streamable) && entry.spotify_uri.is_some()) {
             // Not in the library: shown, but can't play here. Spotify songs
             // say how to play them when clicked.
             line.add_css_class("unavailable");
@@ -521,13 +522,18 @@ impl PlaylistPanel {
             .borrow()
             .get(index)
             .is_some_and(|e| e.track.is_none() && e.spotify_uri.is_some());
-        if only_on_spotify && !GatefoldApplication::get().player().is_remote() {
-            GatefoldApplication::get().library().emit_by_name::<()>(
-                "message",
-                &[&gettext(
+        let app = GatefoldApplication::get();
+        if only_on_spotify && !app.player().is_remote() && !app.spotify().can_stream() {
+            let hint = if crate::spotify::Spotify::streaming_built() {
+                gettext(
+                    "This song is only on Spotify; turn on streaming in Preferences, or choose a device under Play On…",
+                )
+            } else {
+                gettext(
                     "This song is only on Spotify; choose a device under Play On… to play it there",
-                )],
-            );
+                )
+            };
+            app.library().emit_by_name::<()>("message", &[&hint]);
             return;
         }
         self.play(Some(index), false);
@@ -560,9 +566,32 @@ impl PlaylistPanel {
             return;
         }
         let entries = imp.entries.borrow();
+        // Spotify-only songs stream when streaming is on (§9.4).
+        let mut streamed = std::collections::HashMap::new();
+        if app.spotify().can_stream()
+            && let Some(mut db) = app.library().db()
+        {
+            for entry in entries
+                .iter()
+                .filter(|e| e.track.is_none() && streamable(e))
+            {
+                if let Ok(Some(id)) = db.stream_track_for_item(entry.id) {
+                    streamed.insert(entry.id, id);
+                }
+            }
+        }
+        let stand_ins = app
+            .library()
+            .tracks(&streamed.values().copied().collect::<Vec<_>>());
+        if !stand_ins.is_empty() {
+            app.spotify()
+                .fetch_stream_covers(stand_ins.keys().copied().collect());
+        }
         let skipped = entries
             .iter()
-            .filter(|e| e.track.is_none() && e.spotify_uri.is_some())
+            .filter(|e| {
+                e.track.is_none() && e.spotify_uri.is_some() && !streamed.contains_key(&e.id)
+            })
             .count();
         if skipped > 0 {
             app.library().emit_by_name::<()>(
@@ -578,7 +607,13 @@ impl PlaylistPanel {
         let playable: Vec<(usize, TrackObject)> = entries
             .iter()
             .enumerate()
-            .filter_map(|(i, e)| Some((i, TrackObject::new(e.track.clone()?))))
+            .filter_map(|(i, e)| {
+                let track = e.track.clone().or_else(|| {
+                    let id = streamed.get(&e.id)?;
+                    stand_ins.get(id).cloned()
+                })?;
+                Some((i, TrackObject::new(track)))
+            })
             .collect();
         let start = start.and_then(|row| playable.iter().position(|(i, _)| *i == row));
         let name = imp
@@ -773,6 +808,16 @@ fn source_line(info: &gatefold_core::db::Playlist) -> String {
         );
     }
     parts.join(" · ")
+}
+
+/// A Spotify song that can stream (§9.4), streaming being on.
+fn streamable(entry: &PlaylistItem) -> bool {
+    entry
+        .spotify_uri
+        .as_deref()
+        .is_some_and(|uri| uri.starts_with("spotify:track:"))
+        && entry.match_state != "unavailable"
+        && GatefoldApplication::get().spotify().can_stream()
 }
 
 /// What Yes or No does.

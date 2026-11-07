@@ -18,7 +18,7 @@ use crate::playlist_files::Entry as PlaylistFileEntry;
 use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 
 mod spotify;
-pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion};
+pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, StreamInfo};
 
 const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/001_library.sql")),
@@ -28,6 +28,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/005_play_history.sql")),
     M::up(include_str!("db/006_analysis.sql")),
     M::up(include_str!("db/007_spotify.sql")),
+    M::up(include_str!("db/008_streaming.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -438,6 +439,8 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Library songs by ID; negative IDs are Spotify songs to stream
+    /// (`stream_track`).
     pub fn tracks(&self, ids: &[i64]) -> Result<HashMap<i64, Track>> {
         let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT {TRACK_COLUMNS}, {TRACK_ALBUM_COLUMNS} FROM track t
@@ -446,7 +449,12 @@ impl Database {
         ))?;
         let mut tracks = HashMap::new();
         for id in ids {
-            if let Some(track) = stmt.query_row([id], track).optional()? {
+            let found = if *id < 0 {
+                self.stream_track(*id)?
+            } else {
+                stmt.query_row([id], track).optional()?
+            };
+            if let Some(track) = found {
                 tracks.insert(*id, track);
             }
         }
@@ -1275,6 +1283,10 @@ impl Database {
 
     /// Records that a song was played; keeps the newest `HISTORY_KEEP`.
     pub fn add_history(&mut self, track_id: i64, now: i64) -> Result<()> {
+        // Streamed Spotify songs aren't kept in the history.
+        if track_id < 0 {
+            return Ok(());
+        }
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT INTO play_history (track_id, played) VALUES (?1, ?2)",

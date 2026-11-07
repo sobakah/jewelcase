@@ -1,0 +1,23 @@
+[package]
+name = "gatefold-stream"
+description = "Gatefold's optional Spotify streaming (librespot), played through GStreamer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-channel.workspace = true
+base64.workspace = true
+gst.workspace = true
+gst-app.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Unofficial Spotify client (CONCEPT.md §9.4): rustls like the rest, no
+# audio backends (Gatefold's own GStreamer sink).
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-protocol = { version = "0.8", default-features = false }
+librespot-playback = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }

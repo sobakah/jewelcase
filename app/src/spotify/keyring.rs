@@ -1,51 +1,80 @@
-//! The Spotify login in the keyring (oo7, CONCEPT.md §9.3, §12). Runs on a
+//! The Spotify logins in the keyring (oo7, CONCEPT.md §9.3, §12). Runs on a
 //! worker thread; oo7 brings its own async runtime (async-io).
+#![cfg_attr(not(feature = "spotify-stream"), allow(dead_code))]
 
 use gatefold_spotify::Tokens;
 use gtk::gio;
 
-/// Keyring attributes; `application` as in CONCEPT.md §12.
-const ATTRIBUTES: [(&str, &str); 2] = [
-    ("application", "io.github.sobakah.Gatefold"),
-    ("kind", "spotify-login"),
-];
+/// Keyring attributes; `application` as in CONCEPT.md §12, `kind` tells
+/// the Web API login from the streaming login.
+fn attributes(kind: &'static str) -> [(&'static str, &'static str); 2] {
+    [
+        ("application", "io.github.sobakah.Gatefold"),
+        ("kind", kind),
+    ]
+}
+
+const LOGIN: &str = "spotify-login";
+/// librespot's reusable credentials (CONCEPT.md §9.4).
+const STREAM_LOGIN: &str = "spotify-stream-login";
 
 pub async fn load() -> Result<Option<Tokens>, String> {
-    run(|| async {
+    Ok(load_text(LOGIN)
+        .await?
+        .and_then(|text| Tokens::from_json(&text)))
+}
+
+pub async fn save(tokens: Tokens) -> Result<(), String> {
+    save_text(LOGIN, "Gatefold: Spotify login", tokens.to_json()).await
+}
+
+pub async fn delete() -> Result<(), String> {
+    delete_kind(LOGIN).await
+}
+
+pub async fn load_stream() -> Result<Option<String>, String> {
+    load_text(STREAM_LOGIN).await
+}
+
+pub async fn save_stream(text: String) -> Result<(), String> {
+    save_text(STREAM_LOGIN, "Gatefold: Spotify streaming login", text).await
+}
+
+pub async fn delete_stream() -> Result<(), String> {
+    delete_kind(STREAM_LOGIN).await
+}
+
+async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
+    run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
-        let items = keyring.search_items(&ATTRIBUTES).await?;
+        let items = keyring.search_items(&attributes(kind)).await?;
         let Some(item) = items.first() else {
             return Ok(None);
         };
         let secret = item.secret().await?;
-        Ok(Tokens::from_json(&String::from_utf8_lossy(
-            secret.as_bytes(),
-        )))
+        Ok(Some(
+            String::from_utf8_lossy(secret.as_bytes()).into_owned(),
+        ))
     })
     .await
 }
 
-pub async fn save(tokens: Tokens) -> Result<(), String> {
+async fn save_text(kind: &'static str, label: &'static str, text: String) -> Result<(), String> {
     run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
         keyring
-            .create_item(
-                "Gatefold: Spotify login",
-                &ATTRIBUTES,
-                tokens.to_json(),
-                true,
-            )
+            .create_item(label, &attributes(kind), text, true)
             .await
     })
     .await
 }
 
-pub async fn delete() -> Result<(), String> {
-    run(|| async {
+async fn delete_kind(kind: &'static str) -> Result<(), String> {
+    run(move || async move {
         let keyring = oo7::Keyring::new().await?;
-        keyring.delete(&ATTRIBUTES).await
+        keyring.delete(&attributes(kind)).await
     })
     .await
 }

@@ -616,6 +616,14 @@ For now the app is built as an **RPM for Fedora 45 and installed locally**. Ther
 
 The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase 4 works without them, except automatic romanization.
 
+### Phase 8 as built (so far)
+- Crate `gatefold-stream` (only with the `spotify-stream` feature): librespot 0.8 on its own Tokio thread; its decoded samples go through Gatefold's own GStreamer pipeline (`appsrc ! audioconvert ! audioresample ! volume ! autoaudiosink`), with the same volume as local playback.
+- Login: a second, one-time browser login with librespot's client ID (the user's Web API app can't stream), redirect `http://127.0.0.1:5588/login`, scope `streaming`. librespot's reusable credentials then live in the keyring; later starts need no browser.
+- Spotify songs that aren't in the library get negative track IDs (table `stream_track`), so they go into the queue, playlists and the saved queue like library songs. The player streams them and plays everything else from the files; the next streamed song is preloaded.
+- Loudness: with ReplayGain on, librespot normalises with a −4 dB pregain (Spotify's −14 LUFS to ReplayGain's −18 LUFS).
+- Development builds (`make run`) include the feature; it's off until turned on in Preferences → Spotify → Streaming.
+- Next: the Spotify Connect receiver (Gatefold as a device in the Spotify app), adding Spotify songs to local playlists, gapless changes between local and streamed songs.
+
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
 - **Lyrics for Spotify-only songs** from LRCLIB (free public lyrics database, by title, artist and length): shown only, never embedded. In remote mode the Lyrics pane is off for such songs until then (§9.7).

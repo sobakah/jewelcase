@@ -127,6 +127,7 @@ pub fn page() -> adw::PreferencesPage {
     ));
     playlists.add(&sync);
     page.add(&playlists);
+    page.add(&streaming_group(&spotify));
 
     let update = glib::clone!(
         #[weak]
@@ -206,6 +207,71 @@ pub fn page() -> adw::PreferencesPage {
         }
     ));
     page
+}
+
+/// Streaming (§9.4): its own switch, with the risks said plainly.
+fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title(gettext("Streaming"))
+        .description(gettext(
+            "Plays songs that aren’t in your library from Spotify, right in Gatefold, through librespot, an unofficial Spotify client. Needs Spotify Premium. Using it goes against Spotify’s terms of use, and Spotify can stop it from working at any time. Your own files always play from your library.",
+        ))
+        .build();
+    if !Spotify::streaming_built() {
+        group.add(
+            &adw::ActionRow::builder()
+                .title(gettext("Not Included in This Build"))
+                .subtitle(gettext(
+                    "Gatefold was built without streaming (the spotify-stream feature).",
+                ))
+                .build(),
+        );
+        return group;
+    }
+    let switch = adw::SwitchRow::builder()
+        .title(gettext("Stream _From Spotify"))
+        .subtitle(gettext(
+            "Turning it on opens a second Spotify login in the browser, as librespot",
+        ))
+        .use_underline(true)
+        .build();
+    spotify
+        .settings()
+        .bind("spotify-streaming", &switch, "active")
+        .build();
+    switch.connect_active_notify(glib::clone!(
+        #[weak]
+        spotify,
+        move |switch| {
+            let on = switch.is_active();
+            let ready = spotify.stream_status() != "off";
+            glib::spawn_future_local(async move {
+                if on && !ready {
+                    spotify.enable_streaming().await;
+                } else if !on {
+                    spotify.disable_streaming().await;
+                }
+            });
+        }
+    ));
+    group.add(&switch);
+    let status = adw::ActionRow::builder().title(gettext("Status")).build();
+    let update = glib::clone!(
+        #[weak]
+        status,
+        move |spotify: &Spotify| {
+            status.set_subtitle(&match spotify.stream_status().as_str() {
+                "ready" => gettext("Ready: songs that aren’t in your library play from Spotify"),
+                "connecting" => gettext("Logging in…"),
+                "error" => gettext("Not working right now; Spotify may have changed something"),
+                _ => gettext("Off"),
+            });
+        }
+    );
+    update(spotify);
+    spotify.connect_stream_status_notify(move |spotify| update(spotify));
+    group.add(&status);
+    group
 }
 
 fn step(number: u32, title: &str, subtitle: Option<&str>) -> adw::ActionRow {

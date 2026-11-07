@@ -97,10 +97,20 @@ fn agent() -> ureq::Agent {
 
 /// Exchanges the code from the browser for tokens (end of the login).
 pub fn exchange_code(client_id: &str, code: &str, pkce: &auth::Pkce) -> Result<Tokens> {
+    exchange_code_for(client_id, auth::REDIRECT_URI, code, pkce)
+}
+
+/// The same for another client (streaming logs in as librespot).
+pub fn exchange_code_for(
+    client_id: &str,
+    redirect_uri: &str,
+    code: &str,
+    pkce: &auth::Pkce,
+) -> Result<Tokens> {
     let response = agent().post(&auth::token_url()).send_form([
         ("grant_type", "authorization_code"),
         ("code", code),
-        ("redirect_uri", auth::REDIRECT_URI),
+        ("redirect_uri", redirect_uri),
         ("client_id", client_id),
         ("code_verifier", &pkce.verifier),
     ])?;

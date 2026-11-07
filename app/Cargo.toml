@@ -8,14 +8,16 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-# librespot streaming (CONCEPT.md §9.4). Off by default; empty until Phase 8.
-spotify-stream = []
+# librespot streaming (CONCEPT.md §9.4). Off by default: without it the
+# build contains no librespot code.
+spotify-stream = ["dep:gatefold-stream"]
 
 [dependencies]
 gatefold-core.workspace = true
 gatefold-lyrics.workspace = true
 gatefold-metadata.workspace = true
 gatefold-spotify.workspace = true
+gatefold-stream = { workspace = true, optional = true }
 gatefold-tools.workspace = true
 
 adw.workspace = true

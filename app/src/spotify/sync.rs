@@ -192,6 +192,7 @@ fn remote_entries(entries: &[PlaylistEntry]) -> Vec<RemoteEntry> {
         .iter()
         .map(|entry| RemoteEntry {
             uri: entry.uri.clone(),
+            image_url: entry.track.as_ref().and_then(|t| t.image_url.clone()),
             track: entry.track.as_ref().map(remote_track),
         })
         .collect()

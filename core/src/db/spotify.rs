@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::{Database, Result};
+use super::{Database, Result, Track};
+use crate::library::TrackRecord;
+use crate::library::tags::TrackTags;
 use crate::matching::{Confidence, LocalTrack, MatchIndex, RemoteTrack};
 
 /// A Spotify playlist as listed by Spotify.
@@ -37,6 +39,8 @@ pub struct LinkedPlaylist {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteEntry {
     pub uri: Option<String>,
+    /// The album image, for streaming (§9.4).
+    pub image_url: Option<String>,
     /// `None` for anything that isn't a track (episodes).
     pub track: Option<RemoteTrack>,
 }
@@ -50,6 +54,19 @@ pub struct SpotifyVersion {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub checked: i64,
+}
+
+/// A Spotify song to stream, as far as the player needs it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StreamInfo {
+    pub uri: String,
+    pub title: String,
+    /// "Artist, Artist".
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration_ms: u64,
+    pub isrc: Option<String>,
+    pub image_url: Option<String>,
 }
 
 /// An entry kept across a re-read: one without a Spotify URI (library
@@ -378,8 +395,9 @@ impl Database {
         {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO playlist_item (playlist_id, position, local_track_id, spotify_uri,
-                   isrc, title, artist, album, duration_ms, match_state, suggested_track_id)
-                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                   isrc, title, artist, album, duration_ms, match_state, suggested_track_id,
+                   image_url)
+                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             let exists = |track: i64| -> rusqlite::Result<bool> {
                 tx.query_row(
@@ -420,6 +438,7 @@ impl Database {
                     track.map(|t| t.duration_ms as i64),
                     state,
                     suggested,
+                    entry.image_url,
                 ])?;
                 order.push(tx.last_insert_rowid());
                 let count = seen.entry(uri).or_default();
@@ -637,6 +656,125 @@ impl Database {
             .optional()?)
     }
 
+    // Songs to stream (§9.4) ----------------------------------------------------
+
+    /// The (negative) track ID of a Spotify song, added or updated.
+    pub fn stream_track_id(&mut self, info: &StreamInfo) -> Result<i64> {
+        let id: i64 = self.conn.query_row(
+            "INSERT INTO stream_track (uri, title, artist, album, duration_ms, isrc, image_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(uri) DO UPDATE SET title = excluded.title, artist = excluded.artist,
+               album = excluded.album, duration_ms = excluded.duration_ms,
+               isrc = COALESCE(excluded.isrc, isrc),
+               image_url = COALESCE(excluded.image_url, image_url)
+             RETURNING id",
+            params![
+                info.uri,
+                info.title,
+                info.artist,
+                info.album,
+                info.duration_ms as i64,
+                info.isrc,
+                info.image_url
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(-id)
+    }
+
+    /// A streamed song as a track: no file, format "Spotify".
+    pub(super) fn stream_track(&self, id: i64) -> Result<Option<Track>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT uri, title, artist, album, duration_ms, isrc, image_url
+                 FROM stream_track WHERE id = ?1",
+                [-id],
+                |row| {
+                    let artist: Option<String> = row.get(2)?;
+                    let album: Option<String> = row.get(3)?;
+                    // The cover cache key of the image, once downloaded
+                    // (see stream_covers).
+                    let image_url: Option<String> = row.get(6)?;
+                    let cover_key =
+                        image_url.map(|url| crate::library::covers::cover_key('s', url.as_bytes()));
+                    Ok(Track {
+                        record: TrackRecord {
+                            id,
+                            path: std::path::PathBuf::new(),
+                            tags: TrackTags {
+                                title: Some(row.get(1)?),
+                                artist: artist.clone(),
+                                album: album.clone(),
+                                duration_ms: row.get::<_, i64>(4)?.max(0) as u64,
+                                isrc: row.get(5)?,
+                                format: "Spotify".into(),
+                                ..TrackTags::default()
+                            },
+                            cover_key: cover_key.clone(),
+                            added: 0,
+                        },
+                        album_id: None,
+                        album_title: album,
+                        album_artist: artist.map(|a| a.split(", ").next().unwrap_or(&a).to_owned()),
+                        album_cover_key: cover_key,
+                        album_disc: None,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn stream_uri(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT uri FROM stream_track WHERE id = ?1", [-id], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    /// The image URLs of streamed songs, to download their covers (cache
+    /// key: `cover_key('s', url)`).
+    pub fn stream_covers(&self, ids: &[i64]) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT image_url FROM stream_track WHERE id = ?1 AND image_url IS NOT NULL",
+        )?;
+        let mut missing = Vec::new();
+        for id in ids.iter().filter(|id| **id < 0) {
+            if let Some(url) = stmt.query_row([-id], |row| row.get(0)).optional()? {
+                missing.push((*id, url));
+            }
+        }
+        Ok(missing)
+    }
+
+    /// The song to stream for a Spotify entry of a playlist (`None` for
+    /// entries that aren't tracks).
+    pub fn stream_track_for_item(&mut self, item_id: i64) -> Result<Option<i64>> {
+        let info: Option<StreamInfo> = self
+            .conn
+            .query_row(
+                "SELECT spotify_uri, title, artist, album, duration_ms, isrc, image_url
+                 FROM playlist_item
+                 WHERE id = ?1 AND spotify_uri LIKE 'spotify:track:%' AND title IS NOT NULL",
+                [item_id],
+                |row| {
+                    Ok(StreamInfo {
+                        uri: row.get(0)?,
+                        title: row.get(1)?,
+                        artist: row.get(2)?,
+                        album: row.get(3)?,
+                        duration_ms: row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as u64,
+                        isrc: row.get(5)?,
+                        image_url: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        info.map(|info| self.stream_track_id(&info)).transpose()
+    }
+
     // Outbox (§9.6) ------------------------------------------------------------
 
     pub fn queue_spotify_op(&mut self, playlist_id: i64, op: &str, now: i64) -> Result<()> {
@@ -680,6 +818,7 @@ mod tests {
     fn remote(uri: &str, title: &str, duration_s: u64) -> RemoteEntry {
         RemoteEntry {
             uri: Some(uri.into()),
+            image_url: None,
             track: Some(RemoteTrack {
                 title: title.into(),
                 artists: vec!["Adele".into()],
@@ -736,6 +875,7 @@ mod tests {
             ),
             RemoteEntry {
                 uri: Some("spotify:episode:e".into()),
+                image_url: None,
                 track: None,
             },
         ];
@@ -895,6 +1035,41 @@ mod tests {
         theirs.editable = true;
         db.upsert_spotify_playlist(&theirs, 3).unwrap();
         assert!(db.playlist(id).unwrap().unwrap().readable);
+    }
+
+    #[test]
+    fn spotify_songs_get_negative_track_ids() {
+        let mut db = Database::open_in_memory().unwrap();
+        let info = StreamInfo {
+            uri: "spotify:track:x".into(),
+            title: "Talk to you".into(),
+            artist: Some("YEONJUN".into()),
+            album: Some("NO LABELS".into()),
+            duration_ms: 150_000,
+            isrc: None,
+            image_url: Some("https://i/x".into()),
+        };
+        let id = db.stream_track_id(&info).unwrap();
+        assert!(id < 0);
+        assert_eq!(db.stream_track_id(&info).unwrap(), id);
+        let track = db.tracks(&[id]).unwrap().remove(&id).unwrap();
+        assert_eq!(track.record.tags.title.as_deref(), Some("Talk to you"));
+        assert_eq!(track.record.tags.format, "Spotify");
+        assert_eq!(
+            db.stream_uri(id).unwrap().as_deref(),
+            Some("spotify:track:x")
+        );
+        assert_eq!(
+            db.stream_covers(&[id]).unwrap(),
+            [(id, "https://i/x".into())]
+        );
+        assert_eq!(
+            track.record.cover_key,
+            Some(crate::library::covers::cover_key('s', b"https://i/x"))
+        );
+        // Not kept in the history.
+        db.add_history(id, 1).unwrap();
+        assert!(db.history(10).unwrap().is_empty());
     }
 
     #[test]

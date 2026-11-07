@@ -82,11 +82,21 @@ fn challenge(verifier: &str) -> String {
 
 /// The page to open in the browser.
 pub fn authorize_url(client_id: &str, pkce: &Pkce) -> String {
-    let scope = SCOPES.join(" ");
+    authorize_url_for(client_id, REDIRECT_URI, SCOPES, pkce)
+}
+
+/// The same for another client (streaming logs in as librespot).
+pub fn authorize_url_for(
+    client_id: &str,
+    redirect_uri: &str,
+    scopes: &[&str],
+    pkce: &Pkce,
+) -> String {
+    let scope = scopes.join(" ");
     let params = [
         ("client_id", client_id),
         ("response_type", "code"),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", redirect_uri),
         ("code_challenge_method", "S256"),
         ("code_challenge", &pkce.challenge),
         ("state", &pkce.state),
@@ -164,14 +174,20 @@ pub(crate) fn now() -> u64 {
 /// Waits for the browser on the loopback port.
 pub struct Callback {
     listener: TcpListener,
+    path: &'static str,
 }
 
 impl Callback {
     /// Takes the port; fails if something else has it.
     pub fn bind() -> std::io::Result<Self> {
-        let listener = TcpListener::bind(("127.0.0.1", REDIRECT_PORT))?;
+        Self::bind_at(REDIRECT_PORT, "/callback")
+    }
+
+    /// Another port and path (the streaming login's).
+    pub fn bind_at(port: u16, path: &'static str) -> std::io::Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", port))?;
         listener.set_nonblocking(true)?;
-        Ok(Self { listener })
+        Ok(Self { listener, path })
     }
 
     /// The authorization code, once the browser comes back (blocking).
@@ -187,7 +203,7 @@ impl Callback {
             }
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    if let Some(result) = answer(stream, state) {
+                    if let Some(result) = answer(stream, state, self.path) {
                         return result;
                     }
                 }
@@ -202,7 +218,7 @@ impl Callback {
 
 /// Reads one request; `None` for anything that isn't the callback (a
 /// favicon request), which is answered and ignored.
-fn answer(stream: TcpStream, state: &str) -> Option<Result<String>> {
+fn answer(stream: TcpStream, state: &str, expected: &str) -> Option<Result<String>> {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut reader = BufReader::new(&stream);
@@ -211,7 +227,7 @@ fn answer(stream: TcpStream, state: &str) -> Option<Result<String>> {
     let target = line.split_whitespace().nth(1).unwrap_or("");
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let mut writer = &stream;
-    if path != "/callback" {
+    if path != expected {
         let _ = writer
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return None;

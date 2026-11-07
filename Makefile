@@ -11,7 +11,7 @@ NAME     := gatefold
 all: build
 
 $(BUILDDIR)/build.ninja:
-	meson setup $(BUILDDIR) -Dprofile=development
+	meson setup $(BUILDDIR) -Dprofile=development -Dspotify_stream=true
 
 build: $(BUILDDIR)/build.ninja
 	meson compile -C $(BUILDDIR)

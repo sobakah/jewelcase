@@ -70,6 +70,8 @@ mod imp {
         pub remote_device: RefCell<Option<String>>,
         /// Where transport commands go in remote mode.
         pub remote: RefCell<Option<RemoteHandler>>,
+        /// The current song plays from the Spotify stream (§9.4).
+        pub streaming: Cell<bool>,
         /// The local position, kept while remote.
         pub local_position: Cell<u64>,
         /// Remote position and when it was reported, to move it along.
@@ -548,6 +550,21 @@ impl Player {
         if self.forward(RemoteCommand::PlayPause) {
             return;
         }
+        if self.imp().streaming.get() {
+            let spotify = self.spotify();
+            match self.imp().state.get() {
+                State::Playing => {
+                    spotify.stream_pause();
+                    self.set_state(State::Paused);
+                }
+                State::Paused => {
+                    spotify.stream_play();
+                    self.set_state(State::Playing);
+                }
+                State::Stopped => self.load_current(true, self.position()),
+            }
+            return;
+        }
         let Some(engine) = self.engine() else { return };
         match self.imp().state.get() {
             State::Playing => {
@@ -577,6 +594,9 @@ impl Player {
     pub fn stop(&self) {
         if let Some(engine) = self.engine() {
             engine.stop();
+        }
+        if self.imp().streaming.get() {
+            self.spotify().stream_stop();
         }
         self.set_state(State::Stopped);
         self.set_position(0);
@@ -620,7 +640,11 @@ impl Player {
             self.emit_by_name::<()>("seeked", &[]);
             return;
         }
-        if let Some(engine) = self.engine()
+        if self.imp().streaming.get() {
+            if self.imp().state.get() != State::Stopped {
+                self.spotify().stream_seek(ms);
+            }
+        } else if let Some(engine) = self.engine()
             && self.imp().state.get() != State::Stopped
         {
             engine.seek(ms);
@@ -675,6 +699,9 @@ impl Player {
         }
         if let Some(engine) = self.engine() {
             engine.set_volume(volume);
+        }
+        if self.imp().streaming.get() {
+            self.spotify().stream_volume(volume);
         }
         let _ = self.settings().set_double("volume", volume.clamp(0.0, 1.0));
     }
@@ -883,6 +910,14 @@ impl Player {
             self.stop();
             return;
         };
+        // A Spotify song that isn't in the library: streamed (§9.4).
+        if track.is_stand_in() {
+            self.load_stream(&track, play, start_ms);
+            return;
+        }
+        if imp.streaming.replace(false) {
+            self.spotify().stream_stop();
+        }
         let Some(engine) = self.engine() else { return };
         let Some(uri) = playback::file_uri(&track.track().record.path) else {
             return;
@@ -893,6 +928,84 @@ impl Player {
         self.set_state(if play { State::Playing } else { State::Paused });
         self.emit_by_name::<()>("seeked", &[]);
         self.update_next();
+    }
+
+    // Streaming (§9.4) --------------------------------------------------
+
+    fn spotify(&self) -> crate::spotify::Spotify {
+        crate::application::GatefoldApplication::get().spotify()
+    }
+
+    fn stream_uri(&self, track: &TrackObject) -> Option<String> {
+        self.library().db()?.stream_uri(track.id()).ok().flatten()
+    }
+
+    fn load_stream(&self, track: &TrackObject, play: bool, start_ms: u64) {
+        let imp = self.imp();
+        let spotify = self.spotify();
+        let uri = self.stream_uri(track);
+        let (Some(uri), true) = (uri, spotify.can_stream()) else {
+            // Translators: {} is a song title.
+            let text =
+                gettext("“{}” is only on Spotify; turn on streaming in Preferences to play it")
+                    .replace("{}", &track.title());
+            self.emit_by_name::<()>("message", &[&text]);
+            imp.streaming.set(false);
+            self.set_state(State::Stopped);
+            return;
+        };
+        if let Some(engine) = self.engine() {
+            engine.stop();
+        }
+        imp.streaming.set(true);
+        spotify.stream_volume(self.volume());
+        spotify.stream_load(&uri, start_ms, play);
+        self.set_position(start_ms);
+        self.set_state(if play { State::Playing } else { State::Paused });
+        self.emit_by_name::<()>("seeked", &[]);
+        self.update_next();
+    }
+
+    /// What the stream reports about the current song.
+    pub fn stream_note(&self, note: crate::spotify::StreamNote) {
+        use crate::spotify::StreamNote;
+        let imp = self.imp();
+        if !imp.streaming.get() {
+            return;
+        }
+        match note {
+            StreamNote::Playing => {
+                if imp.state.get() != State::Playing {
+                    self.set_state(State::Playing);
+                }
+            }
+            StreamNote::Paused => {
+                if imp.state.get() == State::Playing {
+                    self.set_state(State::Paused);
+                }
+            }
+            StreamNote::Ended => self.handle_event(PlayerEvent::EndOfStream),
+            StreamNote::Unavailable => {
+                self.handle_event(PlayerEvent::Error("Spotify can't play this song".into()))
+            }
+        }
+    }
+
+    /// Streaming was turned off: a streamed song stops.
+    pub fn stream_gone(&self) {
+        if self.imp().streaming.replace(false) {
+            self.set_state(State::Stopped);
+            self.set_position(0);
+        }
+    }
+
+    /// Where playback is, from GStreamer or the stream.
+    fn engine_position(&self) -> Option<u64> {
+        if self.imp().streaming.get() {
+            Some(self.spotify().stream_position())
+        } else {
+            self.engine().and_then(playback::Player::position_ms)
+        }
     }
 
     // Smart shuffle (§7) ------------------------------------------------
@@ -1013,10 +1126,22 @@ impl Player {
             let queue = self.imp().queue.borrow();
             queue.peek_next(true).map(|i| queue.items()[i])
         };
-        let next = next.and_then(|item| {
-            let track = self.track(item.track_id)?;
-            Some((playback::file_uri(&track.track().record.path)?, item.uid))
-        });
+        let next = next.and_then(|item| self.track(item.track_id).map(|t| (t, item.uid)));
+        // A streamed song next: the stream fetches it early; local
+        // playback ends with EOS and the song is loaded then.
+        if let Some((track, _)) = &next
+            && track.is_stand_in()
+        {
+            engine.set_next(None);
+            if self.imp().streaming.get()
+                && let Some(uri) = self.stream_uri(track)
+            {
+                self.spotify().stream_preload(&uri);
+            }
+            return;
+        }
+        let next = next
+            .and_then(|(track, uid)| Some((playback::file_uri(&track.track().record.path)?, uid)));
         engine.set_next(next);
     }
 
@@ -1128,7 +1253,7 @@ impl Player {
                     #[upgrade_or]
                     glib::ControlFlow::Break,
                     move || {
-                        if let Some(ms) = player.engine().and_then(playback::Player::position_ms) {
+                        if let Some(ms) = player.engine_position() {
                             player.set_position(ms);
                         }
                         glib::ControlFlow::Continue
@@ -1202,8 +1327,11 @@ impl Player {
         };
         let ids: Vec<i64> = snapshot.items.iter().map(|i| i.track_id).collect();
         let tracks = library.tracks(&ids);
+        // Streamed songs have no file; they wait for streaming.
         let (queue, skipped) = Queue::restore(&snapshot, |id| {
-            tracks.get(&id).is_some_and(|t| t.record.path.is_file())
+            tracks
+                .get(&id)
+                .is_some_and(|t| t.record.id < 0 || t.record.path.is_file())
         });
         self.cache_tracks(tracks.into_values().map(TrackObject::new).collect());
         self.imp().queue.replace(queue);
@@ -1243,10 +1371,10 @@ impl Player {
         if let Some(source) = self.imp().save.take() {
             source.remove();
         }
-        let position = self
-            .engine()
-            .filter(|_| self.imp().state.get() != State::Stopped)
-            .and_then(playback::Player::position_ms)
+        let live = self.imp().state.get() != State::Stopped && !self.is_remote();
+        let position = live
+            .then(|| self.engine_position())
+            .flatten()
             .unwrap_or_else(|| self.position());
         let snapshot = self.imp().queue.borrow().snapshot(position);
         if let Some(mut db) = self.library().db()

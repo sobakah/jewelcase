@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["app", "core", "lyrics", "metadata", "spotify", "tools"]
+members = ["app", "core", "lyrics", "metadata", "spotify", "stream", "tools"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ gatefold-core = { path = "core" }
 gatefold-lyrics = { path = "lyrics" }
 gatefold-metadata = { path = "metadata" }
 gatefold-spotify = { path = "spotify" }
+gatefold-stream = { path = "stream" }
 gatefold-tools = { path = "tools" }
 
 adw = { package = "libadwaita", version = "0.9", features = ["v1_10"] }

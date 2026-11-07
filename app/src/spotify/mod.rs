@@ -8,6 +8,7 @@
 mod keyring;
 pub mod preferences;
 mod remote;
+mod stream;
 mod sync;
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -28,6 +29,7 @@ use crate::application::GatefoldApplication;
 use crate::config::APP_ID;
 
 pub use remote::RemoteCommand;
+pub use stream::StreamNote;
 pub use sync::{Op, parse_suggestion};
 
 /// How long the browser has to come back.
@@ -66,6 +68,10 @@ mod imp {
         /// Playlists are being read or changes sent.
         #[property(get)]
         pub syncing: Cell<bool>,
+        /// Streaming (§9.4): "off", "connecting", "ready" or "error".
+        #[property(get)]
+        pub stream_status: RefCell<String>,
+        pub stream: RefCell<stream::StreamState>,
 
         pub settings: OnceCell<gio::Settings>,
         pub client: RefCell<Option<Arc<Client>>>,
@@ -99,6 +105,7 @@ mod imp {
             self.parent_constructed();
             self.status
                 .replace(Status::Disconnected.as_str().to_owned());
+            self.stream_status.replace("off".to_owned());
             self.settings
                 .set(gio::Settings::new(APP_ID))
                 .expect("set once");
@@ -157,8 +164,9 @@ impl Spotify {
         self.emit_by_name::<()>("message", &[&text]);
     }
 
-    /// On start: reconnects with the stored login.
+    /// On start: reconnects with the stored logins.
     pub fn start(&self) {
+        self.start_streaming();
         if self.settings().string("spotify-account").is_empty() || self.client_id().is_empty() {
             return;
         }

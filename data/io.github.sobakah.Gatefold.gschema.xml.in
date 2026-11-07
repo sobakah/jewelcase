@@ -135,6 +135,11 @@
       <summary>Connected Spotify account</summary>
       <description>Its display name; empty when not connected. The login itself is in the keyring.</description>
     </key>
+    <key name="spotify-streaming" type="b">
+      <default>false</default>
+      <summary>Stream from Spotify</summary>
+      <description>Songs that aren’t in the library play from Spotify through librespot (unofficial; only in builds with the spotify-stream feature).</description>
+    </key>
     <key name="spotify-playlists" type="b">
       <default>true</default>
       <summary>Show Spotify playlists</summary>
