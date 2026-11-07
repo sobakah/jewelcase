@@ -57,7 +57,7 @@ pub fn compare(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> O
     }
     let local_title = Title::parse(&local.title);
     let remote_title = Title::parse(&remote.title);
-    if local_title.base.is_empty() || local_title.base != remote_title.base {
+    if !local_title.agrees(&remote_title) {
         return None;
     }
     // "(Inst.)" never matches the plain version, and so on.
@@ -110,6 +110,9 @@ pub struct Title {
     /// Lowercase, without brackets, credits and punctuation.
     pub base: String,
     pub notes: BTreeSet<String>,
+    /// Other names in brackets: "락 (樂) (LALALALA)" is also "lalalala"
+    /// (Spotify often uses only the English one).
+    pub alternates: Vec<String>,
 }
 
 impl Title {
@@ -142,12 +145,78 @@ impl Title {
             }
         }
         let notes = extras.iter().filter_map(|e| version_note(e)).collect();
+        let alternates = extras.iter().filter_map(|e| alternate_title(e)).collect();
         let base = rest
             .chars()
             .filter(|c| c.is_alphanumeric())
             .collect::<String>();
-        Self { base, notes }
+        Self {
+            base,
+            notes,
+            alternates,
+        }
     }
+
+    /// The same song name: the same base, or one's base is the other's
+    /// name in brackets.
+    pub fn agrees(&self, other: &Title) -> bool {
+        if self.base.is_empty() || other.base.is_empty() {
+            return false;
+        }
+        self.base == other.base
+            || self.alternates.contains(&other.base)
+            || other.alternates.contains(&self.base)
+    }
+
+    /// The names it can be found by: the base and the alternates.
+    fn keys(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.base)
+            .chain(&self.alternates)
+            .filter(|k| !k.is_empty())
+    }
+}
+
+/// A bracket that names the song another way ("(LALALALA)", "(Butterfly)"),
+/// not a version, credit or edition note.
+fn alternate_title(extra: &str) -> Option<String> {
+    if version_note(extra).is_some() {
+        return None;
+    }
+    let words: Vec<&str> = extra
+        .split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .filter(|w| !w.is_empty())
+        .collect();
+    let not_names = [
+        "feat",
+        "ft",
+        "featuring",
+        "with",
+        "prod",
+        "from",
+        "remastered",
+        "remaster",
+        "ver",
+        "version",
+        "edit",
+        "explicit",
+        "clean",
+        "bonus",
+        "mono",
+        "stereo",
+        "deluxe",
+        "original",
+        "single",
+        "radio",
+        "intro",
+        "outro",
+        "interlude",
+    ];
+    if words.iter().any(|w| not_names.contains(w)) {
+        return None;
+    }
+    let name: String = extra.chars().filter(|c| c.is_alphanumeric()).collect();
+    // One character ("樂") says too little to find a song by.
+    (name.chars().count() >= 2).then_some(name)
 }
 
 /// A title for a search query: without brackets, " - …" suffixes,
@@ -272,9 +341,9 @@ impl<'a> MatchIndex<'a> {
             if let Some(isrc) = &track.isrc {
                 by_isrc.entry(isrc.to_uppercase()).or_default().push(i);
             }
-            let base = Title::parse(&track.title).base;
-            if !base.is_empty() {
-                by_title.entry(base).or_default().push(i);
+            let title = Title::parse(&track.title);
+            for key in title.keys() {
+                by_title.entry(key.clone()).or_default().push(i);
             }
         }
         Self {
@@ -293,9 +362,14 @@ impl<'a> MatchIndex<'a> {
             .and_then(|isrc| self.by_isrc.get(&isrc.to_uppercase()))
             .cloned()
             .unwrap_or_default();
-        if let Some(same_title) = self.by_title.get(&Title::parse(&remote.title).base) {
-            candidates.extend(same_title);
+        let title = Title::parse(&remote.title);
+        for key in title.keys() {
+            if let Some(same_title) = self.by_title.get(key) {
+                candidates.extend(same_title);
+            }
         }
+        candidates.sort_unstable();
+        candidates.dedup();
         let remote_album = remote.album.as_deref().map(album_key);
         candidates
             .into_iter()
@@ -430,6 +504,27 @@ mod tests {
         assert_eq!(search_title("Dynamite - Tropical Remix"), "Dynamite");
         assert_eq!(search_title("Song feat. X"), "Song");
         assert_eq!(search_title("(Intro)"), "(Intro)");
+    }
+
+    #[test]
+    fn a_bracketed_name_is_the_same_song() {
+        let aliases = Aliases::default();
+        // Spotify has only the English name; the file both.
+        let file = local(490, "락 (樂) (LALALALA)", "Stray Kids", 183);
+        let rock = local(494, "락 (樂) (LALALALA) (Rock ver.)", "Stray Kids", 188);
+        let spotify = remote("LALALALA", &["Stray Kids"], 182);
+        assert_eq!(compare(&file, &spotify, &aliases), Some(Confidence::Sure));
+        // A version note still has to agree.
+        assert_eq!(compare(&rock, &spotify, &aliases), None);
+        let index = MatchIndex::new(vec![rock, file.clone()], &aliases);
+        assert_eq!(index.find(&spotify), Some((490, Confidence::Sure)));
+        // Credits and edition notes aren't names.
+        assert!(Title::parse("Song (feat. Someone)").alternates.is_empty());
+        assert!(Title::parse("Song (Deluxe Edition)").alternates.is_empty());
+        assert!(Title::parse("Song (2011 Remaster)").alternates.is_empty());
+        // A different song with the same bracket by another artist isn't.
+        let other = remote("LALALALA", &["Marina Satti"], 172);
+        assert_eq!(compare(&file, &other, &aliases), None);
     }
 
     #[test]
