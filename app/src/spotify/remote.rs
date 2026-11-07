@@ -1,8 +1,8 @@
 //! Spotify Connect devices and remote mode (CONCEPT.md §9.3): the player
 //! shows what a device plays and its buttons control it.
 
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use gatefold_core::db::{SpotifyVersion, Track};
 use gatefold_core::library::TrackRecord;
@@ -27,6 +27,14 @@ const AFTER_COMMAND: Duration = Duration::from_millis(700);
 const VOLUME_DELAY: Duration = Duration::from_millis(300);
 /// The device's queue is read again after this many reports.
 const QUEUE_EVERY: u32 = 5;
+/// Covers downloaded at the same time.
+const COVER_DOWNLOADS: usize = 4;
+/// Covers waiting to be downloaded at most (the oldest wishes go).
+const COVER_WAITING: usize = 100;
+/// A cover that couldn't be had is tried again after this.
+const COVER_RETRY: Duration = Duration::from_secs(60);
+/// Covers that arrive close together refresh the view once.
+const COVER_REFRESH: Duration = Duration::from_millis(400);
 
 /// What the player's controls do in remote mode.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,8 +62,14 @@ pub struct RemoteState {
     volume_timer: Option<glib::SourceId>,
     /// Spotify URI → library song, once looked up.
     matches: HashMap<String, Option<i64>>,
+    /// Covers to download, by URL, the most wanted first.
+    covers_wanted: VecDeque<String>,
     /// Covers being downloaded, by URL.
     loading: HashSet<String>,
+    /// Covers that couldn't be had, and when.
+    covers_failed: HashMap<String, Instant>,
+    /// A view refresh for new covers is coming.
+    covers_refresh: bool,
     /// Counts started hand-overs; an older one stops queueing.
     generation: u64,
     /// The device's queue needs reading again.
@@ -547,6 +561,7 @@ impl Spotify {
             .collect();
         let mut local = library.tracks(&ids);
         let mut objects = Vec::with_capacity(tracks.len());
+        let mut missing = Vec::new();
         for track in tracks {
             let id = self
                 .imp()
@@ -564,42 +579,127 @@ impl Spotify {
                 objects.push(TrackObject::new(found));
                 continue;
             }
-            let cover_key = match &track.image_url {
-                Some(url) => self.remote_cover(url).await,
-                None => None,
-            };
+            let cover_key = track.image_url.as_deref().and_then(|url| {
+                let key = remote_cover_key(url);
+                if cover_cache().has(&key) {
+                    Some(key)
+                } else {
+                    missing.push(url.to_owned());
+                    None
+                }
+            });
             objects.push(TrackObject::new(stand_in(track, cover_key)));
         }
+        self.want_covers(missing);
         objects
     }
 
-    /// Spotify's cover in the cover cache; `None` while it can't be had.
-    async fn remote_cover(&self, url: &str) -> Option<String> {
-        let key = gatefold_core::library::covers::cover_key('s', url.as_bytes());
-        let covers = gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
-        if covers.has(&key) {
-            return Some(key);
+    /// Downloads Spotify's covers in the background, in the order given
+    /// and before ones wished for earlier (the song playing comes first,
+    /// then what's next). The view is shown again as they arrive.
+    fn want_covers(&self, urls: Vec<String>) {
+        if urls.is_empty() {
+            return;
         }
-        if !self
-            .imp()
-            .remote
-            .borrow_mut()
-            .loading
-            .insert(url.to_owned())
         {
-            return None;
+            let mut state = self.imp().remote.borrow_mut();
+            let state = &mut *state;
+            state
+                .covers_failed
+                .retain(|_, at| at.elapsed() < COVER_RETRY);
+            let new: Vec<String> = urls
+                .into_iter()
+                .filter(|url| {
+                    !state.loading.contains(url) && !state.covers_failed.contains_key(url)
+                })
+                .collect();
+            state.covers_wanted.retain(|url| !new.contains(url));
+            for url in new.into_iter().rev() {
+                state.covers_wanted.push_front(url);
+            }
+            state.covers_wanted.truncate(COVER_WAITING);
         }
-        let (job_url, job_key) = (url.to_owned(), key.clone());
-        let made = gtk::gio::spawn_blocking(move || {
-            gatefold_spotify::download_image(&job_url)
-                .ok()
-                .is_some_and(|data| covers.generate(&job_key, data).is_ok())
-        })
-        .await
-        .unwrap_or(false);
-        self.imp().remote.borrow_mut().loading.remove(url);
-        made.then_some(key)
+        self.download_covers();
     }
+
+    /// Starts downloads while fewer than `COVER_DOWNLOADS` run.
+    fn download_covers(&self) {
+        loop {
+            let url = {
+                let mut state = self.imp().remote.borrow_mut();
+                if state.loading.len() >= COVER_DOWNLOADS {
+                    return;
+                }
+                let Some(url) = state.covers_wanted.pop_front() else {
+                    return;
+                };
+                if state.loading.contains(&url) {
+                    continue;
+                }
+                state.loading.insert(url.clone());
+                url
+            };
+            glib::spawn_future_local(glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                async move {
+                    let job_url = url.clone();
+                    let made = gtk::gio::spawn_blocking(move || {
+                        let key = remote_cover_key(&job_url);
+                        let covers = cover_cache();
+                        covers.has(&key)
+                            || gatefold_spotify::download_image(&job_url)
+                                .ok()
+                                .is_some_and(|data| covers.generate(&key, data).is_ok())
+                    })
+                    .await
+                    .unwrap_or(false);
+                    {
+                        let mut state = spotify.imp().remote.borrow_mut();
+                        state.loading.remove(&url);
+                        if !made {
+                            state.covers_failed.insert(url, Instant::now());
+                        }
+                    }
+                    if made {
+                        spotify.refresh_for_covers();
+                    }
+                    spotify.download_covers();
+                }
+            ));
+        }
+    }
+
+    /// Shows the songs again, now with their covers.
+    fn refresh_for_covers(&self) {
+        if std::mem::replace(&mut self.imp().remote.borrow_mut().covers_refresh, true) {
+            return;
+        }
+        glib::timeout_add_local_once(
+            COVER_REFRESH,
+            glib::clone!(
+                #[weak(rename_to = spotify)]
+                self,
+                move || {
+                    spotify.imp().remote.borrow_mut().covers_refresh = false;
+                    if spotify.soloist_receiving() {
+                        spotify.receiver_show(true);
+                    } else if GatefoldApplication::get().player().is_remote() {
+                        spotify.imp().remote.borrow_mut().queue_stale = true;
+                        spotify.poll_soon(Duration::ZERO);
+                    }
+                }
+            ),
+        );
+    }
+}
+
+fn remote_cover_key(url: &str) -> String {
+    gatefold_core::library::covers::cover_key('s', url.as_bytes())
+}
+
+fn cover_cache() -> gatefold_core::library::covers::CoverCache {
+    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir())
 }
 
 /// A stand-in track for a Spotify song that isn't in the library. Its ID

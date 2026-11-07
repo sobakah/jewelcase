@@ -843,7 +843,7 @@ impl Spotify {
 
     /// Shows Soloist's song (as the library song when it matches), its
     /// position and, with `queue`, what comes next.
-    fn receiver_show(&self, queue: bool) {
+    pub(super) fn receiver_show(&self, queue: bool) {
         let (current, status, position, upcoming, options) = {
             let state = &self.imp().stream.borrow().soloist;
             (

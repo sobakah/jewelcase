@@ -855,12 +855,22 @@ impl Player {
         }
         let changed = imp.current_track.borrow().as_ref().map(TrackObject::id)
             != track.as_ref().map(TrackObject::id);
+        // The same song again, now with its cover (downloaded meanwhile).
+        let new_cover = !changed
+            && imp
+                .current_track
+                .borrow()
+                .as_ref()
+                .and_then(|t| t.cover_key().map(str::to_owned))
+                != track
+                    .as_ref()
+                    .and_then(|t| t.cover_key().map(str::to_owned));
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
         imp.current_track.replace(track);
         if imp.duration.replace(duration) != duration {
             self.notify_duration();
         }
-        if changed {
+        if changed || new_cover {
             self.notify_current_track();
         }
         imp.remote_clock
