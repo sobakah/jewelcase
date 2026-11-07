@@ -30,6 +30,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/007_spotify.sql")),
     M::up(include_str!("db/008_streaming.sql")),
     M::up(include_str!("db/009_reread_spotify.sql")),
+    M::up(include_str!("db/010_larger_spotify_images.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.

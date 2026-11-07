@@ -21,6 +21,9 @@ use crate::config::APP_ID;
 
 /// The device name of a Soloist Gatefold starts.
 pub const DEVICE_NAME: &str = "Gatefold";
+/// Quiet reconnects to a running Soloist, and the wait before each.
+const RECONNECTS: u32 = 5;
+const RECONNECT_DELAY_S: u32 = 3;
 /// A song that hasn't started this long after asking is unavailable.
 const START_TIMEOUT_S: u32 = 10;
 
@@ -47,6 +50,9 @@ pub struct SoloistState {
     generation: u64,
     /// Shuffle and repeat were reset for this Soloist.
     prepared: bool,
+    /// Quiet attempts to reach a running Soloist again (soloistd restarts
+    /// it after a settings change or an update).
+    reconnects: u32,
 }
 
 impl Spotify {
@@ -181,9 +187,10 @@ impl Spotify {
             let state = &mut stream.soloist;
             state.generation += 1;
             let old = state.soloist.take();
-            let generation = state.generation;
+            let (generation, reconnects) = (state.generation, state.reconnects);
             *state = SoloistState {
                 generation,
+                reconnects,
                 ..SoloistState::default()
             };
             old
@@ -216,6 +223,7 @@ impl Spotify {
                     !logged_in && !std::mem::replace(&mut state.told_pairing, true)
                 };
                 if logged_in {
+                    self.imp().stream.borrow_mut().soloist.reconnects = 0;
                     self.set_stream_status("ready");
                 } else {
                     self.set_stream_status("pairing");
@@ -285,10 +293,38 @@ impl Spotify {
                 });
             }
             Event::Disconnected => {
-                if self.soloist().is_some() {
-                    self.soloist_gone("error");
-                    self.message(&gettext("Soloist can't be reached"));
+                if self.soloist().is_none() {
+                    return;
                 }
+                // A running Soloist (soloistd's) restarts now and then: try
+                // again quietly a few times before saying so.
+                let retry = {
+                    let mut stream = self.imp().stream.borrow_mut();
+                    let state = &mut stream.soloist;
+                    let attached = state.source != Some("gatefold");
+                    let retry = attached && state.reconnects < RECONNECTS;
+                    if retry {
+                        state.reconnects += 1;
+                    }
+                    retry
+                };
+                if retry {
+                    GatefoldApplication::get().player().stream_gone();
+                    self.soloist_stop();
+                    self.set_stream_status("connecting");
+                    glib::timeout_add_seconds_local_once(
+                        RECONNECT_DELAY_S,
+                        glib::clone!(
+                            #[weak(rename_to = spotify)]
+                            self,
+                            move || spotify.start_streaming()
+                        ),
+                    );
+                    return;
+                }
+                self.imp().stream.borrow_mut().soloist.reconnects = 0;
+                self.soloist_gone("error");
+                self.message(&gettext("Soloist can't be reached"));
             }
         }
     }

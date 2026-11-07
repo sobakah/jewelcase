@@ -69,7 +69,7 @@ pub struct Track {
     pub album_id: Option<String>,
     pub duration_ms: u64,
     pub isrc: Option<String>,
-    /// An album image about 300 px wide.
+    /// The largest album image (640 px).
     pub image_url: Option<String>,
     /// A local file in the user's Spotify app; can't be played or matched
     /// by ID.
@@ -238,15 +238,13 @@ fn string(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
 
-/// The image closest to 300 px wide (lists are largest first).
+/// The largest image (640 px for album covers): covers are scaled down
+/// from it, and the player shows them large.
 fn image(images: &Value) -> Option<String> {
     let images = images.as_array()?;
     images
         .iter()
-        .min_by_key(|image| {
-            let width = image["width"].as_i64().unwrap_or(300);
-            (width - 300).abs()
-        })
+        .max_by_key(|image| image["width"].as_i64().unwrap_or(0))
         .and_then(|image| string(&image["url"]))
 }
 
@@ -284,7 +282,7 @@ mod tests {
         assert_eq!(track.name, "Dynamite");
         assert_eq!(track.artists, ["BTS"]);
         assert_eq!(track.isrc.as_deref(), Some("USA2P2025832"));
-        assert_eq!(track.image_url.as_deref(), Some("mid"));
+        assert_eq!(track.image_url.as_deref(), Some("big"));
         assert!(track.is_playable);
         assert!(Track::parse(&json!({"type": "episode", "uri": "spotify:episode:x"})).is_none());
     }

@@ -97,7 +97,7 @@ pub struct Item {
     pub artists: Vec<String>,
     pub album: Option<String>,
     pub duration_ms: Option<u64>,
-    /// The "default" size cover, or any.
+    /// The largest cover.
     pub cover_url: Option<String>,
 }
 
@@ -111,10 +111,11 @@ impl Item {
                 .map(str::to_owned)
         };
         let covers = decorations["visual_identity"]["cover"].as_array();
+        // The largest: covers are shown large.
         let cover_url = covers.and_then(|covers| {
-            covers
+            ["xlarge", "large", "default", "small"]
                 .iter()
-                .find(|c| c["size"].as_str() == Some("default"))
+                .find_map(|size| covers.iter().find(|c| c["size"].as_str() == Some(size)))
                 .or_else(|| covers.first())
                 .and_then(|c| c["url"].as_str().map(str::to_owned))
         });
@@ -602,9 +603,9 @@ pub struct Running {
     pub port: u16,
 }
 
-/// Finds a Soloist that runs with its WebSocket API on: soloistd's
-/// (`websocket` in its config.json), or one using Soloist's default data
-/// folder (its runtime files).
+/// Finds the Soloist to use: soloistd's when its WebSocket API is on
+/// (`websocket` in its config.json), else one running with Soloist's
+/// default data folder (its runtime files).
 pub fn find_running() -> Option<Running> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let xdg = |var: &str, fallback: &str| {
@@ -612,15 +613,12 @@ pub fn find_running() -> Option<Running> {
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(fallback))
     };
+    // soloistd with its WebSocket on: its Soloist, even while it's just
+    // restarting (connecting waits for it).
     let config = soloistd_config();
     if let Some((addr, port)) = std::fs::read_to_string(&config)
         .ok()
         .and_then(|text| soloistd_websocket(&text))
-        && TcpStream::connect_timeout(
-            &std::net::SocketAddr::new(addr.parse().ok()?, port),
-            Duration::from_millis(300),
-        )
-        .is_ok()
     {
         return Some(Running {
             source: "soloistd",

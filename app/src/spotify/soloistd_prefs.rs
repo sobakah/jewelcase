@@ -247,6 +247,8 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
         refresh,
         move |change: ConfigChange| {
             let refresh = refresh.clone();
+            // Let go first: the restart closes the connection anyway.
+            spotify.soloist_stop();
             glib::spawn_future_local(async move {
                 let result = gio::spawn_blocking(move || {
                     let mut config = Config::load().ok_or("soloistd's config can't be read")?;
@@ -363,6 +365,9 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
         refresh,
         move |action: &'static str| {
             let refresh = refresh.clone();
+            if action != "start" {
+                spotify.soloist_stop();
+            }
             glib::spawn_future_local(async move {
                 let result = gio::spawn_blocking(move || soloistd::control_service(action))
                     .await
