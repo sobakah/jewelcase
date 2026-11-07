@@ -77,17 +77,20 @@ mod imp {
                 });
             self.analyzer.set(analyzer).expect("set once");
             self.player.set(player.clone()).expect("set once");
-            player.restore();
-            crate::mpris::start(&app, &player);
-
+            // Before the queue: a restored Spotify song asks for it.
             let spotify = crate::spotify::Spotify::new();
             self.spotify.set(spotify.clone()).expect("set once");
+            player.restore();
+            crate::mpris::start(&app, &player);
             spotify.start();
         }
 
         fn shutdown(&self) {
             if let Some(player) = self.player.get() {
                 player.save();
+            }
+            if let Some(spotify) = self.spotify.get() {
+                spotify.shutdown_streaming();
             }
             self.parent_shutdown();
         }

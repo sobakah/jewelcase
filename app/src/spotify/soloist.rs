@@ -32,6 +32,9 @@ pub struct SoloistState {
     /// Its name in Spotify's device lists (hidden from Play On…).
     pub(super) device_name: Option<String>,
     logged_in: bool,
+    /// The active Spotify Connect device (else it's made so before playing:
+    /// after a restart, or when the phone played meanwhile).
+    is_active: bool,
     told_pairing: bool,
     /// What Gatefold asked to play, and whether it's playing now.
     wanted: Option<String>,
@@ -63,11 +66,23 @@ impl Spotify {
 
     async fn soloist_connect(&self) {
         self.set_stream_status("connecting");
-        // A running one (soloistd's, or the user's own).
-        let running = gtk::gio::spawn_blocking(gatefold_soloist::find_running)
-            .await
-            .ok()
-            .flatten();
+        // A running one: soloistd's or the user's own, or one Gatefold
+        // started before and that's still there.
+        let own_dir = glib::user_data_dir().join(APP_ID).join("soloist");
+        let running = gtk::gio::spawn_blocking(move || {
+            gatefold_soloist::find_running().or_else(|| {
+                let (addr, port) = gatefold_soloist::runtime_address(&own_dir)?;
+                std::net::TcpStream::connect((addr.as_str(), port)).ok()?;
+                Some(gatefold_soloist::Running {
+                    source: "gatefold",
+                    addr,
+                    port,
+                })
+            })
+        })
+        .await
+        .ok()
+        .flatten();
         let (soloist, events, source) = match running {
             Some(running) => {
                 tracing::info!(
@@ -149,6 +164,16 @@ impl Spotify {
         ));
     }
 
+    /// Gatefold quits: a Soloist it started stops (and waits for it).
+    pub fn shutdown_streaming(&self) {
+        let old = self.imp().stream.borrow_mut().soloist.soloist.take();
+        if let Some(old) = old
+            && let Ok(old) = Rc::try_unwrap(old)
+        {
+            old.shutdown();
+        }
+    }
+
     /// Stops using Soloist (one Gatefold started is stopped too).
     pub(super) fn soloist_stop(&self) {
         let old = {
@@ -179,13 +204,14 @@ impl Spotify {
             Event::Connected => {}
             Event::Auth {
                 logged_in,
+                is_active,
                 device_name,
-                ..
             } => {
                 let first_pairing = {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
                     state.logged_in = logged_in;
+                    state.is_active = is_active;
                     state.device_name = device_name.clone();
                     !logged_in && !std::mem::replace(&mut state.told_pairing, true)
                 };
@@ -204,12 +230,19 @@ impl Spotify {
                     }
                 }
             }
+            Event::Device { is_active } => {
+                self.imp().stream.borrow_mut().soloist.is_active = is_active;
+            }
             Event::Playback {
                 status,
                 item,
                 position,
+                is_active,
                 ..
             } => {
+                if let Some(is_active) = is_active {
+                    self.imp().stream.borrow_mut().soloist.is_active = is_active;
+                }
                 if let Some(position) = position {
                     self.imp().stream.borrow_mut().soloist.position = Some(position);
                 }
@@ -351,9 +384,10 @@ impl Spotify {
             stream.soloist.started = false;
             return;
         }
-        let (prepare, generation) = {
+        let (prepare, generation, active) = {
             let mut stream = self.imp().stream.borrow_mut();
             let state = &mut stream.soloist;
+            let active = std::mem::replace(&mut state.is_active, true);
             state.pending = None;
             state.wanted = Some(uri.to_owned());
             state.started = false;
@@ -362,8 +396,13 @@ impl Spotify {
             (
                 !std::mem::replace(&mut state.prepared, true),
                 state.generation,
+                active,
             )
         };
+        // Linked once, but maybe not the active device right now.
+        if !active {
+            soloist.activate();
+        }
         // Gatefold's queue decides what comes next, not Soloist's.
         if prepare {
             soloist.set_shuffle(false);

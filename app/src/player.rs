@@ -947,6 +947,20 @@ impl Player {
 
     fn load_stream(&self, track: &TrackObject, play: bool, start_ms: u64) {
         let imp = self.imp();
+        // Not playing yet (a restored queue): it waits for "play", by when
+        // streaming has connected; play_pause() then loads it.
+        if !play {
+            if imp.streaming.replace(false) {
+                self.spotify().stream_stop();
+            }
+            if let Some(engine) = self.engine() {
+                engine.stop();
+            }
+            self.set_position(start_ms);
+            self.set_state(State::Stopped);
+            self.emit_by_name::<()>("seeked", &[]);
+            return;
+        }
         let spotify = self.spotify();
         let uri = self.stream_uri(track);
         let (Some(uri), true) = (uri, spotify.can_stream()) else {

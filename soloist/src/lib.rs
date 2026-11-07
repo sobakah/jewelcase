@@ -12,6 +12,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -199,6 +200,11 @@ pub enum Event {
         item: Option<Item>,
         position: Option<Position>,
         volume: Option<u8>,
+        is_active: Option<bool>,
+    },
+    /// Soloist became (or stopped being) the active Connect device.
+    Device {
+        is_active: bool,
     },
     TrackChanged(Option<Item>),
     Status(Status),
@@ -232,6 +238,10 @@ impl Event {
                 item: Item::parse(&value["item"]),
                 position: Position::parse(&value["position"]),
                 volume: volume(&value["volume"]),
+                is_active: value["is_active"].as_bool(),
+            },
+            "device_changed" => Self::Device {
+                is_active: value["is_active"].as_bool().unwrap_or(false),
             },
             "track_changed" => Self::TrackChanged(Item::parse(&value["item"])),
             "playback_changed" => Self::Status(Status::parse(&value["status"])?),
@@ -278,7 +288,16 @@ impl Soloist {
         for name in ["ws.port", "ws.addr"] {
             let _ = std::fs::remove_file(config.data_dir.join(name));
         }
-        let mut child = Command::new(&config.binary)
+        let mut command = Command::new(&config.binary);
+        // If Gatefold dies without stopping it, so does Soloist (Linux).
+        // SAFETY: prctl is async-signal-safe; nothing else runs here.
+        unsafe {
+            command.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+        let mut child = command
             .arg("--device-name")
             .arg(&config.device_name)
             .arg("--api-key")
@@ -431,10 +450,12 @@ impl Soloist {
         let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(mut child) = child {
             // SIGTERM first, so Soloist can remove its runtime files.
-            let _ = Command::new("kill")
-                .arg(child.id().to_string())
-                .stdin(Stdio::null())
-                .status();
+            if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+                // SAFETY: a plain signal to our own child.
+                unsafe {
+                    libc::kill(pid, libc::SIGTERM);
+                }
+            }
             let start = Instant::now();
             while start.elapsed() < Duration::from_secs(3) {
                 if child.try_wait().ok().flatten().is_some() {
@@ -573,7 +594,7 @@ fn connect_to(addr: &str, port: u16) -> Option<WebSocket<TcpStream>> {
 /// and its WebSocket address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
-    /// "soloistd" or "soloist".
+    /// "soloistd", "soloist", or "gatefold" (one Gatefold started earlier).
     pub source: &'static str,
     pub addr: String,
     pub port: u16,
@@ -663,6 +684,7 @@ mod tests {
             item: Some(item),
             position: Some(position),
             volume,
+            is_active,
         }) = Event::parse(snapshot)
         else {
             panic!("not a snapshot");
@@ -675,6 +697,11 @@ mod tests {
         assert_eq!(item.cover_url.as_deref(), Some("d"));
         assert_eq!(position.position_ms, 45_000);
         assert_eq!(volume, Some(65));
+        assert_eq!(is_active, Some(true));
+        assert_eq!(
+            Event::parse(r#"{"type":"device_changed","is_active":false,"device_name":"G"}"#),
+            Some(Event::Device { is_active: false })
+        );
         assert_eq!(
             Event::parse(
                 r#"{"type":"auth_state","logged_in":false,"is_active":false,"device_name":"G"}"#
