@@ -80,7 +80,15 @@ mod imp {
         #[template_child]
         pub playlist_split: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
-        pub playlist_grid: TemplateChild<gtk::GridView>,
+        pub playlist_grid: TemplateChild<gtk::FlowBox>,
+        #[template_child]
+        pub followed_grid: TemplateChild<gtk::FlowBox>,
+        #[template_child]
+        pub followed_toggle: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub followed_content: TemplateChild<adw::ButtonContent>,
+        #[template_child]
+        pub followed_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub playlist_panel: TemplateChild<PlaylistPanel>,
         pub settings: OnceCell<gio::Settings>,
@@ -519,68 +527,94 @@ impl GatefoldWindow {
     fn setup_playlists(&self) {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
-        // Followed Spotify playlists (Spotify doesn't show their songs) come
-        // last, and only when asked for.
+        // Own playlists, and below them, collapsed by default, followed
+        // Spotify playlists (Spotify doesn't show their songs, §9.5).
         let settings = self.settings();
-        let readable = gtk::CustomFilter::new(|item| {
-            item.downcast_ref::<PlaylistObject>()
-                .is_some_and(|p| p.playlist().readable)
-        });
-        let followed = gtk::CustomFilter::new(glib::clone!(
+        let readable = gtk::FilterListModel::new(
+            Some(library.playlists().clone()),
+            Some(gtk::CustomFilter::new(|item| {
+                item.downcast_ref::<PlaylistObject>()
+                    .is_some_and(|p| p.playlist().readable)
+            })),
+        );
+        let followed = gtk::FilterListModel::new(
+            Some(library.playlists().clone()),
+            Some(gtk::CustomFilter::new(|item| {
+                item.downcast_ref::<PlaylistObject>()
+                    .is_some_and(|p| !p.playlist().readable)
+            })),
+        );
+        let tile = |item: &glib::Object| -> gtk::Widget {
+            let tile = PlaylistTile::new();
+            if let Some(playlist) = item.downcast_ref::<PlaylistObject>() {
+                tile.bind(playlist);
+                tile.update_property(&[gtk::accessible::Property::Label(
+                    &playlist.playlist().name,
+                )]);
+            }
+            tile.upcast()
+        };
+        imp.playlist_grid.bind_model(Some(&readable), tile);
+        imp.followed_grid.bind_model(Some(&followed), tile);
+        for (grid, model) in [
+            (imp.playlist_grid.get(), readable.clone()),
+            (imp.followed_grid.get(), followed.clone()),
+        ] {
+            grid.connect_child_activated(move |grid, child| {
+                let Some(playlist) = model
+                    .item(child.index() as u32)
+                    .and_downcast::<PlaylistObject>()
+                else {
+                    return;
+                };
+                if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
+                    window.show_playlist(&playlist);
+                }
+            });
+        }
+        let toggle = imp.followed_toggle.get();
+        let content = imp.followed_content.get();
+        let revealer = imp.followed_revealer.get();
+        let update_toggle = glib::clone!(
+            #[weak]
+            toggle,
+            #[weak]
+            content,
+            #[weak]
+            revealer,
             #[strong]
             settings,
-            move |item| {
-                settings.boolean("show-followed-playlists")
-                    && item
-                        .downcast_ref::<PlaylistObject>()
-                        .is_some_and(|p| !p.playlist().readable)
+            move |followed: &gtk::FilterListModel| {
+                let count = followed.n_items();
+                let open = settings.boolean("show-followed-playlists");
+                toggle.set_visible(count > 0);
+                // Translators: {} is a number of playlists.
+                content.set_label(
+                    &gettext("Followed Playlists ({})").replace("{}", &count.to_string()),
+                );
+                content.set_icon_name(if open {
+                    "pan-down-symbolic"
+                } else {
+                    "pan-end-symbolic"
+                });
+                revealer.set_reveal_child(open && count > 0);
             }
-        ));
-        let parts = gio::ListStore::new::<gio::ListModel>();
-        parts.append(&gtk::FilterListModel::new(
-            Some(library.playlists().clone()),
-            Some(readable),
-        ));
-        parts.append(&gtk::FilterListModel::new(
-            Some(library.playlists().clone()),
-            Some(followed.clone()),
-        ));
+        );
+        update_toggle(&followed);
+        let on_items = update_toggle.clone();
+        followed.connect_items_changed(move |followed, _, _, _| on_items(followed));
+        let on_setting = followed.clone();
         settings.connect_changed(Some("show-followed-playlists"), move |_, _| {
-            followed.changed(gtk::FilterChange::Different);
+            update_toggle(&on_setting);
         });
-        self.add_action(&settings.create_action("show-followed-playlists"));
-        imp.playlist_grid
-            .set_model(Some(&gtk::NoSelection::new(Some(
-                gtk::FlattenListModel::new(Some(parts)),
-            ))));
-        let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            item.set_child(Some(&PlaylistTile::new()));
-        });
-        factory.connect_bind(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            if let (Some(tile), Some(playlist)) = (
-                item.child().and_downcast::<PlaylistTile>(),
-                item.item().and_downcast::<PlaylistObject>(),
-            ) {
-                tile.bind(&playlist);
-                item.set_accessible_label(&playlist.playlist().name);
+        toggle.connect_clicked(glib::clone!(
+            #[strong]
+            settings,
+            move |_| {
+                let open = settings.boolean("show-followed-playlists");
+                let _ = settings.set_boolean("show-followed-playlists", !open);
             }
-        });
-        imp.playlist_grid.set_factory(Some(&factory));
-        imp.playlist_grid.connect_activate(|grid, position| {
-            let Some(playlist) = grid
-                .model()
-                .and_then(|m| m.item(position))
-                .and_downcast::<PlaylistObject>()
-            else {
-                return;
-            };
-            if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
-                window.show_playlist(&playlist);
-            }
-        });
+        ));
         imp.playlist_panel.connect_local(
             "close",
             false,

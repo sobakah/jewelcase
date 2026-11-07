@@ -19,7 +19,8 @@
   padding: 12px;
 }
 
-.album-grid > child {
+.album-grid > child,
+.playlist-flow > flowboxchild {
   padding: 9px;
   border-radius: 15px;
 }

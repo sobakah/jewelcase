@@ -432,14 +432,60 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                       content: Gtk.ScrolledWindow {
                         hscrollbar-policy: never;
 
-                        child: Gtk.GridView playlist_grid {
-                          max-columns: 12;
-                          min-columns: 2;
-                          single-click-activate: true;
+                        child: Gtk.Box {
+                          orientation: vertical;
 
                           styles [
                             "album-grid",
                           ]
+
+                          Gtk.FlowBox playlist_grid {
+                            max-children-per-line: 12;
+                            min-children-per-line: 2;
+                            homogeneous: true;
+                            selection-mode: none;
+                            activate-on-single-click: true;
+                            valign: start;
+
+                            styles [
+                              "playlist-flow",
+                            ]
+                          }
+
+                          // Others' Spotify playlists: Spotify doesn't show
+                          // their songs (CONCEPT.md §9.5).
+                          Gtk.Button followed_toggle {
+                            halign: start;
+                            margin-start: 9;
+                            margin-top: 18;
+                            visible: false;
+
+                            child: Adw.ButtonContent followed_content {
+                              icon-name: "pan-end-symbolic";
+                            };
+
+                            styles [
+                              "flat",
+                              "heading",
+                            ]
+                          }
+
+                          Gtk.Revealer followed_revealer {
+                            transition-type: slide_down;
+
+                            child: Gtk.FlowBox followed_grid {
+                              max-children-per-line: 12;
+                              min-children-per-line: 2;
+                              homogeneous: true;
+                              selection-mode: none;
+                              activate-on-single-click: true;
+                              valign: start;
+
+                              styles [
+                                "playlist-flow",
+                              ]
+                            };
+                          }
                         };
                       };
 
@@ -484,13 +530,6 @@ menu playlist_menu {
     }
   }
 
-  // Others' Spotify playlists: Spotify doesn't show their songs (§9.5).
-  section {
-    item {
-      label: _("Show _Followed Playlists");
-      action: "win.show-followed-playlists";
-    }
-  }
 }
 
 menu sort_menu {
