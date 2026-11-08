@@ -34,6 +34,14 @@ mod imp {
         /// Bar width as part of each bar's slot (the rest is the gap).
         #[property(get, set, minimum = 0.1, maximum = 1.0, default = 0.6)]
         pub fill: Cell<f64>,
+        /// Above 0: as many bars as fit (each slot this wide, in pixels),
+        /// from `min-bars` to `max-bars`, centered in the space given.
+        #[property(get, set, minimum = 0.0, maximum = 64.0, default = 0.0)]
+        pub slot: Cell<f64>,
+        #[property(get, set, minimum = 1, maximum = 128, default = 4)]
+        pub min_bars: Cell<u32>,
+        #[property(get, set, minimum = 1, maximum = 128, default = 24)]
+        pub max_bars: Cell<u32>,
         pub levels: RefCell<Vec<f32>>,
         pub tick: RefCell<Option<gtk::TickCallbackId>>,
         pub last_frame: Cell<i64>,
@@ -46,6 +54,9 @@ mod imp {
             Self {
                 bars: Cell::new(32),
                 fill: Cell::new(0.6),
+                slot: Cell::new(0.0),
+                min_bars: Cell::new(4),
+                max_bars: Cell::new(24),
                 levels: RefCell::new(vec![0.0; 32]),
                 tick: RefCell::default(),
                 last_frame: Cell::new(0),
@@ -119,6 +130,32 @@ mod imp {
     }
 
     impl WidgetImpl for Visualizer {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let slot = self.slot.get();
+            if orientation == gtk::Orientation::Horizontal && slot > 0.0 {
+                let min = (self.min_bars.get() as f64 * slot).ceil() as i32;
+                let natural = (self.max_bars.get() as f64 * slot).ceil() as i32;
+                (min, natural, -1, -1)
+            } else {
+                (0, 0, -1, -1)
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            self.parent_size_allocate(width, height, baseline);
+            let slot = self.slot.get();
+            if slot > 0.0 {
+                let fits = (width as f64 / slot) as u32;
+                let bars = fits.clamp(
+                    self.min_bars.get(),
+                    self.max_bars.get().max(self.min_bars.get()),
+                );
+                if bars != self.bars.get() {
+                    self.set_bars(bars);
+                }
+            }
+        }
+
         fn map(&self) {
             self.parent_map();
             self.obj().update_running();
@@ -138,11 +175,21 @@ mod imp {
                 return;
             }
             let color = obj.color();
-            let slot = width / count;
+            // Fixed slots are centered; otherwise the bars fill the width.
+            let (slot, start) = match self.slot.get() as f32 {
+                fixed if fixed > 0.0 => (fixed, (width - fixed * count) / 2.0),
+                _ => (width / count, 0.0),
+            };
             let bar = (slot * self.fill.get() as f32).max(1.0);
+            // Fitted bars grow taller with their number (wider space).
+            let full = if self.slot.get() > 0.0 {
+                height.min(16.0 + 1.2 * count)
+            } else {
+                height
+            };
             for (i, &level) in levels.iter().enumerate() {
-                let h = (REST + (1.0 - REST) * level) * height;
-                let x = i as f32 * slot + (slot - bar) / 2.0;
+                let h = (REST + (1.0 - REST) * level) * full;
+                let x = start + i as f32 * slot + (slot - bar) / 2.0;
                 let y = (height - h) / 2.0;
                 let rect = graphene::Rect::new(x, y, bar, h);
                 let radius = bar.min(h) / 2.0;

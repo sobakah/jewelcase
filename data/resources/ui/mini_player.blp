@@ -25,19 +25,9 @@ template $GatefoldMiniPlayer: Adw.Bin {
         valign: center;
       }
 
-      // A few bars, like a "now playing" sign driven by the music.
-      $GatefoldVisualizer {
-        bars: 4;
-        fill: 0.6;
-        width-request: 20;
-        height-request: 22;
-        valign: center;
-      }
-
       Gtk.Box text_box {
         orientation: vertical;
         valign: center;
-        hexpand: true;
         width-request: 180;
 
         Gtk.Box {
@@ -74,6 +64,17 @@ template $GatefoldMiniPlayer: Adw.Bin {
             "caption",
           ]
         }
+      }
+
+      // The music as bars, in the space between the song and the
+      // controls: as many as fit (more and taller in a wide window).
+      $GatefoldVisualizer {
+        slot: 7;
+        fill: 0.6;
+        min-bars: 4;
+        max-bars: 24;
+        hexpand: true;
+        height-request: 22;
       }
 
       Gtk.Box {
