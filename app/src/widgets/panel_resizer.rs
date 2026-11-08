@@ -88,48 +88,70 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
     });
 
     let drag = gtk::GestureDrag::new();
-    let start = std::rc::Rc::new(std::cell::Cell::new(0));
+    // Where in the handle it was grabbed, and the width the drag asks for.
+    let grab = std::rc::Rc::new(std::cell::Cell::new(0.0));
+    let wanted = std::rc::Rc::new(std::cell::Cell::new(None::<i32>));
     // While dragging, only the panel changes: the grid behind keeps its
     // width and reflows once at the end, instead of on every motion.
     let begin_stable = stable.clone();
     let cancel_stable = stable.clone();
     drag.connect_drag_begin(glib::clone!(
-        #[weak]
-        overlay,
         #[strong]
-        start,
-        move |_, _, _| {
-            start.set(overlay.width());
+        grab,
+        #[strong]
+        wanted,
+        move |_, x, _| {
+            grab.set(x);
+            wanted.set(None);
             if let Some(stable) = &begin_stable {
                 stable.set_frozen(true);
             }
         }
     ));
-    let clamp = glib::clone!(
+    // The pointer is measured in the split view, which stays put. The
+    // handle moves with the panel's edge: offsets relative to it changed
+    // with every resize, and a held edge flipped between two widths on
+    // alternate frames (the panel looked doubled).
+    let width_at = glib::clone!(
         #[weak]
         split,
+        #[weak]
+        handle,
+        #[strong]
+        grab,
         #[upgrade_or]
-        MIN_WIDTH,
-        move |width: f64| {
+        None,
+        move |gesture: &gtk::GestureDrag| {
+            let sequence = gesture.current_sequence();
+            let (x, y) = gesture.point(sequence.as_ref())?;
+            let point =
+                handle.compute_point(&split, &gtk::graphene::Point::new(x as f32, y as f32))?;
+            // The handle is on the panel's left edge: left widens it.
+            let edge = f64::from(point.x()) - grab.get();
+            let width = f64::from(split.width()) - edge;
             let max = (split.width() - MIN_CONTENT).max(MIN_WIDTH);
-            (width as i32).clamp(MIN_WIDTH, max)
+            Some((width as i32).clamp(MIN_WIDTH, max))
         }
     );
-    let update_clamp = clamp.clone();
     drag.connect_drag_update(glib::clone!(
         #[strong]
-        start,
-        move |_, dx, _| {
-            // The handle is on the panel's left edge: dragging left widens it.
-            apply(update_clamp(f64::from(start.get()) - dx));
+        wanted,
+        move |gesture, _, _| {
+            if let Some(width) = width_at(gesture)
+                && wanted.get() != Some(width)
+            {
+                wanted.set(Some(width));
+                apply(width);
+            }
         }
     ));
     drag.connect_drag_end(glib::clone!(
         #[strong]
         settings,
-        move |_, dx, _| {
-            let width = clamp(f64::from(start.get()) - dx);
-            let _ = settings.set_int(KEY, width);
+        move |_, _, _| {
+            if let Some(width) = wanted.take() {
+                let _ = settings.set_int(KEY, width);
+            }
             if let Some(stable) = &stable {
                 stable.set_frozen(false);
             }
