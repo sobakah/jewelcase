@@ -7,7 +7,7 @@
 |---|---|
 | Name | **Gatefold**, app ID `io.github.sobakah.Gatefold`, command `gatefold` (§12) |
 | Language / library | Rust; own scanner + SQLite |
-| Album details | Side panel (`AdwOverlaySplitView`); only artists get their own page |
+| Album details | Side panel (a sliding panel like `AdwOverlaySplitView`); only artists get their own page |
 | Metadata source | **Local tags are the source of truth.** Online data only adds what tags can't hold (portraits, links, bios). |
 | Spotify | Links, remote control, streaming (librespot), **Spotify playlists with local substitution**, mixed playlists, **two-way editing** of owned Spotify playlists (§9.6) |
 | lyrembed / cdimport | Started as external programs; their pages open **in the default browser**; no GTK port planned |
@@ -170,9 +170,11 @@ Two top-level modes: **Library** and **Player**. They're connected through libad
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Albums**: `GtkGridView` of covers. Each tile shows **only cover, album title and album artist** (one line each, ellipsized). There's no size slider: the cover size adapts to the window width, so the columns always fill the row. Sortable by artist, title, year or date added, with filters (release type, genre, soundtracks, compilations). Clicking a cover opens the **detail side panel** (`AdwOverlaySplitView`, sidebar on the end side). Nothing is pushed as a new page.
+- **Albums**: `GtkGridView` of covers. Each tile shows **only cover, album title and album artist** (one line each, ellipsized). There's no size slider: the cover size adapts to the window width, so the columns always fill the row. Sortable by artist, title, year or date added, with filters (release type, genre, soundtracks, compilations). Clicking a cover opens the **detail side panel** (sidebar on the end side). Nothing is pushed as a new page.
 - **Side panels** (album, playlist, artist page) borrow the player's look: the cover (the portrait on artist pages), blurred and tinted with its dominant color, behind the top of the panel, fading into the normal background before the songs. On the wide artist page it's a lower band (380 px) and blurred twice as much, so the portrait's shapes don't show.
-- Side panels have no close button: a grip on their left edge, halfway down (the player's drag handle, upright), closes them.
+- Side panels have no close button: a grip on their left edge, halfway down (the player's grip, upright), closes them. The player's grip on top is clicked the same way to hide the player (and can still be dragged down); all grips share one look and grow a little under the pointer.
+- **Sliding panels** (November 2026): every side panel (album and playlist panels, the artist page, the album panel on an artist page) slides like a record sleeve pushed in, in one widget (`SlideView`) so they all move alike: a spring a little slower than libadwaita's that runs about 4 % past its place and settles back (drawn a little wider meanwhile, not laid out again), and slides out without a bounce; a soft shadow on its leading edge. Beside the content or over it (narrow windows, artist pages), where the content is dimmed and a click on it or Escape closes the panel. The content takes its final width once, not on every frame. The player's sheet still slides with libadwaita's own animation, which can't be changed.
+- On an artist page an album's panel covers the page's whole height, from the top bar down, as in the library.
 - **Album detail panel**: large cover, title, edition subtitle (§3.4, plus the list of owned versions when editions were merged), album artist(s) as links (→ artist page), year, length, actions (Play, Shuffle, Add to queue, Play next, Add to playlist). Below that is the tracklist, grouped by disc.
 - **Songs expand in place**: clicking a track row's chevron opens a `GtkRevealer` under the row with track artists/featuring, composer, genre, BPM, format/bitrate/sample rate, a lyrics-available indicator with a short excerpt, and actions (Play next, Add to queue, Add to playlist, Go to artist). Double-click or Enter plays the track.
 - **Narrow windows** (`AdwBreakpoint` < ~700 px): the side panel turns into an overlay sheet that covers the grid, and the mini bar stays visible.

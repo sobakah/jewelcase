@@ -8,35 +8,35 @@ template $GatefoldArtistPage: Adw.Bin {
     "artist-panel",
   ]
 
-  // A grip on the left edge, like the one on top of the player, closes
-  // the page: it slides back to the right (CONCEPT.md §4.2).
-  child: Gtk.Overlay {
-    // The cover, blurred, behind the top of the panel (like the player).
-    child: $GatefoldCoverBackdrop backdrop {
-      child: Adw.ToolbarView {
-        [top]
-        Adw.HeaderBar {
-          show-title: false;
-          show-start-title-buttons: false;
-          show-end-title-buttons: false;
+  // An album opens in a panel over the whole height of the page, from
+  // its top edge (like the album panel in the library).
+  child: $GatefoldSlideView split_view {
+    show-sidebar: false;
+    min-sidebar-width: 320;
+    max-sidebar-width: 440;
+    sidebar-width-fraction: 0.38;
+    // A grip on the left edge, like the one on top of the player, closes
+    // the page: it slides back to the right (CONCEPT.md §4.2).
+    content: Gtk.Overlay {
+      // The cover, blurred, behind the top of the panel (like the player).
+      child: $GatefoldCoverBackdrop backdrop {
+        child: Adw.ToolbarView {
+          [top]
+          Adw.HeaderBar {
+            show-title: false;
+            show-start-title-buttons: false;
+            show-end-title-buttons: false;
 
-          styles [
-            "flat",
-          ]
-        }
+            styles [
+              "flat",
+            ]
+          }
 
-        [top]
-        Adw.Banner identify_banner {
-          button-label: _("_Identify…");
-          action-name: "artist.identify";
-        }
-
-        content: Adw.OverlaySplitView split_view {
-          sidebar-position: end;
-          show-sidebar: false;
-          min-sidebar-width: 320;
-          max-sidebar-width: 440;
-          sidebar-width-fraction: 0.38;
+          [top]
+          Adw.Banner identify_banner {
+            button-label: _("_Identify…");
+            action-name: "artist.identify";
+          }
 
           content: Gtk.ScrolledWindow {
             hscrollbar-policy: never;
@@ -184,7 +184,6 @@ template $GatefoldArtistPage: Adw.Bin {
                       line-spacing: 6;
                       margin-top: 6;
                       visible: false;
-
                       // Following on Spotify (when Gatefold knows the artist there).
                       Gtk.Button follow_button {
                         action-name: "artist.toggle-follow";
@@ -236,36 +235,36 @@ template $GatefoldArtistPage: Adw.Bin {
               };
             };
           };
-
-          sidebar: $GatefoldAlbumPanel album_panel {};
         };
       };
-    };
 
-    [overlay]
-    Gtk.Button {
-      tooltip-text: _("Close");
-      action-name: "artist.close";
-      halign: start;
-      valign: center;
-
-      accessibility {
-        label: _("Close");
-      }
-
-      child: Gtk.Box {
-        halign: center;
+      [overlay]
+      Gtk.Button {
+        tooltip-text: _("Close");
+        action-name: "artist.close";
+        halign: start;
         valign: center;
 
-        styles [
-          "grip",
-        ]
-      };
+        accessibility {
+          label: _("Close");
+        }
 
-      styles [
-        "panel-close-handle",
-      ]
-    }
+        child: Gtk.Box {
+          halign: center;
+          valign: center;
+
+          styles [
+            "grip",
+          ]
+        };
+
+        styles [
+          "panel-close-handle",
+        ]
+      }
+    };
+
+    sidebar: $GatefoldAlbumPanel album_panel {};
   };
 }
 

@@ -36,6 +36,8 @@ template $GatefoldWindow: Adw.ApplicationWindow {
     // the player sheet only as wide as it needs (CONCEPT.md §4.3).
     child: Adw.BottomSheet bottom_sheet {
       full-width: false;
+      // The player draws its own grip, which can also be clicked.
+      show-drag-handle: false;
       // The mini player floats over the content (window.rs keeps the
       // switcher bar clear of it on narrow windows).
       content: Adw.ToolbarView library_toolbar {
@@ -259,8 +261,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                 Gtk.StackPage {
                   name: "albums";
 
-                  child: Adw.OverlaySplitView split_view {
-                    sidebar-position: end;
+                  child: $GatefoldSlideView split_view {
                     show-sidebar: false;
                     min-sidebar-width: 320;
                     max-sidebar-width: 440;
@@ -280,9 +281,8 @@ template $GatefoldWindow: Adw.ApplicationWindow {
               title: _("Artists");
               icon-name: "avatar-default-symbolic";
               // Artist pages open over most of the grid (CONCEPT.md §4.2).
-              child: Adw.OverlaySplitView artist_split {
+              child: $GatefoldSlideView artist_split {
                 collapsed: true;
-                sidebar-position: end;
                 show-sidebar: false;
                 min-sidebar-width: 360;
                 max-sidebar-width: 968;
@@ -403,8 +403,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                 Gtk.StackPage {
                   name: "playlists";
 
-                  child: Adw.OverlaySplitView playlist_split {
-                    sidebar-position: end;
+                  child: $GatefoldSlideView playlist_split {
                     show-sidebar: false;
                     min-sidebar-width: 320;
                     max-sidebar-width: 440;

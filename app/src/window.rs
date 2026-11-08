@@ -50,7 +50,7 @@ mod imp {
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub split_view: TemplateChild<adw::OverlaySplitView>,
+        pub split_view: TemplateChild<crate::widgets::SlideView>,
         #[template_child]
         pub album_grid: TemplateChild<crate::widgets::SectionedGrid>,
         #[template_child]
@@ -64,7 +64,7 @@ mod imp {
         #[template_child]
         pub analysis_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub artist_split: TemplateChild<adw::OverlaySplitView>,
+        pub artist_split: TemplateChild<crate::widgets::SlideView>,
         #[template_child]
         pub artist_holder: TemplateChild<adw::Bin>,
         #[template_child]
@@ -84,7 +84,7 @@ mod imp {
         #[template_child]
         pub playlists_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub playlist_split: TemplateChild<adw::OverlaySplitView>,
+        pub playlist_split: TemplateChild<crate::widgets::SlideView>,
         #[template_child]
         pub playlist_grid: TemplateChild<gtk::FlowBox>,
         #[template_child]
@@ -120,6 +120,7 @@ mod imp {
             PlaylistPanel::ensure_type();
             SearchView::ensure_type();
             crate::widgets::SectionedGrid::ensure_type();
+            crate::widgets::SlideView::ensure_type();
             klass.bind_template();
 
             klass.install_action("win.open-player", None, |win, _, _| {
@@ -1560,7 +1561,8 @@ impl GatefoldWindow {
     /// passed as int64 IDs), e.g. `win.open-player win.show-playlist::1`.
     /// `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album and
     /// `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
-    /// opens an artist page; `GATEFOLD_SCREENSHOT_PANEL_ACTIONS` runs album
+    /// opens an artist page (`GATEFOLD_SCREENSHOT_ARTIST_ALBUM=1` then opens
+    /// its first album); `GATEFOLD_SCREENSHOT_PANEL_ACTIONS` runs album
     /// panel actions (`panel.add-to-playlist`);
     /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
     /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
@@ -1689,6 +1691,16 @@ impl GatefoldWindow {
                         if !done {
                             tracing::warn!("Screenshot page action {action}: not found");
                         }
+                    }
+                });
+            }
+            // `GATEFOLD_SCREENSHOT_ARTIST_ALBUM=1`: 3 s later, the artist
+            // page opens its first album.
+            if std::env::var_os("GATEFOLD_SCREENSHOT_ARTIST_ALBUM").is_some() {
+                let window = window.clone();
+                glib::timeout_add_seconds_local_once(3, move || {
+                    if let Some(page) = window.artist_page() {
+                        page.open_first_album();
                     }
                 });
             }
@@ -2053,10 +2065,10 @@ pub fn button_toast(message: &str, label: &str, timeout: u32, clicked: impl Fn()
     window.imp().toast_overlay.add_toast(toast);
 }
 
-/// Shows a split view's sidebar. Revealing it before the split view has had
-/// its first allocation (its page was just made visible) makes it hand the
-/// sidebar a bogus negative width, so then wait for one frame.
-fn reveal_sidebar(split: &adw::OverlaySplitView) {
+/// Shows a panel. Shown before its view is on screen (its page was just
+/// made visible), it would appear without sliding in, so then wait for
+/// a frame.
+fn reveal_sidebar(split: &crate::widgets::SlideView) {
     if split.is_mapped() && split.width() > 0 {
         split.set_show_sidebar(true);
         return;

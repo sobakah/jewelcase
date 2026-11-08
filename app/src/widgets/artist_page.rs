@@ -34,7 +34,7 @@ mod imp {
         #[template_child]
         pub identify_banner: TemplateChild<adw::Banner>,
         #[template_child]
-        pub split_view: TemplateChild<adw::OverlaySplitView>,
+        pub split_view: TemplateChild<crate::widgets::SlideView>,
         #[template_child]
         pub portrait_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
@@ -92,6 +92,7 @@ mod imp {
             AlbumPanel::ensure_type();
             CoverImage::ensure_type();
             CoverBackdrop::ensure_type();
+            crate::widgets::SlideView::ensure_type();
             klass.bind_template();
             klass.install_action("artist.close", None, |page, _, _| {
                 page.emit_by_name::<()>("close", &[]);
@@ -351,8 +352,16 @@ impl ArtistPage {
         self.imp().spotify_id.borrow().clone()
     }
 
+    /// Development aid (screenshots): opens the first album on the page.
+    pub fn open_first_album(&self) {
+        let first = self.imp().flows.borrow().first().cloned();
+        if let Some(child) = first.and_then(|flow| flow.child_at_index(0)) {
+            child.activate();
+        }
+    }
+
     /// The page's album panel collapses like the library's (window breakpoints).
-    pub fn split_view(&self) -> adw::OverlaySplitView {
+    pub fn split_view(&self) -> crate::widgets::SlideView {
         self.imp().split_view.get()
     }
 

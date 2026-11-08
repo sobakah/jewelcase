@@ -478,6 +478,34 @@ template $GatefoldPlayerView: Adw.Bin {
           }
         };
       }
+
+      // The grip on top, like the one on the side panels' edge: drag the
+      // player down, or click it, to hide it (the bottom sheet's own
+      // handle can't be clicked).
+      [overlay]
+      Gtk.Button {
+        tooltip-text: _("Hide Player");
+        action-name: "win.close-player";
+        halign: center;
+        valign: start;
+
+        accessibility {
+          label: _("Hide Player");
+        }
+
+        child: Gtk.Box {
+          halign: center;
+          valign: center;
+
+          styles [
+            "grip",
+          ]
+        };
+
+        styles [
+          "sheet-close-handle",
+        ]
+      }
     };
   };
 }

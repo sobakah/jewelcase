@@ -1,10 +1,9 @@
-//! A drag handle on the inner edge of a split view's sidebar (the album
+//! A drag handle on the inner edge of a sliding panel (the album
 //! and playlist panels, and the artist page over the artist grid), so the
 //! panel can be made wider or narrower. The width is remembered: one for
 //! the album and playlist panels, one for artist pages.
 
 use adw::prelude::*;
-use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib};
 
 /// The album and playlist panels' width (shared).
@@ -21,19 +20,19 @@ const MIN_CONTENT: i32 = 300;
 const KEY_STEP: i32 = 20;
 
 /// Wraps the sidebar of `split` (whose sidebar is at the end) with a handle.
-pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
+pub fn attach(split: &crate::widgets::SlideView, settings: &gio::Settings) {
     attach_panel(split, settings, KEY, MIN_WIDTH, false);
 }
 
-/// The artist page over the artist grid (a split view that always
+/// The artist page over the artist grid (a panel view that always
 /// overlays): three quarters of the window until its edge is dragged, all
 /// of it on narrow windows.
-pub fn attach_artist_overlay(split: &adw::OverlaySplitView, settings: &gio::Settings) {
+pub fn attach_artist_overlay(split: &crate::widgets::SlideView, settings: &gio::Settings) {
     attach_panel(split, settings, ARTIST_KEY, ARTIST_MIN_WIDTH, true);
 }
 
 fn attach_panel(
-    split: &adw::OverlaySplitView,
+    split: &crate::widgets::SlideView,
     settings: &gio::Settings,
     setting: &'static str,
     min_width: i32,
@@ -57,8 +56,7 @@ fn attach_panel(
     ))]);
     let overlay = gtk::Overlay::builder().child(&sidebar).build();
     overlay.add_overlay(&handle);
-    split.set_sidebar(Some(&overlay));
-    let stable = StableContent::wrap(split);
+    split.set_sidebar(Some(overlay.upcast_ref::<gtk::Widget>()));
     // Overlaid (collapsed) panels take the whole width; nothing to resize.
     // The artist overlay always overlays: there it's the window width.
     if !overlays {
@@ -144,9 +142,6 @@ fn attach_panel(
     // Where in the handle it was grabbed, and the width the drag asks for.
     let grab = std::rc::Rc::new(std::cell::Cell::new(0.0));
     let wanted = std::rc::Rc::new(std::cell::Cell::new(None::<i32>));
-    // While dragging, the grid behind follows the edge live.
-    let begin_stable = stable.clone();
-    let cancel_stable = stable.clone();
     drag.connect_drag_begin(glib::clone!(
         #[strong]
         grab,
@@ -155,12 +150,9 @@ fn attach_panel(
         move |_, x, _| {
             grab.set(x);
             wanted.set(None);
-            if let Some(stable) = &begin_stable {
-                stable.set_dragging(true);
-            }
         }
     ));
-    // The pointer is measured in the split view, which stays put. The
+    // The pointer is measured in the panel view, which stays put. The
     // handle moves with the panel's edge: offsets relative to it changed
     // with every resize, and a held edge flipped between two widths on
     // alternate frames (the panel looked doubled).
@@ -204,16 +196,8 @@ fn attach_panel(
             if let Some(width) = wanted.take() {
                 let _ = settings.set_int(setting, width);
             }
-            if let Some(stable) = &stable {
-                stable.set_dragging(false);
-            }
         }
     ));
-    drag.connect_cancel(move |_, _| {
-        if let Some(stable) = &cancel_stable {
-            stable.set_dragging(false);
-        }
-    });
     handle.add_controller(drag);
 
     // Left widens (the handle is on the panel's left edge), Right narrows;
@@ -237,7 +221,7 @@ fn attach_panel(
                 gdk::Key::Right | gdk::Key::KP_Right => -step,
                 _ => return glib::Propagation::Proceed,
             };
-            let now = split.sidebar().map_or(0, |s| s.width());
+            let now = split.sidebar_width();
             let max = (split.width() - MIN_CONTENT).max(min_width);
             let width = (now + change).clamp(min_width, max);
             let _ = settings.set_int(setting, width);
@@ -260,126 +244,4 @@ fn attach_panel(
     describe(settings);
     let id = settings.connect_changed(Some(setting), move |settings, _| describe(settings));
     crate::widgets::disconnect_with(split, settings, id);
-}
-
-mod stable_imp {
-    use std::cell::{Cell, RefCell};
-
-    use adw::prelude::*;
-    use gtk::glib;
-    use gtk::subclass::prelude::*;
-
-    #[derive(Debug, Default)]
-    pub struct StableContent {
-        pub child: RefCell<Option<gtk::Widget>>,
-        pub split: glib::WeakRef<adw::OverlaySplitView>,
-        /// The content width while the panel is shown.
-        pub narrow: Cell<i32>,
-        /// While the panel's edge is dragged (not sliding in or out).
-        pub dragging: Cell<bool>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for StableContent {
-        const NAME: &'static str = "GatefoldStableContent";
-        type Type = super::StableContent;
-        type ParentType = gtk::Widget;
-    }
-
-    impl ObjectImpl for StableContent {
-        fn constructed(&self) {
-            self.parent_constructed();
-            self.obj().set_overflow(gtk::Overflow::Hidden);
-        }
-
-        fn dispose(&self) {
-            if let Some(child) = self.child.take() {
-                child.unparent();
-            }
-        }
-    }
-
-    impl WidgetImpl for StableContent {
-        fn request_mode(&self) -> gtk::SizeRequestMode {
-            self.child
-                .borrow()
-                .as_ref()
-                .map_or(gtk::SizeRequestMode::ConstantSize, |c| c.request_mode())
-        }
-
-        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
-            self.child
-                .borrow()
-                .as_ref()
-                .map_or((0, 0, -1, -1), |c| c.measure(orientation, for_size))
-        }
-
-        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            let Some(child) = self.child.borrow().clone() else {
-                return;
-            };
-            let child_width = match self.split.upgrade() {
-                // The width the split view gives, in step with the panel.
-                Some(split) if !split.is_collapsed() && self.dragging.get() => width,
-                Some(split) if !split.is_collapsed() => {
-                    let full = split.width();
-                    if split.shows_sidebar() {
-                        // Opening (or open): the final width right away.
-                        let sidebar = split.sidebar().map_or(0, |s| s.width());
-                        let narrow = if sidebar > 0 { full - sidebar } else { width };
-                        self.narrow.set(narrow);
-                        narrow.min(full)
-                    } else if width < full && self.narrow.get() > 0 {
-                        // Closing: stay narrow until the panel is gone.
-                        self.narrow.get().max(width)
-                    } else {
-                        width
-                    }
-                }
-                _ => width,
-            };
-            let (min, _, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
-            child.allocate(child_width.max(min), height, baseline, None);
-        }
-    }
-}
-
-glib::wrapper! {
-    /// A split view's content that changes width once when the panel opens
-    /// or closes, not on every frame of the slide: a grid behind the panel
-    /// would otherwise reflow its columns all the way and jump around.
-    pub struct StableContent(ObjectSubclass<stable_imp::StableContent>)
-        @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
-}
-
-impl StableContent {
-    /// While the panel's edge is dragged, the content follows the width
-    /// the split view gives it.
-    fn set_dragging(&self, dragging: bool) {
-        self.imp().dragging.set(dragging);
-        self.queue_allocate();
-    }
-
-    fn wrap(split: &adw::OverlaySplitView) -> Option<Self> {
-        let content = split.content()?;
-        split.set_content(None::<&gtk::Widget>);
-        let stable: Self = glib::Object::new();
-        let imp = stable.imp();
-        content.set_parent(&stable);
-        imp.child.replace(Some(content));
-        imp.split.set(Some(split));
-        split.set_content(Some(&stable));
-        for property in ["show-sidebar", "collapsed"] {
-            split.connect_notify_local(
-                Some(property),
-                glib::clone!(
-                    #[weak]
-                    stable,
-                    move |_, _| stable.queue_allocate()
-                ),
-            );
-        }
-        Some(stable)
-    }
 }

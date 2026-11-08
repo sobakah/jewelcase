@@ -303,34 +303,84 @@ button.smart-shuffle {
   text-decoration-line: underline;
 }
 
-/* The grip on a side panel's left edge (album, playlist, artist page)
-   closes it (§4.1, §4.2); it looks like the bottom sheet's drag handle on
-   top of the player, turned upright. */
-.panel-close-handle {
-  min-width: 20px;
-  min-height: 96px;
+/* The grips that close a panel by a click: on the left edge of the side
+   panels (album, playlist, artist page; §4.1, §4.2), upright, and on top
+   of the player, lying down (§4.3), where dragging it also hides the
+   player. One look and one response to the pointer for all of them. */
+.panel-close-handle,
+.sheet-close-handle {
   padding: 0;
-  margin-left: 2px;
   border-radius: 999px;
   background: none;
   box-shadow: none;
 }
 
-.panel-close-handle .grip {
-  min-width: 4px;
-  min-height: 36px;
+.panel-close-handle {
+  min-width: 20px;
+  min-height: 96px;
+  margin-left: 2px;
+}
+
+.sheet-close-handle {
+  min-width: 96px;
+  min-height: 20px;
+  margin-top: 8px;
+}
+
+.panel-close-handle .grip,
+.sheet-close-handle .grip {
   border-radius: 999px;
   background-color: color-mix(in srgb, currentColor 20%, transparent);
-  transition: background-color 150ms ease-out, min-height 150ms ease-out;
+  transition: background-color 150ms ease-out, min-height 150ms ease-out,
+    min-width 150ms ease-out;
+}
+
+.panel-close-handle .grip {
+  min-width: 5px;
+  min-height: 40px;
+}
+
+.sheet-close-handle .grip {
+  min-width: 40px;
+  min-height: 5px;
 }
 
 .panel-close-handle:hover .grip {
-  min-height: 48px;
+  min-height: 52px;
+}
+
+.sheet-close-handle:hover .grip {
+  min-width: 52px;
+}
+
+.panel-close-handle:hover .grip,
+.sheet-close-handle:hover .grip {
   background-color: color-mix(in srgb, currentColor 35%, transparent);
 }
 
-.panel-close-handle:active .grip {
+.panel-close-handle:active .grip,
+.sheet-close-handle:active .grip {
   background-color: color-mix(in srgb, currentColor 50%, transparent);
+}
+
+/* Panels slide in like a record sleeve (slide_view.rs): a soft shadow
+   on their leading edge, deeper over the content than beside it. The
+   selectors outrank libadwaita's .sidebar-pane border, which stays. */
+slide-view > .slide-pane.end:dir(ltr) {
+  box-shadow: inset 1px 0 var(--sidebar-border-color),
+    -2px 0 6px alpha(black, 0.08),
+    -12px 0 32px alpha(black, 0.12);
+}
+
+slide-view > .slide-pane.overlay-pane {
+  box-shadow: -1px 0 0 alpha(black, 0.06),
+    -3px 0 8px alpha(black, 0.10),
+    -16px 0 48px alpha(black, 0.18);
+}
+
+/* The content behind an overlaid panel, as libadwaita dims it. */
+slide-view > dimming {
+  background: var(--shade-color);
 }
 
 /* Listening statistics (CONCEPT.md §6.3). */
