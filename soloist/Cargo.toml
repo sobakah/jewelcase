@@ -15,3 +15,6 @@ thiserror.workspace = true
 tracing.workspace = true
 # Plain ws:// on 127.0.0.1 only; no TLS.
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile.workspace = true

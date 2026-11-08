@@ -104,6 +104,9 @@ const DUCK_BEFORE_MS: u64 = 400;
 /// Soloist pausing this close to the end (Spotify with autoplay off stops
 /// on the song) is the song ending.
 const PAUSED_AT_END_MS: u64 = 2_500;
+/// Soloist changing songs with more than this left of Gatefold's song was
+/// someone choosing in the Spotify app, not the song ending.
+const CHOSEN_ELSEWHERE_MS: u64 = 15_000;
 /// A pause Gatefold asked for is reported within this.
 const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -374,6 +377,7 @@ impl Spotify {
                 options,
                 ..
             } => {
+                let left = self.ours_left();
                 {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
@@ -390,7 +394,7 @@ impl Spotify {
                     state.status = status;
                 }
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri);
+                    self.soloist_item(&item.uri, left);
                 }
                 if let Some(status) = status {
                     self.soloist_status(status);
@@ -401,9 +405,10 @@ impl Spotify {
                 }
             }
             Event::TrackChanged(item) => {
+                let left = self.ours_left();
                 self.imp().stream.borrow_mut().soloist.current = item.clone();
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri);
+                    self.soloist_item(&item.uri, left);
                 }
                 self.receiver_check();
             }
@@ -554,7 +559,25 @@ impl Spotify {
 
     /// Soloist plays `uri`: Gatefold's song started, or Soloist moved on
     /// (the song ended and it continued, or someone skipped in the app).
-    fn soloist_item(&self, uri: &str) {
+    /// How much of Gatefold's song was left (ms), while it plays.
+    fn ours_left(&self) -> Option<u64> {
+        let state = &self.imp().stream.borrow().soloist;
+        let wanted = state.wanted.as_deref()?;
+        if !state.started {
+            return None;
+        }
+        let duration = state
+            .current
+            .as_ref()
+            .filter(|c| c.uri == wanted)
+            .and_then(|c| c.duration_ms)?;
+        let position = state.position?.now();
+        Some(duration.saturating_sub(position))
+    }
+
+    /// Soloist plays `uri`; `left`: how much of Gatefold's song was left
+    /// just before.
+    fn soloist_item(&self, uri: &str, left: Option<u64>) {
         let (wanted, started) = {
             let state = &self.imp().stream.borrow().soloist;
             (state.wanted.clone(), state.started)
@@ -601,9 +624,20 @@ impl Spotify {
                 GatefoldApplication::get()
                     .player()
                     .stream_note(StreamNote::Ended);
-            } else if self.take_stale(uri) || GatefoldApplication::get().player().playing() {
-                // Soloist moved on while Gatefold played (the song ended,
-                // or someone skipped in the app): Gatefold's next song.
+            } else if self.take_stale(uri) {
+                // What was left in Soloist's queue: Gatefold's song is over.
+                self.soloist_ended();
+            } else if GatefoldApplication::get().player().playing()
+                && left.is_some_and(|left| left > CHOSEN_ELSEWHERE_MS)
+            {
+                // Long before the end: someone picked a song or skipped in
+                // the Spotify app. Theirs plays, and the app stays in
+                // charge (the receiver shows it).
+                tracing::info!("Another song was chosen in the Spotify app; it keeps playing");
+                self.soloist_release();
+            } else if GatefoldApplication::get().player().playing() {
+                // Soloist moved on at the end (its autoplay): Gatefold's
+                // next song.
                 self.soloist_ended();
             } else {
                 // Gatefold's song was paused and someone else plays now

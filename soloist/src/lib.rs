@@ -329,6 +329,13 @@ impl Soloist {
         for name in ["ws.port", "ws.addr"] {
             let _ = std::fs::remove_file(config.data_dir.join(name));
         }
+        // The key in a file only Gatefold's user can read, once Soloist
+        // takes one; on its command line, other local users could read it
+        // (spotify/soloist issues #12, #24). Removed once Soloist listens.
+        let key_file = supports_key_file(&config.binary)
+            .then(|| key_file_path(&config.data_dir))
+            .map(|path| write_key_file(&path, &config.api_key).map(|()| path))
+            .transpose()?;
         let mut command = Command::new(&config.binary);
         // If Gatefold dies without stopping it, so does Soloist (Linux).
         // SAFETY: prctl is async-signal-safe; nothing else runs here.
@@ -338,11 +345,12 @@ impl Soloist {
                 Ok(())
             });
         }
+        command.arg("--device-name").arg(&config.device_name);
+        match &key_file {
+            Some(path) => command.arg("--api-key-file").arg(path),
+            None => command.arg("--api-key").arg(&config.api_key),
+        };
         let mut child = command
-            .arg("--device-name")
-            .arg(&config.device_name)
-            .arg("--api-key")
-            .arg(&config.api_key)
             .arg("--data-dir")
             .arg(&config.data_dir)
             .arg("--cache-dir")
@@ -354,7 +362,12 @@ impl Soloist {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .inspect_err(|_| {
+                if let Some(path) = &key_file {
+                    let _ = std::fs::remove_file(path);
+                }
+            })?;
         for pipe in [
             child
                 .stdout
@@ -404,7 +417,13 @@ impl Soloist {
 
         // Talks to it, once it has written its port.
         let data_dir = config.data_dir.clone();
-        let (commands, thread) = talk(events, move || wait_for_port(&data_dir));
+        let (commands, thread) = talk(events, move || {
+            let address = wait_for_port(&data_dir);
+            if let Some(path) = &key_file {
+                let _ = std::fs::remove_file(path);
+            }
+            address
+        });
         Ok((
             Self {
                 commands,
@@ -663,6 +682,41 @@ pub fn runtime_address(data_dir: &Path) -> Option<(String, u16)> {
     Some((local_only(&addr), port))
 }
 
+/// Whether this Soloist reads its API key from a file (`--api-key-file`,
+/// as asked for in spotify/soloist #12 and #24; not in the build of
+/// 2026-11-06).
+fn supports_key_file(binary: &Path) -> bool {
+    let Ok(output) = Command::new(binary)
+        .arg("--help")
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    let text = [output.stdout, output.stderr].concat();
+    String::from_utf8_lossy(&text).contains("--api-key-file")
+}
+
+/// Next to Soloist's data folder, not in it.
+fn key_file_path(data_dir: &Path) -> PathBuf {
+    data_dir.with_file_name("soloist-api-key")
+}
+
+/// Written readable by the user only (0600 from the start, not changed
+/// afterwards).
+fn write_key_file(path: &Path, key: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::remove_file(path);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(key.as_bytes())?;
+    file.sync_all()
+}
+
 /// Waits for a just-started Soloist to write its address.
 fn wait_for_port(data_dir: &Path) -> Option<(String, u16)> {
     let start = Instant::now();
@@ -879,5 +933,33 @@ mod tests {
             ..position
         };
         assert_eq!(paused.now(), 1000);
+    }
+
+    #[test]
+    fn the_key_goes_into_a_private_file_when_soloist_takes_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let fake = |name: &str, help: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\necho '{help}'\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        assert!(!supports_key_file(&fake(
+            "old",
+            "  -k, --api-key <key>  Developer API key"
+        )));
+        assert!(supports_key_file(&fake(
+            "new",
+            "      --api-key-file <path>  Read the key"
+        )));
+        let data = dir.path().join("soloist");
+        let path = key_file_path(&data);
+        assert_eq!(path, dir.path().join("soloist-api-key"));
+        write_key_file(&path, "secret").unwrap();
+        write_key_file(&path, "secret").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }
