@@ -291,7 +291,7 @@ The goal: every non-Latin lyric is shown with a romanized line, without the user
 
 **Fallback without lyrembed** (not installed, or older than the version with `romanize --stdio`): no auto-romanization. The Integrations page says why and shows the install/update command.
 
-**As built (November 2026, lyrembed 1.1.1):** for the song that plays (local lyrics without romanization, and LRCLIB lyrics for Spotify songs), not prefetched; the lyrics show at once and the romanization replaces them when it's there; not with the "original only" layout. One helper process, stopped after 5 minutes idle and when Gatefold quits; results (also "nothing to do") cached by a hash of the text and hint (migration 025). The Han hint comes only from the file's language tag (`TLAN`/`LANGUAGE`); no setting yet, and no "auto" marker. lyrembed 1.1.1 lets a `"ja"` hint outweigh Chinese evidence (fixed in its working tree, not released yet), which is why Gatefold sends one only from the tag.
+**As built (November 2026, lyrembed 1.1.1):** for the song that plays (local lyrics without romanization, and LRCLIB lyrics for Spotify songs), not prefetched; the lyrics show at once and the romanization replaces them when it's there; not with the "original only" layout. One helper process, stopped after 5 minutes idle and when Gatefold quits; results (also "nothing to do") cached by a hash of the text and hint (migration 025). The Han hint comes only from the file's language tag (`TLAN`/`LANGUAGE`); no setting yet, and no "auto" marker. In lyrembed the hint only settles Han runs the lyrics leave open; Chinese evidence still wins.
 
 ---
 
