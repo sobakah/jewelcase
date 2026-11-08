@@ -17,9 +17,9 @@ use adw::subclass::prelude::*;
 use gtk::{gdk, glib};
 
 /// Sliding in: slower than libadwaita's panels and a little bouncy (it
-/// runs about 4 % past its place).
+/// runs about 2 % past its place).
 fn open_spring() -> adw::SpringParams {
-    adw::SpringParams::new(0.72, 1.0, 280.0)
+    adw::SpringParams::new(0.78, 1.0, 280.0)
 }
 
 /// Sliding out: as unhurried, without a bounce (one would only flash the
@@ -182,11 +182,13 @@ mod imp {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             let progress = self.progress.get();
             let panel = self.sidebar_width_for(width);
-            // The content keeps its final width while the panel slides
-            // (a grid behind it would reflow its columns on every frame):
-            // narrow from the start of opening to the end of closing.
+            // The content takes its final width once, when the panel
+            // starts to move (a grid behind it would reflow its columns on
+            // every frame): narrow as it starts opening, full as it starts
+            // closing, under the panel sliding away (staying narrow until
+            // the end left an empty strip behind the panel).
             let (content_min, _, _, _) = self.content_bin.measure(gtk::Orientation::Horizontal, -1);
-            let content_width = if !self.collapsed.get() && (self.show_sidebar.get() || progress > 0.0) {
+            let content_width = if !self.collapsed.get() && self.show_sidebar.get() {
                 (width - panel).max(content_min)
             } else {
                 width.max(content_min)
