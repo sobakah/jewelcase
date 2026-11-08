@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.2.2
+Version:        0.2.3
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -97,6 +97,15 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sun Nov 08 2026 sobakah - 0.2.3-1
+- Fixed racing through an album at the end of a Spotify song played
+  through Soloist; Soloist's decisions go to the system log
+- Save Spotify albums and follow artists on Spotify, with Undo;
+  Connect Again in Preferences for new permissions
+- Songs whose FLAC header lacks the length get it (read again once)
+- Spotify album artists link to their Spotify page; a click on an
+  album title copies it
+
 * Sun Nov 08 2026 sobakah - 0.2.2-1
 - Listening statistics: top artists, albums, songs and genres of the
   week, month, year or all time, with listening time and trends

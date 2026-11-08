@@ -48,6 +48,18 @@
   </branding>
 
   <releases>
+    <release version="0.2.3" date="2026-11-08" type="development">
+      <description>
+        <p>Saving albums and following artists on Spotify, and fixes.</p>
+        <ul>
+          <li>Fixed: Spotify songs played through Soloist no longer race through the rest of the album</li>
+          <li>Save Spotify albums and follow artists on Spotify, with Undo</li>
+          <li>Connect Again in Preferences grants new Spotify permissions and keeps your playlists</li>
+          <li>Songs whose files don't say how long they are get their length</li>
+          <li>Spotify album artists open their page; clicking an album title copies it</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-11-08" type="development">
       <description>
         <p>Listening statistics, a visualizer and update notices.</p>

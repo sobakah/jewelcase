@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 (pre-release)
+
+A fix for Spotify songs played through Soloist, saving albums and following artists on Spotify, and songs without a stored length. Gatefold's database is updated on the first start; after that, 0.2.2 can't open it any more. 0.2.2 offers this update itself (its banner, then Install).
 
 - Fixed: at the end of a Spotify song played through Soloist, Gatefold could race through the rest of the album in a second and stop at its start. That happened when Soloist first played a song left in its queue from earlier: the next song's own start was then taken for that left-over playing again. Should songs ever keep ending right after they start, Gatefold now stops and says so. When Gatefold's Next makes Soloist skip and it lands on a song left in its queue, Gatefold plays its own song directly.
 - Save Spotify albums to your Spotify library from their panel (the + button next to Shuffle; a check mark once saved, click again to remove), and follow or unfollow artists on Spotify from their page (Follow next to their links, also for artists in your library). Gatefold asks Spotify when a panel or page opens, so changes made in the Spotify app show. A notice confirms it, with Undo. Following needs one more permission: press Connect Again in Preferences → Spotify (or on the notice Gatefold shows when Spotify refuses), and allow it in the browser.
@@ -9,6 +11,14 @@
 - Songs whose FLAC file doesn't say how long it is (some encoders leave that out) now get their length, so their progress bar, total time and seeking work. Such songs already in the library are read again once, on the next start. Until a song has a length, its bar stays empty instead of full.
 - On a Spotify album, the artist's name opens their page: the one in your library if you have them, otherwise their Spotify page (before, only artists in your library were links).
 - Clicking an album's title copies it (instead of putting a text cursor in it).
+
+### Install
+
+Download `gatefold-0.2.3-1.fc45.x86_64.rpm` below and install it, or use the update notice in Gatefold 0.2.2:
+
+```sh
+sudo dnf install ./gatefold-0.2.3-1.fc45.x86_64.rpm
+```
 
 ## 0.2.2 (pre-release)
 
