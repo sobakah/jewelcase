@@ -117,6 +117,7 @@ impl MetadataService {
                     updates,
                     last_spotify: None,
                 };
+                worker.clean_portraits();
                 // Dialogs and the open artist page go before the lookups
                 // that artist tiles queue (one at a time, each a few
                 // seconds with MusicBrainz' rate limit).
@@ -167,6 +168,31 @@ struct Worker {
 }
 
 impl Worker {
+    /// About once a week: portraits no artist shows any more (replaced,
+    /// and the candidates of "Choose from Online Sources…").
+    fn clean_portraits(&mut self) {
+        const KEY: &str = "portrait-cache-cleaned";
+        const EVERY_S: i64 = 7 * 24 * 3600;
+        let last: i64 = self
+            .db
+            .app_state(KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        if now() - last < EVERY_S {
+            return;
+        }
+        let Ok(keep) = self.db.portrait_keys_in_use() else {
+            return;
+        };
+        let removed = self.portraits.remove_unused(&keep, &['o', 'l', 'c']);
+        if removed > 0 {
+            tracing::info!("Removed {removed} unused portraits from the cache");
+        }
+        let _ = self.db.set_app_state(KEY, &now().to_string());
+    }
+
     fn run(&mut self, job: Job) {
         match job {
             Job::Lookup {

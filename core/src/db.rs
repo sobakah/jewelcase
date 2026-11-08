@@ -43,6 +43,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/018_playlist_sort.sql")),
     M::up(include_str!("db/019_portrait_sources.sql")),
     M::up(include_str!("db/020_musicbrainz_isrcs.sql")),
+    M::up(include_str!("db/021_ctime.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -258,6 +259,60 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The files' change times as last seen (`None`: not yet recorded).
+    pub fn file_ctimes(&self) -> Result<HashMap<PathBuf, Option<i64>>> {
+        let mut stmt = self.conn.prepare("SELECT path, ctime FROM track")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((PathBuf::from(row.get::<_, String>(0)?), row.get(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_ctimes(&mut self, ctimes: &[(PathBuf, i64)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE track SET ctime = ?2 WHERE path = ?1")?;
+            for (path, ctime) in ctimes {
+                stmt.execute(params![path_str(path), ctime])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The audio fingerprints (`analysis::content_key`) known for these
+    /// files.
+    pub fn content_keys(&self, paths: &[PathBuf]) -> Result<HashMap<PathBuf, String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT content_key FROM track WHERE path = ?1")?;
+        let mut keys = HashMap::new();
+        for path in paths {
+            let key: Option<String> = stmt
+                .query_row([path_str(path)], |row| row.get(0))
+                .optional()?
+                .flatten();
+            if let Some(key) = key {
+                keys.insert(path.clone(), key);
+            }
+        }
+        Ok(keys)
+    }
+
+    /// Files that moved: their songs keep their ID (play history, queue,
+    /// playlists, Spotify matches, when they were added).
+    pub fn move_tracks(&mut self, moves: &[(PathBuf, PathBuf)]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE track SET path = ?2 WHERE path = ?1")?;
+            for (from, to) in moves {
+                stmt.execute(params![path_str(from), path_str(to)])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Inserts or updates tracks by path. Existing tracks keep their ID and
     /// the time they were added.
     pub fn upsert_tracks(&mut self, files: &[ScannedFile], now: i64) -> Result<()> {
@@ -320,6 +375,18 @@ impl Database {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// The artist portraits in use (found, online, or chosen by the user).
+    pub fn portrait_keys_in_use(&self) -> Result<HashSet<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT portrait_key FROM artist UNION SELECT custom_portrait_key FROM artist",
+        )?;
+        let keys = stmt
+            .query_map([], |row| row.get::<_, Option<String>>(0))?
+            .filter_map(|key| key.ok().flatten())
+            .collect();
+        Ok(keys)
     }
 
     /// Every cover key something refers to: songs, albums, playlists, and

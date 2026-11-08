@@ -55,6 +55,9 @@ enum ScanMessage {
     Done(Result<ScanSummary, String>, Aliases),
 }
 
+/// How often the library folders are checked without a watcher event.
+const PERIODIC_SCAN_S: u32 = 30 * 60;
+
 mod imp {
     use super::*;
 
@@ -221,6 +224,22 @@ impl Library {
         self.watch_folders();
         self.watch_mounts();
         self.rescan();
+        // Now and then without a hint from inotify: changes another
+        // machine made on a network share aren't reported. A scan that
+        // finds nothing changed only compares file times.
+        glib::timeout_add_seconds_local(
+            PERIODIC_SCAN_S,
+            glib::clone!(
+                #[weak(rename_to = library)]
+                self,
+                #[upgrade_or]
+                glib::ControlFlow::Break,
+                move || {
+                    library.schedule_rescan();
+                    glib::ControlFlow::Continue
+                }
+            ),
+        );
         Ok(())
     }
 

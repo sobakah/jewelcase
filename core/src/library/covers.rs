@@ -63,10 +63,12 @@ impl CoverCache {
         &self.dir
     }
 
-    /// Removes the cached album covers ('e', 'f') and Spotify images ('s')
-    /// whose key isn't in `keep` (all can be made again: from the files,
-    /// or downloaded). Mosaics and other kinds stay. Returns how many.
-    pub fn remove_unused(&self, keep: &std::collections::HashSet<String>) -> usize {
+    /// Removes cached images whose key starts with one of `kinds` (e.g.
+    /// 'e', 'f' album covers, 's' Spotify images, 'm' mosaics) and isn't
+    /// in `keep`, once they're a day old (one just made may not be
+    /// referred to yet). Returns how many.
+    pub fn remove_unused(&self, keep: &std::collections::HashSet<String>, kinds: &[char]) -> usize {
+        const MIN_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return 0;
         };
@@ -76,7 +78,16 @@ impl CoverCache {
             let Some(name) = name.to_str() else { continue };
             // "<key>-<size>.jpg" or "<key>.color".
             let key = name.split(['-', '.']).next().unwrap_or_default();
-            if !key.starts_with(['e', 'f', 's']) || keep.contains(key) {
+            if !key.starts_with(kinds) || keep.contains(key) {
+                continue;
+            }
+            let young = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_none_or(|age| age < MIN_AGE);
+            if young {
                 continue;
             }
             if fs::remove_file(entry.path()).is_ok() {
@@ -322,10 +333,20 @@ mod tests {
             "mmosaic-360.jpg",
             "cchosen-360.jpg",
         ] {
-            fs::write(dir.path().join(name), b"x").unwrap();
+            let path = dir.path().join(name);
+            fs::write(&path, b"x").unwrap();
+            let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 3600);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
         }
+        // Made just now: kept even though unused.
+        fs::write(dir.path().join("enew-360.jpg"), b"x").unwrap();
         let keep: std::collections::HashSet<String> = ["eused".to_owned()].into();
-        assert_eq!(cache.remove_unused(&keep), 2);
+        assert_eq!(cache.remove_unused(&keep, &['e', 'f', 's']), 2);
         let mut left: Vec<String> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -335,6 +356,7 @@ mod tests {
             left,
             [
                 "cchosen-360.jpg",
+                "enew-360.jpg",
                 "eused-360.jpg",
                 "eused.color",
                 "mmosaic-360.jpg"

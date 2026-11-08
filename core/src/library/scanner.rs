@@ -47,6 +47,9 @@ pub struct ScanSummary {
     /// New or changed files that were read.
     pub read: usize,
     pub removed: usize,
+    /// Files found at a new path (a renamed or moved folder): their songs
+    /// kept their ID.
+    pub moved: usize,
     /// Files whose tags couldn't be read.
     pub failed: usize,
     pub symlinks_skipped: usize,
@@ -67,6 +70,9 @@ struct FoundFile {
     path: PathBuf,
     mtime: i64,
     size: i64,
+    /// Change time: also changes when tags are written with the old
+    /// modification time kept.
+    ctime: i64,
 }
 
 /// Brings the database up to date with `folders` and regroups the albums
@@ -104,19 +110,37 @@ pub fn scan(
     summary.files = found.len();
 
     let stamps = db.file_stamps()?;
-    let changed: Vec<FoundFile> = found
-        .into_iter()
-        .filter(|f| stamps.get(&f.path) != Some(&(f.mtime, f.size)))
+    let ctimes = db.file_ctimes()?;
+    // Change times to record: new, changed, or not recorded yet (the
+    // first scan with them, which doesn't read the files for it).
+    let new_ctimes: Vec<(PathBuf, i64)> = found
+        .iter()
+        .filter(|f| ctimes.get(&f.path).copied().flatten() != Some(f.ctime))
+        .map(|f| (f.path.clone(), f.ctime))
         .collect();
-    let removed: Vec<PathBuf> = stamps
-        .into_keys()
-        .filter(|path| !seen.contains(path))
+    let mut changed: Vec<FoundFile> = found
+        .into_iter()
+        .filter(|f| {
+            stamps.get(&f.path) != Some(&(f.mtime, f.size))
+                || ctimes
+                    .get(&f.path)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|ctime| ctime != f.ctime)
+        })
+        .collect();
+    let mut removed: Vec<PathBuf> = stamps
+        .keys()
+        .filter(|path| !seen.contains(*path))
         .filter(|path| !unavailable.iter().any(|f| path.starts_with(f)))
+        .cloned()
         .collect();
 
+    summary.moved = find_moves(db, &mut changed, &mut removed, &stamps)?;
     summary.read = read_files(db, &changed, progress, &mut summary.failed)?;
     summary.removed = removed.len();
     db.delete_tracks(&removed)?;
+    db.set_ctimes(&new_ctimes)?;
     let covers_changed = update_folder_covers(db, &seen)?;
 
     // Nothing changed (most scans: every start, a watcher event for a
@@ -125,6 +149,7 @@ pub fn scan(
     let regroup = force
         || summary.read > 0
         || summary.removed > 0
+        || summary.moved > 0
         || covers_changed
         || db.app_state(FINGERPRINT_KEY)?.as_deref() != Some(fingerprint.as_str());
     if regroup {
@@ -146,6 +171,89 @@ pub fn scan(
     Ok(summary)
 }
 
+/// Gone paths that turn up elsewhere (a renamed or moved folder, cdimport
+/// sorting files) are moved in the database instead of deleted and added
+/// again, so their songs keep their ID and with it the play history, the
+/// queue, playlists and Spotify matches. Same file name, size and
+/// modification time (kept by a rename) is a move; otherwise the audio
+/// fingerprint decides, where the analysis made one. Moved files that
+/// don't look unchanged are read again. Returns how many moved.
+fn find_moves(
+    db: &mut Database,
+    changed: &mut Vec<FoundFile>,
+    removed: &mut Vec<PathBuf>,
+    stamps: &HashMap<PathBuf, (i64, i64)>,
+) -> Result<usize, DbError> {
+    if removed.is_empty() {
+        return Ok(0);
+    }
+    let keys = db.content_keys(removed)?;
+    let mut by_size: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (i, path) in removed.iter().enumerate() {
+        if let Some((_, size)) = stamps.get(path) {
+            by_size.entry(*size).or_default().push(i);
+        }
+    }
+    let mut taken = vec![false; removed.len()];
+    let mut moves = Vec::new();
+    let mut unchanged = HashSet::new();
+    for (i, file) in changed.iter().enumerate() {
+        // Changed in place, not new here.
+        if stamps.contains_key(&file.path) {
+            continue;
+        }
+        let Some(candidates) = by_size.get(&file.size) else {
+            continue;
+        };
+        let free: Vec<usize> = candidates.iter().copied().filter(|r| !taken[*r]).collect();
+        let renamed = free.iter().copied().find(|r| {
+            stamps[&removed[*r]].0 == file.mtime && removed[*r].file_name() == file.path.file_name()
+        });
+        let found = renamed.or_else(|| {
+            let fingerprinted: Vec<usize> = free
+                .iter()
+                .copied()
+                .filter(|r| keys.contains_key(&removed[*r]))
+                .collect();
+            if fingerprinted.is_empty() {
+                return None;
+            }
+            let key = crate::analysis::content_key(&file.path).ok()?;
+            fingerprinted
+                .into_iter()
+                .find(|r| keys[&removed[*r]] == key)
+        });
+        if let Some(r) = found {
+            taken[r] = true;
+            moves.push((removed[r].clone(), file.path.clone()));
+            if renamed.is_some() {
+                unchanged.insert(i);
+            }
+        }
+    }
+    if moves.is_empty() {
+        return Ok(0);
+    }
+    db.move_tracks(&moves)?;
+    let mut index = 0;
+    changed.retain(|_| {
+        let keep = !unchanged.contains(&index);
+        index += 1;
+        keep
+    });
+    let mut index = 0;
+    removed.retain(|_| {
+        let keep = !taken[index];
+        index += 1;
+        keep
+    });
+    tracing::info!(
+        "{} files moved; their songs keep their history",
+        moves.len()
+    );
+    Ok(moves.len())
+}
+
 /// About once a week: cached covers nothing refers to any more (replaced
 /// covers, removed albums, Spotify songs no longer listed) are removed.
 fn clean_covers(db: &mut Database, covers: &CoverCache) -> Result<(), DbError> {
@@ -158,8 +266,17 @@ fn clean_covers(db: &mut Database, covers: &CoverCache) -> Result<(), DbError> {
     if now - last < EVERY_S {
         return Ok(());
     }
-    let keep = db.cover_keys_in_use()?;
-    let removed = covers.remove_unused(&keep);
+    let mut keep = db.cover_keys_in_use()?;
+    // Playlist mosaics of the covers they show now (a playlist's songs
+    // changed: its old mosaic goes).
+    for playlist in db.playlists()? {
+        if playlist.cover_keys.len() > 1 {
+            keep.insert(covers.mosaic_key(&playlist.cover_keys));
+        }
+    }
+    // Album covers, Spotify images, mosaics, and playlist covers the
+    // user replaced.
+    let removed = covers.remove_unused(&keep, &['e', 'f', 's', 'm', 'c']);
     if removed > 0 {
         tracing::info!("Removed {removed} unused covers from the cache");
     }
@@ -212,6 +329,7 @@ fn walk(
                     path,
                     mtime,
                     size: meta.len() as i64,
+                    ctime: std::os::unix::fs::MetadataExt::ctime(&meta),
                 });
             }
         }
@@ -557,6 +675,69 @@ mod tests {
         fs::remove_file(album.join("cover.jpg")).unwrap();
         update_folder_covers(&mut db, &seen).unwrap();
         assert_eq!(key_of(&db, &song), None);
+    }
+
+    #[test]
+    fn a_renamed_folder_keeps_its_songs_and_a_new_ctime_is_read_again() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut db = Database::open_in_memory().unwrap();
+        let covers = CoverCache::new(dir.path().join("covers"));
+        let music = dir.path().join("Musik");
+        let old = music.join("Old Name");
+        fs::create_dir_all(&old).unwrap();
+        // Not decodable: reading it would fail, so a move must not read it.
+        fs::write(old.join("a.flac"), b"abc").unwrap();
+        let mtime = fs::metadata(old.join("a.flac"))
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        db.upsert_tracks(
+            &[ScannedFile {
+                path: old.join("a.flac"),
+                mtime,
+                size: 3,
+                tags: tags::TrackTags::default(),
+                cover_key: None,
+            }],
+            0,
+        )
+        .unwrap();
+        let id = db.all_tracks().unwrap()[0].id;
+        let scan_now = |db: &mut Database| {
+            scan(
+                db,
+                std::slice::from_ref(&music),
+                &Aliases::default(),
+                &covers,
+                false,
+                &|_| {},
+            )
+            .unwrap()
+        };
+        // Records the change time, without reading.
+        let summary = scan_now(&mut db);
+        assert_eq!((summary.read, summary.failed), (0, 0));
+
+        let new = music.join("New Name");
+        fs::rename(&old, &new).unwrap();
+        let summary = scan_now(&mut db);
+        assert_eq!((summary.moved, summary.removed, summary.failed), (1, 0, 0));
+        let tracks = db.all_tracks().unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!((tracks[0].id, &tracks[0].path), (id, &new.join("a.flac")));
+
+        // Tags written with the old time kept: the change time differs.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::set_permissions(
+            new.join("a.flac"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+        let summary = scan_now(&mut db);
+        assert_eq!(summary.read + summary.failed, 1, "read again");
     }
 
     #[test]
