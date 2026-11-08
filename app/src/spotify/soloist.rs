@@ -74,7 +74,8 @@ pub struct SoloistState {
     /// else playing.
     quiet_until: Option<std::time::Instant>,
     /// Gatefold's next song when it's a Spotify song too: handed to
-    /// Soloist's queue shortly before the end, so it follows seamlessly.
+    /// Soloist's queue as soon as the current one plays, so it follows
+    /// seamlessly and Next in the Spotify app skips to it.
     next_uri: Option<String>,
     queued_next: Option<String>,
     /// Songs handed to Soloist's queue that Gatefold didn't need after all
@@ -97,9 +98,7 @@ pub struct SoloistState {
     volume: f64,
 }
 
-/// Before the end, the next Spotify song goes into Soloist's queue …
-const HAND_OVER_BEFORE_MS: u64 = 10_000;
-/// … or, with a local song next, Soloist is muted.
+/// With a local song next, Soloist is muted this long before the end.
 const DUCK_BEFORE_MS: u64 = 400;
 /// Soloist pausing this close to the end (Spotify with autoplay off stops
 /// on the song) is the song ending.
@@ -427,9 +426,23 @@ impl Spotify {
                 }
             }
             Event::Queue(items) => {
-                self.imp().stream.borrow_mut().soloist.upcoming = items;
+                let pruned = {
+                    let mut stream = self.imp().stream.borrow_mut();
+                    let state = &mut stream.soloist;
+                    // Left-over songs Soloist doesn't have any more (played,
+                    // or its queue was emptied) can't come back.
+                    let before = state.stale_queue.len();
+                    state
+                        .stale_queue
+                        .retain(|uri| items.iter().any(|item| item.uri == *uri));
+                    state.upcoming = items;
+                    state.stale_queue.len() < before
+                };
                 if self.soloist_receiving() {
                     self.receiver_show(true);
+                } else if pruned {
+                    // Nothing left in the way: the next song can be handed over.
+                    self.schedule_end();
                 }
             }
             Event::Volume(_) => {}
@@ -764,7 +777,32 @@ impl Spotify {
         self.schedule_end();
     }
 
-    /// Timers for the end of the current song (see `soloist_next`).
+    /// Gatefold's next Spotify song goes into Soloist's queue while the
+    /// current one plays: it follows seamlessly, and the Spotify app's
+    /// Next skips to it (taken as Gatefold's next song, `soloist_item`).
+    /// Soloist's queue can't be emptied, so only one song at a time, and
+    /// none while a song Gatefold didn't need after all is still in it
+    /// (Soloist plays that one first; it ends Gatefold's song).
+    fn hand_over_next(&self) {
+        let next = {
+            let state = &self.imp().stream.borrow().soloist;
+            // Not the song itself (Repeat One, the same song twice):
+            // Soloist would play it without an end.
+            state.next_uri.clone().filter(|next| {
+                state.queued_next.is_none()
+                    && state.stale_queue.is_empty()
+                    && Some(next) != state.wanted.as_ref()
+            })
+        };
+        if let (Some(next), Some(soloist)) = (next, self.soloist()) {
+            tracing::debug!("Handing {next} to Soloist's queue");
+            soloist.add_to_queue(&next);
+            self.imp().stream.borrow_mut().soloist.queued_next = Some(next);
+        }
+    }
+
+    /// The next song handed over, and a timer for the end of the current
+    /// one (see `soloist_next`).
     fn schedule_end(&self) {
         let (generation, wanted, remaining) = {
             let mut stream = self.imp().stream.borrow_mut();
@@ -794,32 +832,7 @@ impl Spotify {
             let state = &spotify.imp().stream.borrow().soloist;
             state.end_generation == generation && state.wanted.as_deref() == Some(wanted.as_str())
         };
-        glib::timeout_add_local_once(
-            std::time::Duration::from_millis(remaining.saturating_sub(HAND_OVER_BEFORE_MS)),
-            glib::clone!(
-                #[weak(rename_to = spotify)]
-                self,
-                #[strong]
-                still,
-                move || {
-                    if !still(&spotify) {
-                        return;
-                    }
-                    let next = {
-                        let state = &spotify.imp().stream.borrow().soloist;
-                        // Not the song itself (Repeat One, the same song
-                        // twice): Soloist would play it without an end.
-                        state.next_uri.clone().filter(|next| {
-                            state.queued_next.is_none() && Some(next) != state.wanted.as_ref()
-                        })
-                    };
-                    if let (Some(next), Some(soloist)) = (next, spotify.soloist()) {
-                        soloist.add_to_queue(&next);
-                        spotify.imp().stream.borrow_mut().soloist.queued_next = Some(next);
-                    }
-                }
-            ),
-        );
+        self.hand_over_next();
         glib::timeout_add_local_once(
             std::time::Duration::from_millis(remaining.saturating_sub(DUCK_BEFORE_MS)),
             glib::clone!(
@@ -886,6 +899,21 @@ impl Spotify {
             self.schedule_end();
             return;
         }
+        // Gatefold's Next to the song already in Soloist's queue: Soloist
+        // skips to it, so it isn't left in the queue to play again later.
+        let skip = {
+            let mut stream = self.imp().stream.borrow_mut();
+            let state = &mut stream.soloist;
+            let skip = play
+                && start_ms == 0
+                && state.started
+                && state.wanted.is_some()
+                && state.queued_next.as_deref() == Some(uri);
+            if skip {
+                state.queued_next = None;
+            }
+            skip
+        };
         Self::forget_queued(&mut self.imp().stream.borrow_mut().soloist);
         self.restore_volume();
         let Some(soloist) = self.soloist() else {
@@ -925,7 +953,11 @@ impl Spotify {
             soloist.set_shuffle(false);
             soloist.set_repeat(Repeat::Off);
         }
-        soloist.play(Some(uri));
+        if skip {
+            soloist.skip_next();
+        } else {
+            soloist.play(Some(uri));
+        }
         // No start in time: Spotify can't play it.
         let uri = uri.to_owned();
         glib::timeout_add_seconds_local_once(
