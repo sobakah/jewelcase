@@ -5,8 +5,8 @@ use std::path::Path;
 
 use crate::{Version, config_path, read_json};
 
-/// The first version with `lyrembed romanize --stdio` (§10.4) isn't
-/// released yet; probing decides instead (`romanize --help`).
+/// `lyrembed romanize --stdio` (§10.4) came with lyrembed 1.1.1; probing
+/// decides (`romanize --help`), not the version.
 pub const INSTALL_COMMAND: &str = "pipx install lyrembed";
 
 /// `lyrembed <album dir> --auto`: tag tracks with confident matches.
@@ -95,7 +95,7 @@ pub fn supports_romanize_stdio(help: &str) -> bool {
 pub fn romanize_requirement(version: Option<Version>) -> String {
     match version {
         Some(version) => format!(
-            "lyrembed {version} has no “romanize --stdio” yet, which automatic romanization needs"
+            "lyrembed {version} has no “romanize --stdio” yet, which automatic romanization needs (lyrembed 1.1.1 or newer)"
         ),
         None => "Automatic romanization needs lyrembed".to_owned(),
     }

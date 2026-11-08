@@ -71,6 +71,8 @@ mod imp {
         pub lyrics_jobs: Cell<u32>,
 
         pub detected: RefCell<Detected>,
+        /// Counts detections; an older one finishing later is dropped.
+        pub detect_generation: Cell<u64>,
         pub page_process: RefCell<Option<gio::Subprocess>>,
         pub page_tool: Cell<Option<PageTool>>,
         pub page_url: RefCell<Option<String>>,
@@ -155,6 +157,8 @@ impl Tools {
             PathBuf::from(self.settings().string("lyrembed-path").as_str()),
             PathBuf::from(self.settings().string("cdimport-path").as_str()),
         );
+        let generation = self.imp().detect_generation.get() + 1;
+        self.imp().detect_generation.set(generation);
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
             self,
@@ -162,6 +166,10 @@ impl Tools {
                 let detected = gio::spawn_blocking(move || detect(&overrides.0, &overrides.1))
                     .await
                     .unwrap_or_default();
+                // A changed path started a newer detection meanwhile.
+                if tools.imp().detect_generation.get() != generation {
+                    return;
+                }
                 tracing::info!("Companion tools: {detected:?}");
                 tools.imp().detected.replace(detected);
                 tools.check_unfinished_imports();

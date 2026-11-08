@@ -11,6 +11,7 @@ mod mpris;
 mod objects;
 mod player;
 mod preferences_dialog;
+mod romanizer;
 mod spotify;
 mod theme;
 mod tools;

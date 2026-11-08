@@ -514,11 +514,11 @@ impl PreferencesDialog {
             .set_subtitle(&describe(&detected.cdimport, cdimport::INSTALL_COMMAND));
 
         let romanize = if detected.romanize_stdio {
-            gettext("Available")
+            gettext("Lyrics without romanization get it for display, also from LRCLIB")
         } else {
             // §5.1: without "romanize --stdio", lyrics show as tagged.
             gettext(
-                "Not available: needs a lyrembed with “romanize --stdio”. Lyrics show as tagged; lyrembed's own romanization still works.",
+                "Not available: needs lyrembed 1.1.1 or newer (update it on lyrembed's page, or with “pipx upgrade lyrembed”). Lyrics show as tagged.",
             )
         };
         imp.romanize_status.set_subtitle(&romanize);

@@ -26,6 +26,89 @@ pub struct Lyrics {
     /// At least one line has a romanization.
     pub dual: bool,
     pub source: Source,
+    /// The file's language tag (`TLAN`, `LANGUAGE`), lowercase.
+    pub language: Option<String>,
+}
+
+impl Lyrics {
+    /// Non-Latin lines without a romanization: worth romanizing for
+    /// display (§5.1).
+    pub fn needs_romanization(&self) -> bool {
+        !self.dual
+            && self
+                .lines
+                .iter()
+                .any(|line| line.secondary.is_none() && !lrc::is_latin(&line.primary))
+    }
+
+    /// The lyrics as text again (LRC when synced), to romanize them.
+    pub fn to_text(&self) -> String {
+        let mut text = String::new();
+        for line in &self.lines {
+            if let (true, Some(ms)) = (self.synced, line.time_ms) {
+                text.push_str(&format!(
+                    "[{:02}:{:02}.{:02}]",
+                    ms / 60_000,
+                    ms / 1000 % 60,
+                    ms % 1000 / 10
+                ));
+            }
+            text.push_str(&line.primary);
+            text.push('\n');
+        }
+        text
+    }
+
+    /// What the language tag says about Han characters: "ja" or "zh".
+    pub fn han_hint(&self) -> Option<&'static str> {
+        match self.language.as_deref()? {
+            "jpn" | "ja" => Some("ja"),
+            "zho" | "chi" | "zh" | "cmn" | "yue" => Some("zh"),
+            _ => None,
+        }
+    }
+
+    /// These lyrics with the romanization lyrembed made (each romanized
+    /// line under its original, §5.1).
+    pub fn with_romanization(&self, romanized: &str) -> Lyrics {
+        let lines = if self.synced {
+            lrc::pair(lrc::parse(romanized))
+        } else {
+            pair_plain(&self.lines, romanized)
+        };
+        let dual = lines.iter().any(|l| l.secondary.is_some());
+        Lyrics {
+            lines,
+            dual,
+            ..self.clone()
+        }
+    }
+}
+
+/// Plain lyrics and their romanization: lyrembed puts a romanized line
+/// right under each line it changed, so a Latin line that isn't the next
+/// original line belongs to the one before.
+fn pair_plain(original: &[Line], romanized: &str) -> Vec<Line> {
+    let mut result = romanized.lines().map(str::trim).peekable();
+    let mut lines = Vec::with_capacity(original.len());
+    for (index, line) in original.iter().enumerate() {
+        // The original line itself (skipped if lyrembed changed it).
+        result.next_if(|r| *r == line.primary);
+        let next_original = original.get(index + 1).map(|l| l.primary.as_str());
+        let secondary = if lrc::is_latin(&line.primary) {
+            None
+        } else {
+            result
+                .next_if(|r| !r.is_empty() && Some(*r) != next_original && lrc::is_latin(r))
+                .map(str::to_owned)
+        };
+        lines.push(Line {
+            time_ms: None,
+            primary: line.primary.clone(),
+            secondary,
+        });
+    }
+    lines
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +122,16 @@ pub enum LyricsState {
 /// sidecar `.lrc`, embedded synced, embedded or sidecar plain text.
 pub fn load(path: &Path, title: Option<&str>) -> LyricsState {
     let embedded = sources::embedded(path);
+    match load_from(path, title, &embedded) {
+        LyricsState::Lyrics(lyrics) => LyricsState::Lyrics(Lyrics {
+            language: embedded.language.clone(),
+            ..lyrics
+        }),
+        state => state,
+    }
+}
+
+fn load_from(path: &Path, title: Option<&str>, embedded: &sources::Embedded) -> LyricsState {
     if embedded.language.as_deref() == Some("zxx") || title.is_some_and(is_instrumental_title) {
         return LyricsState::Instrumental;
     }
@@ -109,6 +202,7 @@ fn synced(text: &str, romanized: Option<&str>, source: Source) -> Lyrics {
         synced: true,
         dual,
         source,
+        language: None,
     }
 }
 
@@ -118,6 +212,7 @@ fn unsynced(text: &str, source: Source) -> Lyrics {
         synced: false,
         dual: false,
         source,
+        language: None,
     }
 }
 
@@ -207,5 +302,51 @@ mod tests {
         assert!(!plain.synced);
         assert_eq!(from_online(None, None, true), LyricsState::Instrumental);
         assert_eq!(from_online(Some(""), Some("  "), false), LyricsState::None);
+    }
+
+    #[test]
+    fn romanization_from_lyrembed_pairs_with_the_lines() {
+        let LyricsState::Lyrics(synced) =
+            from_online(Some("[00:01.00]사랑해요\n[00:03.50]Hello"), None, false)
+        else {
+            panic!("no lyrics");
+        };
+        assert!(synced.needs_romanization());
+        assert_eq!(synced.to_text(), "[00:01.00]사랑해요\n[00:03.50]Hello\n");
+        // What `lyrembed romanize --stdio` answers.
+        let paired =
+            synced.with_romanization("[00:01.00]사랑해요\n[00:01.00]saranghaeyo\n[00:03.50]Hello");
+        assert!(paired.dual && !paired.needs_romanization());
+        assert_eq!(paired.lines.len(), 2);
+        assert_eq!(paired.lines[0].secondary.as_deref(), Some("saranghaeyo"));
+        assert_eq!(paired.lines[1].secondary, None);
+
+        let LyricsState::Lyrics(plain) =
+            from_online(None, Some("사랑해요\n\nHello\n밤하늘"), false)
+        else {
+            panic!("no lyrics");
+        };
+        let paired = plain.with_romanization("사랑해요\nsaranghaeyo\n\nHello\n밤하늘\nbamhaneul");
+        let secondaries: Vec<Option<&str>> = paired
+            .lines
+            .iter()
+            .map(|l| l.secondary.as_deref())
+            .collect();
+        assert_eq!(
+            secondaries,
+            [Some("saranghaeyo"), None, None, Some("bamhaneul")]
+        );
+    }
+
+    #[test]
+    fn the_language_tag_hints_han_characters() {
+        let LyricsState::Lyrics(mut lyrics) = from_online(None, Some("約束"), false) else {
+            panic!("no lyrics");
+        };
+        assert_eq!(lyrics.han_hint(), None);
+        lyrics.language = Some("jpn".into());
+        assert_eq!(lyrics.han_hint(), Some("ja"));
+        lyrics.language = Some("zho".into());
+        assert_eq!(lyrics.han_hint(), Some("zh"));
     }
 }

@@ -47,6 +47,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/022_playlist_search_rowids.sql")),
     M::up(include_str!("db/023_lrclib.sql")),
     M::up(include_str!("db/024_similar_artists.sql")),
+    M::up(include_str!("db/025_romanized.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -424,6 +425,26 @@ impl Database {
                 row.plain,
                 row.instrumental
             ],
+        )?;
+        Ok(())
+    }
+
+    /// A cached romanization: `Some(None)` when lyrembed had nothing to do.
+    pub fn romanized(&self, key: &str) -> Result<Option<Option<String>>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT lyrics FROM romanized WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn set_romanized(&mut self, key: &str, lyrics: Option<&str>, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO romanized (key, lyrics, checked) VALUES (?1, ?2, ?3)",
+            params![key, lyrics, now],
         )?;
         Ok(())
     }

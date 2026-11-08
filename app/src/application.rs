@@ -84,6 +84,7 @@ mod imp {
             player.restore();
             crate::mpris::start(&app, &player);
             spotify.start();
+            crate::romanizer::watch_idle();
         }
 
         fn shutdown(&self) {
@@ -93,6 +94,7 @@ mod imp {
             if let Some(spotify) = self.spotify.get() {
                 spotify.shutdown_streaming();
             }
+            crate::romanizer::stop();
             self.parent_shutdown();
         }
 

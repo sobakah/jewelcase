@@ -199,7 +199,13 @@ impl LyricsView {
             glib::clone!(
                 #[weak(rename_to = view)]
                 self,
-                move |_, _| view.rebuild()
+                move |_, _| {
+                    view.rebuild();
+                    // From "original only": the romanization may be missing.
+                    if let Some(LyricsState::Lyrics(lyrics)) = view.imp().state.borrow().clone() {
+                        view.add_romanization(lyrics);
+                    }
+                }
             ),
         );
         // Tools write lyrics into the files; rescans bring them here live.
@@ -343,6 +349,36 @@ impl LyricsView {
         ));
     }
 
+    /// Non-Latin lyrics without romanization get it from lyrembed (§5.1),
+    /// shown once it's there; not with the "original only" layout.
+    fn add_romanization(&self, lyrics: gatefold_lyrics::Lyrics) {
+        let imp = self.imp();
+        if imp.settings.string("lyrics-layout") == "original-only"
+            || !lyrics.needs_romanization()
+            || *imp.lines.borrow() != lyrics.lines
+        {
+            return;
+        }
+        let id = imp.track_id.get();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            async move {
+                let Some(romanized) = crate::romanizer::romanize(&lyrics).await else {
+                    return;
+                };
+                let imp = view.imp();
+                // Another song, or other lyrics, meanwhile.
+                if imp.track_id.get() != id || *imp.lines.borrow() != lyrics.lines {
+                    return;
+                }
+                imp.lines.replace(romanized.lines);
+                view.rebuild();
+                view.set_position(GatefoldApplication::get().player().position());
+            }
+        ));
+    }
+
     /// A Spotify song's lyrics from LRCLIB.
     fn load_online(&self, track: TrackObject) {
         let id = Some(track.id());
@@ -388,11 +424,12 @@ impl LyricsView {
         match state {
             LyricsState::Lyrics(lyrics) => {
                 imp.synced.set(lyrics.synced);
-                imp.lines.replace(lyrics.lines);
+                imp.lines.replace(lyrics.lines.clone());
                 self.rebuild();
                 imp.stack.set_visible_child_name("lyrics");
                 let player = GatefoldApplication::get().player();
                 self.set_position(player.position());
+                self.add_romanization(lyrics);
             }
             LyricsState::Instrumental => {
                 self.show_status("folder-music-symbolic", &gettext("Instrumental"), None)
