@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.1.1
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -97,6 +97,21 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sun Nov 08 2026 sobakah - 0.2.0-1
+- Spotify playlists: reorder and rename from the menu, covers, delete
+  or unfollow; safer sending (placed by song, no doubles, locked while
+  sending); ISRCs from MusicBrainz for matching
+- Search: results by kind with Spotify's, an icon for library or
+  Spotify, recent searches
+- Lyrics for Spotify songs from LRCLIB; romanization for display through
+  lyrembed 1.1.1
+- Soloist: the Spotify app keeps control of songs chosen there; many
+  fixes; the API key goes into a file once Soloist allows it
+- Library: moved folders keep their songs' history; ctime; periodic
+  checks; scans write only what changed
+- Related artists from ListenBrainz for smart shuffle; resizable artist
+  pages; keyboard access to panel widths
+
 * Sun Nov 08 2026 sobakah - 0.1.1-1
 - Playlists sort like on Spotify; playlist songs get the album songs'
   actions; Spotify songs' artist and album open from the player

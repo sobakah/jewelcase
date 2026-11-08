@@ -48,6 +48,21 @@
   </branding>
 
   <releases>
+    <release version="0.2.0" date="2026-11-08" type="development">
+      <description>
+        <p>Spotify playlists you can fully edit, a new search, and lyrics for Spotify songs.</p>
+        <ul>
+          <li>Reorder, rename, give a cover to, delete or unfollow Spotify playlists</li>
+          <li>Changes to Spotify playlists are sent more safely</li>
+          <li>Search results by kind, with Spotify's results and an icon for what's in your library; recent searches</li>
+          <li>Lyrics for Spotify songs from LRCLIB, and romanization for lyrics without it (with lyrembed 1.1.1)</li>
+          <li>Songs chosen in the Spotify app keep playing on Soloist</li>
+          <li>Renamed music folders keep their songs' play history</li>
+          <li>Smart shuffle mixes in related artists from ListenBrainz</li>
+          <li>Artist pages can be resized</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-08" type="development">
       <description>
         <p>Playlists, Spotify fixes and a new look for the side panels.</p>

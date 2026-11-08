@@ -2,7 +2,7 @@
 
 A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. Cover art is the main way around your library; lyrics, the queue and details open when you want them. Spotify is optional and stays in its own sections.
 
-**Status:** 0.1.0 is the first pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
+**Status:** 0.2.0 is the current pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
 
 ## Features
 
@@ -14,7 +14,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 
 **Queue and shuffle.** "Play next" and "Add to queue" go before the rest of the album or playlist. The queue can be reordered (also with Alt+↑/↓), cleared and saved as a playlist, and it's restored when Gatefold starts. Shuffle songs or whole albums, or use **smart shuffle**: mix in similar songs by genre, tempo, artist or sound, and keep playing similar music when the queue ends. The song analysis behind it runs in the background once turned on in Preferences.
 
-**Playlists and search.** Playlists get mosaic covers from their albums, can be reordered by drag and drop, and can be imported and exported as M3U8 or XSPF. One search (Ctrl+F) finds artists, albums, songs and playlists, in a card over the current view.
+**Playlists and search.** Playlists get mosaic covers from their albums, can be reordered by drag and drop, and can be imported and exported as M3U8 or XSPF. One search (Ctrl+F) finds artists, albums, songs and playlists, in a card over the current view: your library first, then Spotify's results (when connected), with an icon for what's in your library. The last five searches show while the field is empty.
 
 **Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes:
 
@@ -25,7 +25,8 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 **Spotify (optional).** With Spotify Premium and a developer app of your own (see [Spotify](#spotify-optional) below):
 
 - Play on your Spotify Connect devices, with the player showing what they play.
-- Your Spotify playlists appear next to the local ones. Songs you have play from your files, your own playlists can be edited from Gatefold, and local playlists can be published to Spotify.
+- Your Spotify playlists appear next to the local ones. Songs you have play from your files, and local playlists can be published to Spotify. Your own Spotify playlists can be edited from Gatefold (songs, order, name, cover), and playlists can be deleted or unfollowed.
+- Spotify songs that aren't in your library get lyrics from LRCLIB (optional, only while the lyrics are shown).
 - Saved albums and followed artists that aren't in your library get their own section at the end of the album and artist grids. Artist pages list the artist's releases on Spotify that you don't have.
 - Songs you don't have stream through Spotify Soloist, Spotify's official headless player, in Gatefold's queue.
 
@@ -34,7 +35,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 Fedora 45: download the RPM from the [releases page](https://github.com/sobakah/gatefold/releases) and install it with
 
 ```sh
-sudo dnf install ./gatefold-0.1.0-1.fc45.x86_64.rpm
+sudo dnf install ./gatefold-0.2.0-1.fc45.x86_64.rpm
 ```
 
 To build the RPM yourself, install the build dependencies (`sudo dnf builddep gatefold.spec`) and run `make rpm`; the packages end up in `rpmbuild/RPMS/`.

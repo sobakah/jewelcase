@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (pre-release)
+
+Spotify playlists you can fully edit, a new search, lyrics for Spotify songs, and a round of fixes from a review of the whole program. Gatefold's database is updated on the first start; after that, 0.1.1 can't open it any more. Automatic romanization needs lyrembed 1.1.1 (click **Update** on lyrembed's page, or `pipx upgrade lyrembed`). You may be asked to connect to Spotify again once, for the permission to delete or unfollow playlists.
 
 ### Spotify playlists
 
@@ -41,8 +43,17 @@
 - In shuffle, a song without ReplayGain tags after a tagged one no longer starts too loud or quiet for a moment.
 - Playlists update only the rows that changed, and the cover cache no longer keeps old playlist mosaics and portrait choices forever.
 - Large libraries: a scan that finds a new album writes only what changed, and the window no longer waits while the library is read again afterwards.
+- Album, playlist and artist panels no longer look doubled while you drag their edge, and the grid behind follows the edge as you drag.
 - Artist pages can be made wider or narrower by dragging their left edge, like album and playlist panels; the width is kept separately.
 - The panel width can be changed with the keyboard (focus the panel's edge, then Left or Right), and the time next to the seek bar switches with Enter or Space.
+
+### Install
+
+Download `gatefold-0.2.0-1.fc45.x86_64.rpm` below and install it:
+
+```sh
+sudo dnf install ./gatefold-0.2.0-1.fc45.x86_64.rpm
+```
 
 ## 0.1.1 (pre-release)
 
