@@ -332,3 +332,26 @@ button.smart-shuffle {
 .panel-close-handle:active .grip {
   background-color: color-mix(in srgb, currentColor 50%, transparent);
 }
+
+/* Listening statistics (CONCEPT.md §6.3). */
+.stats-total {
+  padding: 12px 6px;
+}
+
+.stats-timeline {
+  padding: 18px 18px 12px 18px;
+}
+
+.stats-bars {
+  color: var(--accent-color);
+}
+
+.stats-trend {
+  padding: 1px 6px;
+  border-radius: 99px;
+  background-color: alpha(currentColor, 0.1);
+}
+
+.stats-flow > flowboxchild {
+  padding: 0;
+}

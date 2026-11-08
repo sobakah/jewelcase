@@ -207,6 +207,26 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         use-underline: true;
       }
     }
+
+    Adw.PreferencesGroup {
+      title: _("Listening Statistics");
+      description: _("Kept on this computer only; nothing is sent anywhere");
+
+      Adw.SwitchRow stats_row {
+        title: _("_Keep Listening Statistics");
+        subtitle: _("Logs every song that really played: half of it, or 30 seconds");
+        use-underline: true;
+      }
+
+      Adw.ButtonRow delete_stats_row {
+        title: _("_Delete Statistics…");
+        use-underline: true;
+
+        styles [
+          "destructive-action",
+        ]
+      }
+    }
   }
 
   Adw.PreferencesPage {

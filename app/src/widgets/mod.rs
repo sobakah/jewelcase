@@ -20,6 +20,7 @@ mod search_view;
 mod sectioned_grid;
 mod shuffle_options;
 mod spotify_tile;
+pub mod statistics;
 mod track_info;
 mod track_row;
 

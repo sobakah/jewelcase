@@ -570,18 +570,31 @@ impl Player {
     }
 
     /// Library songs and Spotify songs (streamed, or a device's).
-    fn record_history(&self, track: &TrackObject) {
+    /// A song that really played (`played` ms): into Recently Played and,
+    /// unless turned off, the listening statistics.
+    fn record_history(&self, track: &TrackObject, played: u64) {
         let Some(track_id) = self.spotify().durable_id(track) else {
             return;
         };
-        let recorded = self
-            .library()
-            .db()
-            .map(|mut db| db.add_history(track_id, crate::metadata::now()));
-        match recorded {
-            Some(Ok(())) => self.emit_by_name::<()>("history-changed", &[]),
-            Some(Err(err)) => tracing::warn!("Cannot record the play history: {err}"),
-            None => {}
+        let Some(mut db) = self.library().db() else {
+            return;
+        };
+        let now = crate::metadata::now();
+        let played = match track.duration_ms() {
+            0 => played,
+            duration => played.min(duration),
+        };
+        if self.settings().boolean("listening-stats")
+            && let Err(err) = db.log_play(track_id, now, played)
+        {
+            tracing::warn!("Cannot log the play for the statistics: {err}");
+        }
+        match db.add_history(track_id, now) {
+            Ok(()) => {
+                drop(db);
+                self.emit_by_name::<()>("history-changed", &[]);
+            }
+            Err(err) => tracing::warn!("Cannot record the play history: {err}"),
         }
     }
 
@@ -1781,7 +1794,7 @@ impl Player {
         if changed && let Some(previous) = previous {
             let played = imp.position.get();
             if played > 0 && played >= (previous.duration_ms() / 2).min(HISTORY_MIN_MS) {
-                self.record_history(&previous);
+                self.record_history(&previous, played);
             }
         }
         if imp.duration.replace(duration) != duration {

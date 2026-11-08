@@ -21,7 +21,9 @@ use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 mod spotify;
 pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, StreamInfo};
 mod spotify_library;
+mod stats;
 pub use spotify_library::{SpotifyAlbum, SpotifyArtist};
+pub use stats::{PlayEntry, Ranked, Summary, Trend};
 
 const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/001_library.sql")),
@@ -50,6 +52,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/024_similar_artists.sql")),
     M::up(include_str!("db/025_romanized.sql")),
     M::up(include_str!("db/026_spotify_history.sql")),
+    M::up(include_str!("db/027_play_log.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.

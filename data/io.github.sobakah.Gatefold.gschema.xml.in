@@ -92,6 +92,22 @@
       <summary>Crossfade within albums</summary>
       <description>Off: songs of an album playing in order follow gaplessly.</description>
     </key>
+    <key name="statistics-period" type="s">
+      <choices>
+        <choice value="week"/>
+        <choice value="month"/>
+        <choice value="year"/>
+        <choice value="all"/>
+      </choices>
+      <default>"month"</default>
+      <summary>Period shown in Listening Statistics</summary>
+      <description>The last 7 days, 30 days, 12 months, or everything logged.</description>
+    </key>
+    <key name="listening-stats" type="b">
+      <default>true</default>
+      <summary>Keep listening statistics</summary>
+      <description>Every song that really played (half of it, or 30 seconds) is logged on this computer for Listening Statistics; nothing is sent anywhere.</description>
+    </key>
     <key name="replaygain" type="s">
       <choices>
         <choice value="off"/>

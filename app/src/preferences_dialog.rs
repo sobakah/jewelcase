@@ -42,6 +42,10 @@ mod imp {
         #[template_child]
         pub restore_queue_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub stats_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub delete_stats_row: TemplateChild<adw::ButtonRow>,
+        #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub start_view_row: TemplateChild<adw::ComboRow>,
@@ -128,6 +132,14 @@ mod imp {
             settings
                 .bind("restore-queue", &*self.restore_queue_row, "active")
                 .build();
+            settings
+                .bind("listening-stats", &*self.stats_row, "active")
+                .build();
+            self.delete_stats_row.connect_activated(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.ask_delete_stats()
+            ));
             bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
             bind_choice(&settings, "lyrics-pane", &self.lyrics_pane_row, &PANE_MODES);
             bind_choice(&settings, "queue-pane", &self.queue_pane_row, &PANE_MODES);
@@ -375,6 +387,47 @@ impl PreferencesDialog {
             .settings
             .get()
             .expect("settings are set in constructed()")
+    }
+
+    /// Deletes the play log after asking (the history stays).
+    fn ask_delete_stats(&self) {
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("Delete Listening Statistics?")),
+            Some(&gettext(
+                "Everything logged so far is deleted; they can't be brought back. Recently Played stays.",
+            )),
+        );
+        dialog.add_responses(&[
+            ("cancel", &gettext("_Cancel")),
+            ("delete", &gettext("_Delete")),
+        ]);
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        dialog.connect_response(
+            Some("delete"),
+            glib::clone!(
+                #[weak(rename_to = preferences)]
+                self,
+                move |_, _| {
+                    let library = crate::application::GatefoldApplication::get().library();
+                    let deleted = library.db().map(|mut db| db.delete_play_log());
+                    match deleted {
+                        Some(Ok(())) => {
+                            preferences.add_toast(adw::Toast::new(&gettext("Statistics deleted")));
+                        }
+                        Some(Err(err)) => {
+                            tracing::warn!("Cannot delete the statistics: {err}");
+                            preferences.add_toast(adw::Toast::new(&gettext(
+                                "The statistics couldn't be deleted",
+                            )));
+                        }
+                        None => {}
+                    }
+                }
+            ),
+        );
+        dialog.present(Some(self));
     }
 
     fn refresh_folders(&self) {

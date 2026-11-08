@@ -181,6 +181,11 @@ impl GatefoldApplication {
         let about = gio::ActionEntry::builder("about")
             .activate(|app: &Self, _, _| app.show_about())
             .build();
+        let statistics = gio::ActionEntry::builder("statistics")
+            .activate(|app: &Self, _, _| {
+                crate::widgets::statistics::show(app.active_window().as_ref());
+            })
+            .build();
         let rescan = gio::ActionEntry::builder("rescan")
             .activate(|app: &Self, _, _| app.library().rescan_all())
             .build();
@@ -204,6 +209,7 @@ impl GatefoldApplication {
             preferences,
             shortcuts,
             about,
+            statistics,
             rescan,
             import_cd,
             continue_import,
