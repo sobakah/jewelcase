@@ -116,7 +116,14 @@ pub enum Op {
     Replace {
         uris: Vec<String>,
     },
+    /// A new cover (a key in the cover cache).
+    Cover {
+        key: String,
+    },
 }
+
+/// Spotify takes covers up to 256 KB of base64: JPEGs up to this size.
+const MAX_COVER_BYTES: usize = 190_000;
 
 /// What to do with a change, given what Spotify has now.
 enum Placed {
@@ -180,6 +187,7 @@ impl Op {
             }),
             Self::Rename { name } => json!({"op": "rename", "name": name}),
             Self::Replace { uris } => json!({"op": "replace", "uris": uris}),
+            Self::Cover { key } => json!({"op": "cover", "key": key}),
         }
         .to_string()
     }
@@ -229,6 +237,9 @@ impl Op {
                 name: value["name"].as_str()?.to_owned(),
             },
             "replace" => Self::Replace { uris: uris() },
+            "cover" => Self::Cover {
+                key: value["key"].as_str()?.to_owned(),
+            },
             _ => return None,
         })
     }
@@ -239,7 +250,7 @@ impl Op {
             Self::Add { position, .. } => position.is_some(),
             Self::Remove { restore, .. } => !restore.is_empty(),
             Self::Move { .. } => true,
-            Self::Rename { .. } | Self::Replace { .. } => false,
+            Self::Rename { .. } | Self::Replace { .. } | Self::Cover { .. } => false,
         }
     }
 
@@ -346,7 +357,7 @@ impl Op {
                 current.splice(at..at, moved);
             }
             Self::Replace { uris } => *current = uris.clone(),
-            Self::Rename { .. } => {}
+            Self::Rename { .. } | Self::Cover { .. } => {}
         }
     }
 
@@ -378,6 +389,18 @@ impl Op {
                 .map(Some),
             Self::Rename { name } => client.rename_playlist(id, name).map(|()| None),
             Self::Replace { uris } => client.replace_items(id, uris).map(Some),
+            Self::Cover { key } => {
+                let covers =
+                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                match covers.upload_jpeg(key, MAX_COVER_BYTES) {
+                    Ok(jpeg) => client.upload_cover(id, &jpeg).map(|()| None),
+                    // Gone from the cache (replaced again): nothing to send.
+                    Err(err) => {
+                        tracing::warn!("Cannot prepare the cover for Spotify: {err}");
+                        Ok(None)
+                    }
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -1093,8 +1116,9 @@ impl Spotify {
                             }
                         }
                         Op::Rename { name } => client.rename_playlist(&sid, &name)?,
-                        // The order changed elsewhere; theirs stays.
-                        Op::Move { .. } | Op::Replace { .. } => {}
+                        // The order changed elsewhere; theirs stays. A
+                        // refused cover isn't tried again.
+                        Op::Move { .. } | Op::Replace { .. } | Op::Cover { .. } => {}
                     }
                 }
                 Ok(())
@@ -1872,6 +1896,7 @@ mod tests {
             },
             Op::Rename { name: "New".into() },
             Op::Replace { uris: vec![] },
+            Op::Cover { key: "cabc".into() },
         ] {
             assert_eq!(Op::parse(&op.to_json()), Some(op));
         }

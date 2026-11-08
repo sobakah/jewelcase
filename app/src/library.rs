@@ -1142,6 +1142,9 @@ impl Library {
 
     /// Uses an image file as the playlist's cover (decoded by glycin).
     pub async fn set_playlist_cover(&self, id: i64, data: Vec<u8>) -> Result<(), String> {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
+            return Ok(());
+        }
         let key = gatefold_core::library::covers::cover_key('c', &data);
         let job_key = key.clone();
         gio::spawn_blocking(move || {
@@ -1155,6 +1158,10 @@ impl Library {
         .await
         .map_err(|_| "the cover job failed".to_owned())??;
         self.playlist_op(|db, now| db.set_playlist_cover(id, Some(&key), now));
+        // Spotify gets it too, for playlists that are synced and editable.
+        if self.spotify_link(id).is_some_and(|p| p.editable) {
+            self.queue_spotify_op(id, crate::spotify::Op::Cover { key });
+        }
         Ok(())
     }
 

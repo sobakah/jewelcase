@@ -188,6 +188,24 @@ impl CoverCache {
         cover_key('m', joined.as_bytes())
     }
 
+    /// A cached cover as a JPEG of at most `max_bytes` and 640 px (what
+    /// Spotify takes as a playlist cover): from the panel thumbnail,
+    /// with less quality until it fits.
+    pub fn upload_jpeg(&self, key: &str, max_bytes: usize) -> Result<Vec<u8>, CoverError> {
+        let path = self.path(key, CoverSize::Panel);
+        let image = image::open(&path).map_err(|e| CoverError::Decode(e.to_string()))?;
+        let image = image.resize(640, 640, FilterType::Lanczos3).to_rgb8();
+        for quality in [90, 80, 70, 60, 50, 40] {
+            let mut data = Vec::new();
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, quality);
+            DynamicImage::ImageRgb8(image.clone()).write_with_encoder(encoder)?;
+            if data.len() <= max_bytes {
+                return Ok(data);
+            }
+        }
+        Err(CoverError::Decode("too large even at low quality".into()))
+    }
+
     fn write_thumbnails(&self, key: &str, image: &DynamicImage) -> Result<(), CoverError> {
         fs::create_dir_all(&self.dir)?;
         for size in CoverSize::ALL {

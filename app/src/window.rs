@@ -1696,7 +1696,8 @@ impl GatefoldWindow {
                 }
             }
             // `GATEFOLD_SCREENSHOT_EDITS="move:0:2 remove:1 add:Title
-            // rename:Name"`: edits of the open playlist, 3 s in.
+            // rename:Name cover:/path.jpg"`: edits of the open playlist, 3 s
+            // in.
             if let Ok(edits) = std::env::var("GATEFOLD_SCREENSHOT_EDITS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(3, move || {
@@ -1728,6 +1729,14 @@ impl GatefoldWindow {
                             }
                             ["rename", name] => {
                                 library.rename_playlist(id, &name.replace('_', " "))
+                            }
+                            ["cover", path] => {
+                                if let Ok(data) = std::fs::read(path) {
+                                    let library = library.clone();
+                                    glib::spawn_future_local(async move {
+                                        let _ = library.set_playlist_cover(id, data).await;
+                                    });
+                                }
                             }
                             _ => tracing::warn!("Unknown edit {edit}"),
                         }

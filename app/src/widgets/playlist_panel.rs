@@ -503,7 +503,9 @@ impl PlaylistPanel {
             "playlist.arrange",
             editable && linked && info.readable && !imp.arranging.get(),
         );
-        self.action_set_enabled("playlist.change-cover", !mirror);
+        // Mirrors: a new cover goes to Spotify too (owned ones); Spotify
+        // has no "back to automatic", so there's no reset for them.
+        self.action_set_enabled("playlist.change-cover", !mirror || editable);
         self.action_set_enabled("playlist.reset-cover", !mirror);
         self.action_set_enabled("playlist.publish", connected && !linked);
         self.action_set_enabled("playlist.refresh", connected && linked);
