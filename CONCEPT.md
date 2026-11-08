@@ -334,7 +334,7 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
   - **GStreamer `bpmdetect`** → BPM number, because there are no BPM tags in the library. A `BPM`/`TBPM`/`tmpo` tag, if one ever exists, takes precedence.
   - Expect roughly 1–3 s CPU per track: about 15–30 min for the current ~600 tracks. Progress shows in Preferences → Library, and features that depend on the analysis are greyed out per track until it's done.
   - Results are keyed by file content hash (not path), so moved or renamed files (cdimport's moves, identical tracks in merged editions) aren't analyzed twice.
-- Optional later: ListenBrainz's public similar-artists dataset (by MBID, read-only, no account, no scrobbling) to widen the "same artist" criterion to "related artists". Spotify's related-artists and recommendations endpoints are **not available** to new apps since Nov 2024, so they aren't an option.
+- **Related artists** (November 2026): ListenBrainz's public similar-artists dataset (labs API `similar-artists/json`, by MBID, read-only, no account, no scrobbling) widens "same artist": a related artist scores up to 0.6 of the same artist, by ListenBrainz's score over the artist's best. Asked only with online lookups and "same artist" on, when smart shuffle needs it: one artist at a time through the metadata worker, at most one request a second (ListenBrainz's rule), each again after 90 days (migration 024), an hour's pause after a 429 or 5xx. Spotify's related-artists and recommendations endpoints are **not available** to new apps since Nov 2024, so they aren't an option.
 
 ---
 
@@ -479,7 +479,9 @@ Each write returns a new `snapshot_id`. OAuth scopes: `playlist-read-private`, `
 - **Covers**: Spotify playlists show Spotify's image (its own, or its mosaic of the whole playlist), also when some of their songs are in the library.
 - **Others' playlists**: Spotify answers 403 for their entries in Development Mode, even when the list shows a song count. Gatefold asks once per snapshot and then shows them as hidden; reading them needs librespot (phase 8).
 - **Searches**: a failed search (offline, too many requests) is never taken as "not on Spotify"; it's retried later. Spotify's waits up to 30 s are waited out.
-- **Not yet**: deleting or unfollowing Spotify playlists (`DELETE /me/library` with the playlist's URI since February 2026).
+- **Remove from Spotify…** (November 2026): deletes your own playlist on Spotify, unfollows someone else's (`DELETE /me/library?uris=spotify:playlist:<id>`; new logins also ask for `user-library-modify`, an older login that Spotify refuses is asked to connect again). The dialog says Spotify keeps deleted playlists restorable for 90 days (spotify.com/account/recover-playlists) and that followers keep theirs. A mirror can stay as a local playlist (default for your own); a published one always stays. A sync job; changes still waiting are dropped; a removed playlist that Spotify's list still shows for a moment isn't mirrored again.
+- **Picking in the Spotify app**: while Gatefold plays through Soloist, a song chosen or skipped to in the Spotify app with more than 15 s of Gatefold's song left is the app's choice: Gatefold lets go and shows it as the receiver. At the end of a song (Soloist's autoplay), Gatefold's queue still decides.
+- **Lyrics for Spotify songs** (November 2026): from LRCLIB (`/api/get` by title, artist, album, length; once more without the album when that found nothing), shown only. Only for the song that plays and only while the lyrics are on screen; every answer cached (migration 023), misses asked again after 30 days; an hour's pause after a 429 or 5xx (or `Retry-After`), 10 minutes offline; one request at a time. Preferences → Online → Lyrics (on by default, with online lookups). The lyrics pane no longer closes for these songs.
 
 ### 9.8 Saved albums, followed artists and discographies
 Spotify's albums and artists are shown **apart from the library**, never mixed into its grids, sorting or search:
@@ -664,15 +666,13 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
-- **Lyrics for Spotify-only songs** from LRCLIB (free public lyrics database, by title, artist and length): shown only, never embedded. In remote mode the Lyrics pane is off for such songs until then (§9.7).
-- **Unfollowing or deleting Spotify playlists** (`DELETE /me/library`; deleting your own playlist is unfollowing it, Spotify keeps it restorable for 90 days at spotify.com/account/recover-playlists).
-- **ListenBrainz similar artists** for smart shuffle's "same artist" criterion (§7).
+- None at the moment; LRCLIB lyrics, removing Spotify playlists and ListenBrainz related artists were done in November 2026 (§7, §9.7).
 
 ### Known issues (code review, November 2026)
 A review of the whole program (six areas, read in full) found about 85 problems; all but these are fixed (the last ones on 2026-11-08).
 
 **Security**
-- **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Fix:* a key file (0600, in Gatefold's own data folder, or systemd's `LoadCredential=` for soloistd) once Soloist takes one; an environment variable would be the second choice (`/proc/<pid>/environ` is readable only by the same user and root, but it's inherited by child processes and ends up in crash reports). Where: `soloist/src/lib.rs`, `Soloist::start`.
+- **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Ready:* when `soloist --help` lists `--api-key-file`, Gatefold writes the key to a 0600 file next to its Soloist data folder, passes that, and removes the file once Soloist listens (chosen over an environment variable, which child processes inherit and crash reports may contain). soloistd would need the same change (or systemd's `LoadCredential=`). Where: `soloist/src/lib.rs`, `Soloist::start`.
 
 **Performance (large libraries)**
 - **A scan that found changes still rewrites everything**: all album and artist rows, the whole search index, and on the main thread the reload reads all genres, runs per-artist subqueries and rematches every Spotify entry in one write transaction. *Fix:* update only changed albums; move reload queries off the main thread. Where: `db.replace_library`, `rebuild_search`; `app/src/library.rs`, `reload`, `rematch_spotify`.

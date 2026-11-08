@@ -10,10 +10,16 @@
 - Changes wait 4 seconds after your last edit, then go out together. While they're on their way, the playlist can't be changed ("sending changes to Spotify…").
 - Songs added or moved while someone changed the playlist elsewhere (on the phone) land after the right song, not at a shifted position. A song whose confirmation got lost (a timeout) is no longer added twice.
 - "Create on Spotify" clicked twice creates one playlist.
+- "Remove from Spotify…" deletes your own playlist on Spotify (Spotify keeps it restorable for 90 days) or unfollows someone else's; it can stay in Gatefold as a local playlist. You may be asked to connect to Spotify again once, for the extra permission.
 - With online lookups on, songs without an ISRC get the ones MusicBrainz knows (one request per album, once), so more Spotify playlist songs are found in your library.
+
+### Lyrics
+
+- Spotify songs that aren't in your library get lyrics from LRCLIB, synced where LRCLIB has them. Gatefold asks only for the song that plays, only while the lyrics are shown, and remembers every answer. Preferences → Online → Lyrics turns it off.
 
 ### Soloist and Spotify Connect
 
+- Picking or skipping songs in the Spotify app while Gatefold plays through Soloist works: the app's song plays and Gatefold shows it, instead of replacing it with its own next song.
 - When the Spotify app moves playback away from Soloist, Gatefold stops showing Soloist's song.
 - Shuffle or repeat failing no longer marks a song as unavailable; giving up on a song pauses Soloist, so it doesn't start late.
 - A stopped soloistd service is no longer waited for; Gatefold starts its own Soloist. Turning streaming off while Gatefold connects really stops it.
@@ -23,6 +29,7 @@
 
 - Renaming or moving a music folder keeps the songs' play history, queue and playlist entries, Spotify matches and "added" dates.
 - Tag edits that keep the file's date (Picard's "preserve timestamps") are noticed. The library is also checked every 30 minutes, for changes on a network share.
+- Smart shuffle's "same artist" also mixes in related artists (from ListenBrainz, with online lookups on).
 - In shuffle, a song without ReplayGain tags after a tagged one no longer starts too loud or quiet for a moment.
 - Playlists update only the rows that changed, and the cover cache no longer keeps old playlist mosaics and portrait choices forever.
 - The panel width can be changed with the keyboard (focus the panel's edge, then Left or Right), and the time next to the seek bar switches with Enter or Space.
