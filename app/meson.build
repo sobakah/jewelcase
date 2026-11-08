@@ -19,13 +19,17 @@ cargo_env.set('GATEFOLD_GETTEXT_PACKAGE', gettext_package)
 cargo_env.set('GATEFOLD_GRESOURCE', gresource_bundle.full_path())
 cargo_env.set('CARGO_TARGET_DIR', meson.project_build_root() / 'target')
 
-custom_target(
+# The development build is installed as gatefold-devel, so it doesn't hide
+# the installed app's program (its output stays app/gatefold for make run
+# and the headless tests).
+development = get_option('profile') == 'development'
+cargo_build = custom_target(
   'cargo-build',
   build_by_default: true,
   build_always_stale: true,
   output: meson.project_name(),
   console: true,
-  install: true,
+  install: not development,
   install_dir: bindir,
   depends: gresource_bundle,
   env: cargo_env,
@@ -38,6 +42,16 @@ custom_target(
     cargo_options,
   ],
 )
+if development
+  meson.add_install_script(
+    find_program('sh'),
+    '-c',
+    'install -Dm755 "$1" "${MESON_INSTALL_DESTDIR_PREFIX}/$2/' + program_name + '"',
+    'sh',
+    cargo_build.full_path(),
+    get_option('bindir'),
+  )
+endif
 
 # Without streaming, the librespot crate isn't built for the tests either
 # (it alone takes minutes). A release build of all tests takes a while on

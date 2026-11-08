@@ -34,9 +34,14 @@ if get_option('profile') == 'development'
   application_id = base_id + '.Devel'
   git_rev = run_command('git', 'rev-parse', '--short', 'HEAD', check: false).stdout().strip()
   version_suffix = git_rev != '' ? '-' + git_rev : '-devel'
+  # Installed next to the RPM: its own program and menu entry.
+  program_name = meson.project_name() + '-devel'
+  name_suffix = ' (Development)'
 else
   application_id = base_id
   version_suffix = ''
+  program_name = meson.project_name()
+  name_suffix = ''
 endif
 
 subdir('data')

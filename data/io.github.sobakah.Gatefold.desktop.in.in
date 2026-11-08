@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=Gatefold
+Name=Gatefold@name_suffix@
 GenericName=Music Player
 Comment=Listen to your albums, follow artists and curate playlists
 # Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
 Keywords=music;player;album;artist;playlist;lyrics;audio;flac;
-Exec=gatefold
+Exec=@program@
 Icon=@app_id@
 Terminal=false
 Type=Application

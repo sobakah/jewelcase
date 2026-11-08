@@ -2,6 +2,8 @@ subdir('resources')
 
 app_conf = configuration_data()
 app_conf.set('app_id', application_id)
+app_conf.set('program', program_name)
+app_conf.set('name_suffix', name_suffix)
 app_conf.set('schema_path', '/' + application_id.replace('.', '/') + '/')
 
 # Desktop file
