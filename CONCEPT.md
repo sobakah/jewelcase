@@ -291,6 +291,8 @@ The goal: every non-Latin lyric is shown with a romanized line, without the user
 
 **Fallback without lyrembed** (not installed, or older than the version with `romanize --stdio`): no auto-romanization. The Integrations page says why and shows the install/update command.
 
+**As built (November 2026, lyrembed 1.1.1):** for the song that plays (local lyrics without romanization, and LRCLIB lyrics for Spotify songs), not prefetched; the lyrics show at once and the romanization replaces them when it's there; not with the "original only" layout. One helper process, stopped after 5 minutes idle and when Gatefold quits; results (also "nothing to do") cached by a hash of the text and hint (migration 025). The Han hint comes only from the file's language tag (`TLAN`/`LANGUAGE`); no setting yet, and no "auto" marker. lyrembed 1.1.1 lets a `"ja"` hint outweigh Chinese evidence (fixed in its working tree, not released yet), which is why Gatefold sends one only from the tag.
+
 ---
 
 ## 6. Queue
@@ -572,7 +574,7 @@ These are small changes in lyrembed and cdimport that would make the integration
 
 | Tool | Addition | Lets the player… |
 |---|---|---|
-| lyrembed | **Required:** `lyrembed romanize --stdio`, a long-running filter. Input: JSON lines `{"id":…, "lyrics":"…", "han_hint":"ja"\|"zh"\|null}`. Output: `{"id":…, "lyrics":"…" (layout below), "scripts":["hangul",…], "unresolved_han":n}`. Writes nothing, no network. | romanize automatically for display (§5.1) with lyrembed's engine, with ~1 s start-up once instead of per song |
+| lyrembed | **Done in 1.1.1:** `lyrembed romanize --stdio`, a long-running filter. Input: JSON lines `{"id":…, "lyrics":"…", "han_hint":"ja"\|"zh"\|null}`. Output: `{"id":…, "lyrics":"…" (layout below) \| null, "language":"ko"\|"ja"\|"zh"\|"mixed"\|"any"\|null, "reason":"…"}`, or `"error"` for a line that isn't a request. Writes nothing, no network. | romanize automatically for display (§5.1) with lyrembed's engine, with ~1 s start-up once instead of per song |
 | lyrembed | `--auto --romanize-only` (romanize the embedded lyrics of a folder, layout below, with backups, no search) | offer **"Save romanization to files"** without opening the page |
 | lyrembed | `path` may be a **single audio file**: the page opens directly on that track | open "Check & edit" for the track that's playing, not the whole album |
 | lyrembed | `--json` for `--auto`: one JSON line per track (`{"file":…, "result":"embedded/none/instrumental/failed", "source":…}`) | show per-track progress and results instead of re-reading files |
@@ -666,17 +668,13 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
-- None at the moment; LRCLIB lyrics, removing Spotify playlists and ListenBrainz related artists were done in November 2026 (§7, §9.7).
+- **Next from the Spotify app while Gatefold streams through Soloist.** Soloist gets one song at a time, so the Spotify app sees nothing after it and Next does nothing (Pause works; MPRIS and KDE Connect control Gatefold directly). Gatefold could keep its next song queued in Soloist all the time instead of 10 s before the end; Soloist moving to it is already taken as Gatefold's next song. Limits: only when the next song is a Spotify one (local files can't go into Spotify's queue), Soloist's queue can't be emptied (a queued song Gatefold no longer wants stays there), Previous only restarts the song. Not the whole queue: Spotify's queue can't hold local songs, and nothing in it can be removed or reordered. Where: `app/src/spotify/soloist.rs`, `schedule_end`, `soloist_item`.
 
 ### Known issues (code review, November 2026)
-A review of the whole program (six areas, read in full) found about 85 problems; all but these are fixed (the last ones on 2026-11-08).
+A review of the whole program (six areas, read in full) found about 85 problems; all but this one are fixed (the last ones on 2026-11-08: scans now write only what changed, and the reload after a scan runs on a worker thread).
 
 **Security**
 - **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Ready:* when `soloist --help` lists `--api-key-file`, Gatefold writes the key to a 0600 file next to its Soloist data folder, passes that, and removes the file once Soloist listens (chosen over an environment variable, which child processes inherit and crash reports may contain). soloistd would need the same change (or systemd's `LoadCredential=`). Where: `soloist/src/lib.rs`, `Soloist::start`.
-
-**Performance (large libraries)**
-- **A scan that found changes still rewrites everything**: all album and artist rows, the whole search index, and on the main thread the reload reads all genres, runs per-artist subqueries and rematches every Spotify entry in one write transaction. *Fix:* update only changed albums; move reload queries off the main thread. Where: `db.replace_library`, `rebuild_search`; `app/src/library.rs`, `reload`, `rematch_spotify`.
-- **The main thread can wait up to 5 s for the database** (`busy_timeout`) while the scanner holds a long transaction (song changes write the history). Shorter scanner transactions come with the fix above. Where: `core/src/db.rs`, `Database::open`.
 
 ---
 

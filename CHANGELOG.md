@@ -16,6 +16,7 @@
 ### Lyrics
 
 - Spotify songs that aren't in your library get lyrics from LRCLIB, synced where LRCLIB has them. Gatefold asks only for the song that plays, only while the lyrics are shown, and remembers every answer. Preferences → Online → Lyrics turns it off.
+- Korean, Japanese and Chinese lyrics without romanization get it under each line, like lyrics lyrembed romanized in the files, also lyrics from LRCLIB. This needs lyrembed 1.1.1 or newer and writes nothing to the files.
 
 ### Soloist and Spotify Connect
 
@@ -32,6 +33,7 @@
 - Smart shuffle's "same artist" also mixes in related artists (from ListenBrainz, with online lookups on).
 - In shuffle, a song without ReplayGain tags after a tagged one no longer starts too loud or quiet for a moment.
 - Playlists update only the rows that changed, and the cover cache no longer keeps old playlist mosaics and portrait choices forever.
+- Large libraries: a scan that finds a new album writes only what changed, and the window no longer waits while the library is read again afterwards.
 - The panel width can be changed with the keyboard (focus the panel's edge, then Left or Right), and the time next to the seek bar switches with Enter or Space.
 
 ## 0.1.1 (pre-release)
