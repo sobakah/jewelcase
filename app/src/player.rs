@@ -205,14 +205,6 @@ impl Player {
             ),
         );
         settings.connect_changed(
-            Some("replaygain-preamp"),
-            glib::clone!(
-                #[weak]
-                player,
-                move |_, _| player.apply_replaygain()
-            ),
-        );
-        settings.connect_changed(
             Some("replaygain"),
             glib::clone!(
                 #[weak]
@@ -1226,7 +1218,6 @@ impl Player {
         }
         imp.active.set(new);
         engine.set_volume(0.0);
-        engine.set_preamp(self.settings().double("replaygain-preamp"));
         engine.set_album_gain(self.album_gain());
         self.apply_measured_gain(engine, track.id());
         engine.load(&uri, lead_in, true);
@@ -1751,10 +1742,8 @@ impl Player {
     fn apply_replaygain(&self) {
         let mode = self.settings().string("replaygain");
         let album = self.album_gain();
-        let preamp = self.settings().double("replaygain-preamp");
         for engine in self.all_engines() {
             engine.set_replaygain(mode != "off");
-            engine.set_preamp(preamp);
             engine.set_album_gain(album);
         }
         if let (Some(engine), Some(track)) = (self.engine(), self.current_track()) {
@@ -1772,7 +1761,6 @@ impl Player {
     /// The gain for a song without ReplayGain tags: its measured one, or
     /// minus the pre-amp to play it as it is.
     fn fallback_gain(&self, track_id: i64) -> f64 {
-        let preamp = self.settings().double("replaygain-preamp");
         let measured = (track_id > 0)
             .then(|| self.library().db())
             .flatten()
@@ -1780,7 +1768,7 @@ impl Player {
         if let Some(gain) = measured {
             tracing::debug!("Measured gain for track {track_id}: {gain:.1} dB");
         }
-        measured.unwrap_or(-preamp)
+        measured.unwrap_or(-playback::PREAMP_DB)
     }
 
     fn set_current_track(&self, track: Option<TrackObject>) {

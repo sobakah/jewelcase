@@ -34,8 +34,6 @@ mod imp {
         #[template_child]
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub preamp_row: TemplateChild<adw::SpinRow>,
-        #[template_child]
         pub crossfade_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub crossfade_albums_row: TemplateChild<adw::SwitchRow>,
@@ -186,9 +184,6 @@ mod imp {
                 })
                 .build();
             settings
-                .bind("replaygain-preamp", &*self.preamp_row, "value")
-                .build();
-            settings
                 .bind("crossfade", &*self.crossfade_row, "value")
                 .build();
             settings
@@ -204,12 +199,6 @@ mod imp {
                     .sync_create()
                     .build();
             }
-            // No pre-amp without ReplayGain.
-            self.replaygain_row
-                .bind_property("selected", &*self.preamp_row, "sensitive")
-                .transform_to(|_, selected: u32| Some(selected != 0))
-                .sync_create()
-                .build();
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();
             obj.add(&crate::spotify::preferences::page());

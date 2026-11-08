@@ -162,7 +162,10 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
             count
         } else if has_all(playlist.id()) {
             let (note, tooltip) = if tracks.len() == 1 {
-                (gettext("Has this song"), gettext("Remove the Song From This Playlist"))
+                (
+                    gettext("Has this song"),
+                    gettext("Remove the Song From This Playlist"),
+                )
             } else {
                 (
                     gettext("Has all of these songs"),
@@ -238,8 +241,11 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                             library.remove_playlist_items(id, &items);
                         } else {
                             // Only those it doesn't have yet.
-                            let missing: Vec<i64> =
-                                tracks.iter().copied().filter(|t| !had.contains(t)).collect();
+                            let missing: Vec<i64> = tracks
+                                .iter()
+                                .copied()
+                                .filter(|t| !had.contains(t))
+                                .collect();
                             library.add_to_playlist(id, &missing, true);
                         }
                     }

@@ -1272,7 +1272,10 @@ impl Library {
             .map(|p| p.playlist().name.clone())
             .unwrap_or_default();
         // Translators: {} is a playlist name.
-        self.emit_by_name::<()>("message", &[&gettext("Removed from “{}”").replace("{}", &name)]);
+        self.emit_by_name::<()>(
+            "message",
+            &[&gettext("Removed from “{}”").replace("{}", &name)],
+        );
     }
 
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {

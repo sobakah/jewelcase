@@ -359,9 +359,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     // Spotify's songs are louder than ReplayGain'd files.
     let offset = adw::SpinRow::builder()
         .title(gettext("Volume of Spotify Songs"))
-        .subtitle(gettext(
-            "In dB; 0 matches your files with ReplayGain and its default pre-amp",
-        ))
+        .subtitle(gettext("In dB; 0 matches your files with ReplayGain"))
         .adjustment(&gtk::Adjustment::new(0.0, -15.0, 6.0, 1.0, 3.0, 0.0))
         .build();
     settings

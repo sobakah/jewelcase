@@ -1400,7 +1400,8 @@ mod tests {
         assert!(db.playlists_containing(one, None).unwrap().is_empty());
         // A device's song, known by its URI only.
         assert_eq!(
-            db.playlists_containing(0, Some("spotify:track:two")).unwrap(),
+            db.playlists_containing(0, Some("spotify:track:two"))
+                .unwrap(),
             [other]
         );
     }

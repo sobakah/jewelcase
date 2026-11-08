@@ -115,20 +115,6 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
           ]
         };
       }
-
-      Adw.SpinRow preamp_row {
-        title: _("_Pre-Amp");
-        subtitle: _("In dB on top of ReplayGain’s standard level; +4 is about as loud as Spotify and most players");
-        use-underline: true;
-        digits: 1;
-
-        adjustment: Gtk.Adjustment {
-          lower: -15;
-          upper: 15;
-          step-increment: 0.5;
-          page-increment: 3;
-        };
-      }
     }
 
     Adw.PreferencesGroup {

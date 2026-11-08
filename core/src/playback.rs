@@ -22,6 +22,11 @@ use std::sync::{Arc, Mutex};
 
 use gst::prelude::*;
 
+/// Extra gain on top of ReplayGain's −18 LUFS reference: +4 dB is about
+/// Spotify's and most players' −14 LUFS, so local and Spotify songs play
+/// equally loud. It applies to the fallback gain too.
+pub const PREAMP_DB: f64 = 4.0;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerEvent {
     /// A new stream started playing (after `load` or a gapless switch).
@@ -96,6 +101,7 @@ impl Player {
         prefer_replaygain_tags(&rgvolume);
         let pending_gain: Arc<Mutex<Option<f64>>> = Arc::default();
         set_gain_at_stream_start(&rgvolume, pending_gain.clone());
+        rgvolume.set_property("pre-amp", PREAMP_DB);
         // Room above the peak for positive gains (the pre-amp, quiet
         // songs); rglimiter keeps the result from clipping.
         rgvolume.set_property("headroom", 6.0f64);
@@ -255,12 +261,6 @@ impl Player {
         if let Ok(mut replaygain) = self.replaygain.lock() {
             *replaygain = enabled;
         }
-    }
-
-    /// Extra gain on top of ReplayGain's −18 LUFS reference (+4 dB is about
-    /// Spotify's −14 LUFS). It applies to the fallback gain too.
-    pub fn set_preamp(&self, db: f64) {
-        self.rgvolume.set_property("pre-amp", db.clamp(-15.0, 15.0));
     }
 
     /// The gain (dB, before the pre-amp) for a song without ReplayGain
