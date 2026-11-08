@@ -231,6 +231,15 @@ template $GatefoldPlaylistPanel: Adw.Bin {
                 ]
               }
 
+              // Reordering a Spotify playlist (CONCEPT.md §9.6): only after
+              // choosing it in the menu; the new order goes out once done.
+              Adw.Banner arrange_banner {
+                title: _("Drag songs to change the order, here and on Spotify");
+                button-label: _("_Done");
+                revealed: false;
+                margin-bottom: 6;
+              }
+
               Gtk.ListBox items {
                 selection-mode: none;
 
@@ -359,6 +368,18 @@ menu playlist_menu {
 
   // Spotify (CONCEPT.md §9.6).
   section {
+    item {
+      label: _("Re_name on Spotify…");
+      action: "playlist.rename-spotify";
+      hidden-when: "action-disabled";
+    }
+
+    item {
+      label: _("Change Or_der on Spotify");
+      action: "playlist.arrange";
+      hidden-when: "action-disabled";
+    }
+
     item {
       label: _("Create on _Spotify…");
       action: "playlist.publish";

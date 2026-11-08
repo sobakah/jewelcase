@@ -21,9 +21,12 @@ use super::Spotify;
 use crate::application::GatefoldApplication;
 use crate::metadata::now;
 
-/// Local edits wait this long, so a drag & drop or a bulk add goes out
-/// as few calls.
-const FLUSH_DELAY: Duration = Duration::from_millis(1500);
+/// Local edits wait this long after the last one, so several edits in a
+/// row (drags, removes, a bulk add) go out together, and a playlist is
+/// rarely locked while it's being changed.
+const FLUSH_DELAY: Duration = Duration::from_secs(4);
+/// A playlist just created on Spotify may not be in Spotify's list yet.
+const NEW_PLAYLIST_GRACE: Duration = Duration::from_secs(600);
 /// After a network error, waiting changes are tried again this much later.
 const RETRY_DELAY_S: u32 = 60;
 /// "Not on Spotify" is believed for this long, then searched again.
@@ -49,6 +52,22 @@ pub struct SyncState {
     /// (one retry each, not one per failure).
     full_retry: bool,
     resolve_retry: std::collections::HashSet<i64>,
+    /// Playlists whose changes wait until the user is done (reordering).
+    held: std::collections::HashSet<i64>,
+    /// Local playlists being created on Spotify ("Create on Spotify").
+    publishing: std::collections::HashSet<i64>,
+    /// Creations waiting for their turn: (playlist, entries found).
+    create: Vec<Creation>,
+    /// Spotify playlists created in this session, and when.
+    created: Vec<(String, std::time::Instant)>,
+}
+
+/// "Create on Spotify", once the user said yes.
+struct Creation {
+    id: i64,
+    name: String,
+    /// Entries and the Spotify songs found for them.
+    found: Vec<(i64, String)>,
 }
 
 /// How long to wait before trying again: what Spotify asked for (it can be
@@ -61,11 +80,20 @@ fn retry_delay(err: &Error) -> u32 {
 }
 
 /// A change waiting in the outbox; positions are Spotify's (§9.6).
+///
+/// Positions only hold for the snapshot they were made for, so adds and
+/// moves also name the entry they follow: when the playlist changed
+/// elsewhere meanwhile, that's where they go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Add {
         uris: Vec<String>,
         position: Option<u32>,
+        /// The Spotify entry before it (`None`: at the start, or old ops).
+        after: Option<String>,
+        /// Sent, but the answer got lost (timeout, reset): checked before
+        /// sending it again, so it isn't added twice.
+        sent: bool,
     },
     /// Spotify removes every occurrence; `restore` puts the others back
     /// (URI and final position, ascending).
@@ -77,6 +105,10 @@ pub enum Op {
         start: u32,
         before: u32,
         length: u32,
+        /// The song moved and the entry it follows afterwards (`None`: at
+        /// the start).
+        uri: Option<String>,
+        after: Option<String>,
     },
     Rename {
         name: String,
@@ -86,11 +118,52 @@ pub enum Op {
     },
 }
 
+/// What to do with a change, given what Spotify has now.
+enum Placed {
+    Send(Op),
+    /// Nothing to send: it's there already, or its song is gone.
+    Done,
+}
+
 impl Op {
+    /// Adds `uris` at `position` of `current`, the Spotify entries as they
+    /// are with the addition.
+    pub fn add(uris: Vec<String>, position: Option<u32>, current: &[String]) -> Self {
+        let after = position
+            .and_then(|p| p.checked_sub(1))
+            .and_then(|p| current.get(p as usize).cloned());
+        Self::Add {
+            uris,
+            position,
+            after,
+            sent: false,
+        }
+    }
+
+    /// The entry at `start` moved to `end`; `current` is the Spotify
+    /// entries after the move.
+    pub fn moved(start: u32, end: u32, current: &[String]) -> Self {
+        Self::Move {
+            start,
+            // Spotify counts the place before the move.
+            before: if end > start { end + 1 } else { end },
+            length: 1,
+            uri: current.get(end as usize).cloned(),
+            after: end
+                .checked_sub(1)
+                .and_then(|p| current.get(p as usize).cloned()),
+        }
+    }
+
     pub fn to_json(&self) -> String {
         match self {
-            Self::Add { uris, position } => {
-                json!({"op": "add", "uris": uris, "position": position})
+            Self::Add {
+                uris,
+                position,
+                after,
+                sent,
+            } => {
+                json!({"op": "add", "uris": uris, "position": position, "after": after, "sent": sent})
             }
             Self::Remove { uris, restore } => {
                 json!({"op": "remove", "uris": uris, "restore": restore})
@@ -99,7 +172,12 @@ impl Op {
                 start,
                 before,
                 length,
-            } => json!({"op": "move", "start": start, "before": before, "length": length}),
+                uri,
+                after,
+            } => json!({
+                "op": "move", "start": start, "before": before, "length": length,
+                "uri": uri, "after": after,
+            }),
             Self::Rename { name } => json!({"op": "rename", "name": name}),
             Self::Replace { uris } => json!({"op": "replace", "uris": uris}),
         }
@@ -119,10 +197,13 @@ impl Op {
                 .unwrap_or_default()
         };
         let number = |key: &str| value[key].as_u64().map(|n| n as u32);
+        let text = |key: &str| value[key].as_str().map(str::to_owned);
         Some(match value["op"].as_str()? {
             "add" => Self::Add {
                 uris: uris(),
                 position: number("position"),
+                after: text("after"),
+                sent: value["sent"].as_bool().unwrap_or(false),
             },
             "remove" => Self::Remove {
                 uris: uris(),
@@ -141,6 +222,8 @@ impl Op {
                 start: number("start")?,
                 before: number("before")?,
                 length: number("length").unwrap_or(1),
+                uri: text("uri"),
+                after: text("after"),
             },
             "rename" => Self::Rename {
                 name: value["name"].as_str()?.to_owned(),
@@ -148,6 +231,123 @@ impl Op {
             "replace" => Self::Replace { uris: uris() },
             _ => return None,
         })
+    }
+
+    /// Depends on where Spotify's entries are.
+    fn is_positional(&self) -> bool {
+        match self {
+            Self::Add { position, .. } => position.is_some(),
+            Self::Remove { restore, .. } => !restore.is_empty(),
+            Self::Move { .. } => true,
+            Self::Rename { .. } | Self::Replace { .. } => false,
+        }
+    }
+
+    /// The change for `current` (Spotify's entries now, which may differ
+    /// from the snapshot the change was made for).
+    fn place(self, current: &[String]) -> Placed {
+        match self {
+            Self::Add {
+                uris,
+                position,
+                after,
+                sent,
+            } => {
+                let at = locate(current, position, after.as_deref());
+                let there = current.get(at..at + uris.len()) == Some(uris.as_slice())
+                    || (position.is_none() && current.ends_with(&uris));
+                if sent && there {
+                    return Placed::Done;
+                }
+                Placed::Send(Self::Add {
+                    uris,
+                    position: position.map(|_| at as u32),
+                    after,
+                    sent: false,
+                })
+            }
+            Self::Remove { uris, restore } => {
+                // Spotify removes by URI; the copies put back go where
+                // they fit now.
+                let left = current.iter().filter(|u| !uris.contains(u)).count();
+                let restore = restore
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (uri, p))| (uri, p.min((left + i) as u32)))
+                    .collect();
+                Placed::Send(Self::Remove { uris, restore })
+            }
+            Self::Move {
+                start,
+                before,
+                length: 1,
+                uri: Some(uri),
+                after,
+            } => {
+                let Some(from) = nearest(current, &uri, start as usize) else {
+                    // Removed elsewhere.
+                    return Placed::Done;
+                };
+                let mut rest = current.to_vec();
+                rest.remove(from);
+                let wanted = if before > start { before - 1 } else { before } as usize;
+                let to = match &after {
+                    None => 0,
+                    Some(after) => nearest(&rest, after, wanted.saturating_sub(1))
+                        .map_or(wanted.min(rest.len()), |i| i + 1),
+                };
+                if to == from {
+                    return Placed::Done;
+                }
+                Placed::Send(Self::Move {
+                    start: from as u32,
+                    before: if to > from { to + 1 } else { to } as u32,
+                    length: 1,
+                    uri: Some(uri),
+                    after,
+                })
+            }
+            op => Placed::Send(op),
+        }
+    }
+
+    /// `current` as Spotify has it after this change.
+    fn record(&self, current: &mut Vec<String>) {
+        match self {
+            Self::Add { uris, position, .. } => {
+                let at = position.map_or(current.len(), |p| (p as usize).min(current.len()));
+                current.splice(at..at, uris.iter().cloned());
+            }
+            Self::Remove { uris, restore } => {
+                current.retain(|u| !uris.contains(u));
+                for (uri, p) in restore {
+                    let at = (*p as usize).min(current.len());
+                    current.insert(at, uri.clone());
+                }
+            }
+            Self::Move {
+                start,
+                before,
+                length,
+                ..
+            } => {
+                let (start, length) = (*start as usize, *length as usize);
+                if start + length > current.len() {
+                    return;
+                }
+                let moved: Vec<String> = current.drain(start..start + length).collect();
+                let before = *before as usize;
+                let at = if before > start {
+                    before - length
+                } else {
+                    before
+                };
+                let at = at.min(current.len());
+                current.splice(at..at, moved);
+            }
+            Self::Replace { uris } => *current = uris.clone(),
+            Self::Rename { .. } => {}
+        }
     }
 
     /// Sends the change; the new snapshot, if the call makes one.
@@ -158,7 +358,7 @@ impl Op {
         snapshot: Option<&str>,
     ) -> gatefold_spotify::Result<Option<String>> {
         match self {
-            Self::Add { uris, position } if !uris.is_empty() => {
+            Self::Add { uris, position, .. } if !uris.is_empty() => {
                 client.add_items(id, uris, *position).map(Some)
             }
             Self::Remove { uris, restore } if !uris.is_empty() => {
@@ -172,6 +372,7 @@ impl Op {
                 start,
                 before,
                 length,
+                ..
             } => client
                 .reorder(id, *start, *before, *length, snapshot)
                 .map(Some),
@@ -182,12 +383,34 @@ impl Op {
     }
 }
 
+/// Where an addition goes in `current`: after the entry it followed (the
+/// copy nearest its old place), else at its old place, else at the end.
+fn locate(current: &[String], position: Option<u32>, after: Option<&str>) -> usize {
+    match position {
+        None => current.len(),
+        Some(0) => 0,
+        Some(p) => after
+            .and_then(|after| nearest(current, after, p as usize - 1))
+            .map_or((p as usize).min(current.len()), |i| i + 1),
+    }
+}
+
+/// The occurrence of `uri` closest to `near`.
+fn nearest(list: &[String], uri: &str, near: usize) -> Option<usize> {
+    list.iter()
+        .enumerate()
+        .filter(|(_, u)| *u == uri)
+        .map(|(i, _)| i)
+        .min_by_key(|i| i.abs_diff(near))
+}
+
 /// What a job does.
 enum Job {
     Full,
     Flush,
     Playlist(i64),
     Resolve(i64, bool),
+    Create(Creation),
 }
 
 fn remote_track(track: &gatefold_spotify::Track) -> RemoteTrack {
@@ -294,6 +517,33 @@ impl Spotify {
         ));
     }
 
+    /// While the user reorders a playlist, its changes wait; released,
+    /// they go out shortly.
+    pub fn hold_changes(&self, id: i64, hold: bool) {
+        let mut state = self.imp().sync.borrow_mut();
+        let changed = if hold {
+            state.held.insert(id)
+        } else {
+            state.held.remove(&id)
+        };
+        drop(state);
+        if changed && !hold {
+            self.changes_queued();
+        }
+    }
+
+    /// Changes to this playlist are on their way to Spotify: no new ones
+    /// until Spotify confirmed them.
+    pub fn is_sending(&self, id: i64) -> bool {
+        self.sending() == id
+    }
+
+    fn set_sending(&self, id: i64) {
+        if self.imp().sending.replace(id) != id {
+            self.notify_sending();
+        }
+    }
+
     fn run_jobs(&self) {
         if !self.is_connected() || self.imp().sync.borrow().running {
             return;
@@ -307,7 +557,9 @@ impl Spotify {
                 loop {
                     let job = {
                         let mut state = spotify.imp().sync.borrow_mut();
-                        if std::mem::take(&mut state.full) {
+                        if !state.create.is_empty() {
+                            Some(Job::Create(state.create.remove(0)))
+                        } else if std::mem::take(&mut state.full) {
                             state.flush = false;
                             state.playlists.clear();
                             Some(Job::Full)
@@ -333,6 +585,7 @@ impl Spotify {
                         Job::Resolve(id, announce) => {
                             spotify.resolve_entries(id, announce).await;
                         }
+                        Job::Create(creation) => spotify.create(creation).await,
                     }
                 }
                 spotify.imp().sync.borrow_mut().running = false;
@@ -447,8 +700,14 @@ impl Spotify {
                 match db.upsert_spotify_playlist(&info, now()) {
                     Ok(id) => {
                         keep.push(summary.id.clone());
-                        let stale = existing
-                            .is_none_or(|p| p.snapshot_id.as_deref() != Some(&summary.snapshot_id));
+                        // Changes still waiting (held, or Spotify was
+                        // unreachable): read after they're sent, else
+                        // reading would undo them here.
+                        let waiting = existing.is_some_and(|p| p.pending_changes > 0);
+                        let stale = !waiting
+                            && existing.is_none_or(|p| {
+                                p.snapshot_id.as_deref() != Some(&summary.snapshot_id)
+                            });
                         // Spotify refused before: don't ask again.
                         let readable = existing.map_or(info.readable, |p| p.readable || editable);
                         if readable && stale {
@@ -457,6 +716,14 @@ impl Spotify {
                     }
                     Err(err) => tracing::warn!("Cannot store a Spotify playlist: {err}"),
                 }
+            }
+            // Just created here: Spotify's list may not have it yet.
+            {
+                let mut state = self.imp().sync.borrow_mut();
+                state
+                    .created
+                    .retain(|(_, when)| when.elapsed() < NEW_PLAYLIST_GRACE);
+                keep.extend(state.created.iter().map(|(id, _)| id.clone()));
             }
             if let Err(err) = db.forget_spotify_playlists(&keep) {
                 tracing::warn!("Cannot remove old Spotify playlists: {err}");
@@ -527,7 +794,11 @@ impl Spotify {
                 return;
             }
         };
-        if linked.snapshot_id.as_deref() != Some(&summary.snapshot_id)
+        let waiting = library
+            .db()
+            .is_some_and(|db| !db.spotify_ops(id).unwrap_or_default().is_empty());
+        if !waiting
+            && linked.snapshot_id.as_deref() != Some(&summary.snapshot_id)
             && let Err(err) = self
                 .read_items(id, &linked.spotify_id, Some(summary.snapshot_id), false)
                 .await
@@ -594,7 +865,17 @@ impl Spotify {
     /// Sends a playlist's waiting changes, then checks the result against
     /// Spotify: if someone changed it elsewhere meanwhile, Spotify's version
     /// wins and changes Spotify refused are applied again by URI (§9.6).
+    /// The playlist can't be edited until that's done.
     async fn flush(&self, id: i64) {
+        if self.imp().sync.borrow().held.contains(&id) {
+            return;
+        }
+        self.set_sending(id);
+        self.send_changes(id).await;
+        self.set_sending(0);
+    }
+
+    async fn send_changes(&self, id: i64) {
         let library = GatefoldApplication::get().library();
         let (linked, ops) = {
             let Some(db) = library.db() else { return };
@@ -603,23 +884,82 @@ impl Spotify {
             };
             (linked, db.spotify_ops(id).unwrap_or_default())
         };
-        if ops.is_empty() {
+        let Some(last_op) = ops.last().map(|(op_id, _)| *op_id) else {
             return;
-        }
+        };
+        let drop_ops = |op_ids: &[i64]| {
+            if let Some(mut db) = library.db() {
+                for op_id in op_ids {
+                    let _ = db.remove_spotify_op(*op_id);
+                }
+            }
+        };
         let mut snapshot = linked.snapshot_id.clone();
         let mut refused = Vec::new();
         let mut parsed = Vec::new();
         for (op_id, text) in ops {
             match Op::parse(&text) {
                 Some(op) => parsed.push((vec![op_id], op)),
-                None => {
-                    if let Some(mut db) = library.db() {
-                        let _ = db.remove_spotify_op(op_id);
-                    }
-                }
+                None => drop_ops(&[op_id]),
             }
         }
-        for (op_ids, op) in merge_adds(parsed) {
+        let merged = merge_adds(parsed);
+        // Positions hold for the snapshot they were made for. If Spotify's
+        // playlist changed since (elsewhere, or by an addition whose
+        // answer got lost), its entries are read and the changes placed
+        // by the songs they follow.
+        let positional = merged.iter().any(|(_, op)| op.is_positional());
+        let unsure = merged
+            .iter()
+            .any(|(_, op)| matches!(op, Op::Add { sent: true, .. }));
+        let mut current: Option<Vec<String>> = None;
+        if positional || unsure {
+            let (sid, known) = (linked.spotify_id.clone(), snapshot.clone());
+            let checked = self
+                .call(move |client| {
+                    let now = client.playlist(&sid)?.snapshot_id;
+                    if !unsure && known.as_deref() == Some(now.as_str()) {
+                        return Ok((now, None));
+                    }
+                    let entries = client.playlist_items(&sid)?;
+                    Ok((
+                        now,
+                        Some(entries.into_iter().filter_map(|e| e.uri).collect()),
+                    ))
+                })
+                .await;
+            match checked {
+                Ok((now, entries)) => {
+                    if entries.is_some() {
+                        tracing::info!(
+                            "Spotify playlist {} changed; placing changes by song",
+                            linked.spotify_id
+                        );
+                    }
+                    snapshot = Some(now);
+                    current = entries;
+                }
+                Err(Error::LoggedOut) => return,
+                Err(err) if err.is_temporary() || !refused_change(&err) => {
+                    tracing::info!("Spotify is unreachable, changes wait: {err}");
+                    self.retry_later(&err);
+                    return;
+                }
+                // Refused (gone?): the next full sync sorts it out.
+                Err(err) => tracing::warn!("Cannot check a Spotify playlist: {err}"),
+            }
+        }
+        for (op_ids, op) in merged {
+            let op = match &current {
+                Some(entries) => match op.place(entries) {
+                    Placed::Send(op) => op,
+                    Placed::Done => {
+                        drop_ops(&op_ids);
+                        continue;
+                    }
+                },
+                None => op,
+            };
             let (sid, snap, job) = (linked.spotify_id.clone(), snapshot.clone(), op.clone());
             match self
                 .call(move |client| job.apply(client, &sid, snap.as_deref()))
@@ -629,19 +969,42 @@ impl Spotify {
                     if new_snapshot.is_some() {
                         snapshot = new_snapshot;
                     }
-                    if let Some(mut db) = library.db() {
-                        for op_id in &op_ids {
-                            let _ = db.remove_spotify_op(*op_id);
-                        }
+                    if let Some(entries) = &mut current {
+                        op.record(entries);
                     }
+                    drop_ops(&op_ids);
                 }
                 Err(Error::LoggedOut) => return,
                 // Only Spotify refusing this change drops it; a problem
                 // with the login (e.g. renewing it failed) keeps it waiting.
                 Err(err) if err.is_temporary() || !refused_change(&err) => {
                     tracing::info!("Spotify is unreachable, changes wait: {err}");
-                    if let (Some(mut db), Some(snapshot)) = (library.db(), &snapshot) {
-                        let _ = db.set_snapshot(id, snapshot);
+                    if let Some(mut db) = library.db() {
+                        if let Some(snapshot) = &snapshot {
+                            let _ = db.set_snapshot(id, snapshot);
+                        }
+                        // It may have arrived without the answer: checked
+                        // before it's sent again.
+                        if let Op::Add {
+                            uris,
+                            position,
+                            after,
+                            ..
+                        } = &op
+                            && answer_lost(&err)
+                            && let Some((first, rest)) = op_ids.split_first()
+                        {
+                            let unsure = Op::Add {
+                                uris: uris.clone(),
+                                position: *position,
+                                after: after.clone(),
+                                sent: true,
+                            };
+                            let _ = db.update_spotify_op(*first, &unsure.to_json());
+                            for op_id in rest {
+                                let _ = db.remove_spotify_op(*op_id);
+                            }
+                        }
                     }
                     library.reload_playlists();
                     self.retry_later(&err);
@@ -650,16 +1013,27 @@ impl Spotify {
                 Err(err) => {
                     tracing::warn!("Spotify refused a playlist change: {err}");
                     refused.push(op);
-                    if let Some(mut db) = library.db() {
-                        for op_id in &op_ids {
-                            let _ = db.remove_spotify_op(*op_id);
-                        }
-                    }
+                    drop_ops(&op_ids);
                 }
             }
         }
         if !refused.is_empty() {
             self.reapply_by_uri(&linked.spotify_id, refused).await;
+        }
+        // Newer changes came in meanwhile: comparing now would take them
+        // for changes made elsewhere. They're sent (and compared) next.
+        let newer = library.db().is_some_and(|db| {
+            db.spotify_ops(id)
+                .unwrap_or_default()
+                .iter()
+                .any(|(op_id, _)| *op_id > last_op)
+        });
+        if newer {
+            if let (Some(mut db), Some(snapshot)) = (library.db(), &snapshot) {
+                let _ = db.set_snapshot(id, snapshot);
+            }
+            library.reload_playlists();
+            return;
         }
         match self.read_items(id, &linked.spotify_id, None, true).await {
             Ok(true) => {
@@ -729,7 +1103,7 @@ impl Spotify {
         }
     }
 
-    /// Covers of Spotify playlists without library songs come from Spotify.
+    /// Spotify playlists' covers, downloaded when Spotify's image changed.
     async fn load_covers(&self) {
         let library = GatefoldApplication::get().library();
         let wanted: Vec<(i64, String, String)> = library
@@ -930,10 +1304,8 @@ impl Spotify {
                     if db.set_item_spotify(item, &uri).is_ok()
                         && let Ok(Some(position)) = db.remote_position(item)
                     {
-                        let op = Op::Add {
-                            uris: vec![uri],
-                            position: Some(position),
-                        };
+                        let current = db.spotify_uris(id).unwrap_or_default();
+                        let op = Op::add(vec![uri], Some(position), &current);
                         let _ = db.queue_spotify_op(id, &op.to_json(), now());
                         added += 1;
                     }
@@ -977,10 +1349,24 @@ impl Spotify {
     /// "Create on Spotify" (§9.6): finds the songs, shows what will be
     /// missing, then creates the Spotify playlist and links it.
     pub async fn publish(&self, id: i64, parent: &impl IsA<gtk::Widget>) {
+        // Once at a time per playlist (two quick clicks).
+        if !self.imp().sync.borrow_mut().publishing.insert(id) {
+            return;
+        }
+        if !self.ask_to_publish(id, parent).await {
+            self.imp().sync.borrow_mut().publishing.remove(&id);
+        }
+    }
+
+    /// Finds the songs and asks; true when the creation is queued.
+    async fn ask_to_publish(&self, id: i64, parent: &impl IsA<gtk::Widget>) -> bool {
         let library = GatefoldApplication::get().library();
         let Some(playlist) = library.playlist(id) else {
-            return;
+            return false;
         };
+        if playlist.playlist().spotify_id.is_some() {
+            return false;
+        }
         let name = playlist.playlist().name.clone();
         let entries = library
             .db()
@@ -1151,15 +1537,41 @@ impl Spotify {
         let ask =
             !(cfg!(debug_assertions) && std::env::var_os("GATEFOLD_SCREENSHOT_PUBLISH").is_some());
         if ask && dialog.choose_future(Some(parent)).await != "create" {
-            return;
+            return false;
         }
         for (check, (item, _, uri, _, _)) in checks.iter().zip(&likely) {
             if check.is_active() {
                 sure.push((*item, uri.clone()));
             }
         }
+        // Created between the sync's other jobs: a sync that read the
+        // list of playlists before can't unlink it.
+        self.imp().sync.borrow_mut().create.push(Creation {
+            id,
+            name,
+            found: sure,
+        });
+        self.run_jobs();
+        true
+    }
 
-        let playlist_name = name.clone();
+    /// Creates the Spotify playlist and links it (a sync job).
+    async fn create(&self, creation: Creation) {
+        let Creation { id, name, found } = creation;
+        self.created_playlist(id, &name, &found).await;
+        self.imp().sync.borrow_mut().publishing.remove(&id);
+    }
+
+    async fn created_playlist(&self, id: i64, name: &str, sure: &[(i64, String)]) {
+        let library = GatefoldApplication::get().library();
+        // Linked meanwhile, or deleted.
+        if library
+            .playlist(id)
+            .is_none_or(|p| p.playlist().spotify_id.is_some())
+        {
+            return;
+        }
+        let playlist_name = name.to_owned();
         let created = self
             .call(move |client| client.create_playlist(&playlist_name, "Made with Gatefold"))
             .await;
@@ -1171,6 +1583,11 @@ impl Spotify {
                 return;
             }
         };
+        self.imp()
+            .sync
+            .borrow_mut()
+            .created
+            .push((summary.id.clone(), std::time::Instant::now()));
         {
             let Some(mut db) = library.db() else { return };
             let owner = self.imp().account_name.borrow().clone();
@@ -1180,7 +1597,7 @@ impl Spotify {
                 tracing::warn!("Cannot link the playlist: {err}");
                 return;
             }
-            for (item, uri) in &sure {
+            for (item, uri) in sure {
                 let _ = db.set_item_spotify(*item, uri);
             }
             let uris = db.spotify_uris(id).unwrap_or_default();
@@ -1188,11 +1605,9 @@ impl Spotify {
         }
         library.reload_playlists();
         // Translators: {} is a playlist name.
-        self.message(&gettext("Created “{}” on Spotify").replace("{}", &name));
-        let mut state = self.imp().sync.borrow_mut();
-        state.flush = true;
-        drop(state);
-        self.run_jobs();
+        self.message(&gettext("Created “{}” on Spotify").replace("{}", name));
+        // Sent next (this runs as a job).
+        self.imp().sync.borrow_mut().flush = true;
     }
 }
 
@@ -1208,9 +1623,16 @@ fn merge_adds(ops: Vec<(Vec<i64>, Op)>) -> Vec<(Vec<i64>, Op)> {
                 Op::Add {
                     uris: last,
                     position: last_position,
+                    sent: false,
+                    ..
                 },
             )),
-            Op::Add { uris, position },
+            Op::Add {
+                uris,
+                position,
+                sent: false,
+                ..
+            },
         ) = (merged.last_mut(), &op)
         {
             let follows = match (*last_position, *position) {
@@ -1227,6 +1649,12 @@ fn merge_adds(ops: Vec<(Vec<i64>, Op)>) -> Vec<(Vec<i64>, Op)> {
         merged.push((ids, op));
     }
     merged
+}
+
+/// The request may have arrived though its answer didn't (a timeout, a
+/// reset, Spotify failing on its side).
+fn answer_lost(err: &Error) -> bool {
+    matches!(err, Error::Http(_)) || err.status().is_some_and(|s| s >= 500)
 }
 
 /// Spotify said no to the change itself (not to the login, not busy).
@@ -1362,6 +1790,8 @@ mod tests {
         let add = |uri: &str, position| Op::Add {
             uris: vec![uri.to_owned()],
             position,
+            after: None,
+            sent: false,
         };
         let merged = merge_adds(vec![
             (vec![1], add("a", None)),
@@ -1412,10 +1842,14 @@ mod tests {
             Op::Add {
                 uris: vec!["spotify:track:a".into()],
                 position: Some(3),
+                after: Some("spotify:track:z".into()),
+                sent: true,
             },
             Op::Add {
                 uris: vec!["spotify:track:a".into()],
                 position: None,
+                after: None,
+                sent: false,
             },
             Op::Remove {
                 uris: vec!["spotify:track:b".into()],
@@ -1425,11 +1859,99 @@ mod tests {
                 start: 1,
                 before: 5,
                 length: 1,
+                uri: Some("spotify:track:c".into()),
+                after: None,
             },
             Op::Rename { name: "New".into() },
             Op::Replace { uris: vec![] },
         ] {
             assert_eq!(Op::parse(&op.to_json()), Some(op));
         }
+    }
+
+    fn list(names: &str) -> Vec<String> {
+        names.split_whitespace().map(str::to_owned).collect()
+    }
+
+    fn placed(op: Op, current: &[String]) -> Option<Op> {
+        match op.place(current) {
+            Placed::Send(op) => Some(op),
+            Placed::Done => None,
+        }
+    }
+
+    #[test]
+    fn an_addition_follows_its_song_when_the_playlist_changed() {
+        // Made for "a b c" (x after b); meanwhile "z" was put first.
+        let op = Op::add(list("x"), Some(2), &list("a b x c"));
+        let current = list("z a b c");
+        let op = placed(op, &current).unwrap();
+        let mut result = current.clone();
+        op.record(&mut result);
+        assert_eq!(result, list("z a b x c"));
+        // The song it followed is gone: its old place.
+        let op = Op::add(list("x"), Some(2), &list("a b x c"));
+        let mut result = list("a c");
+        placed(op, &result).unwrap().record(&mut result);
+        assert_eq!(result, list("a c x"));
+    }
+
+    #[test]
+    fn an_addition_whose_answer_got_lost_is_not_sent_twice() {
+        let unsure = |position| Op::Add {
+            uris: list("x"),
+            position,
+            after: Some("b".into()),
+            sent: true,
+        };
+        assert!(placed(unsure(Some(2)), &list("a b x c")).is_none());
+        assert!(placed(unsure(None), &list("a b c x")).is_none());
+        // Not there: sent again.
+        assert!(placed(unsure(Some(2)), &list("a b c")).is_some());
+    }
+
+    #[test]
+    fn a_move_follows_its_songs_when_the_playlist_changed() {
+        // "a b c d": d moved after a, made for that list.
+        let op = Op::moved(3, 1, &list("a d b c"));
+        // Meanwhile "z" came first: d still goes after a.
+        let current = list("z a b c d");
+        let op = placed(op, &current).unwrap();
+        let mut result = current.clone();
+        op.record(&mut result);
+        assert_eq!(result, list("z a d b c"));
+        // Moved down: a after c.
+        let op = Op::moved(0, 2, &list("b c a d"));
+        let current = list("a b c d e");
+        let mut result = current.clone();
+        placed(op, &current).unwrap().record(&mut result);
+        assert_eq!(result, list("b c a d e"));
+        // The song is gone, or already there: nothing to send.
+        assert!(placed(Op::moved(3, 1, &list("a d b c")), &list("a b c")).is_none());
+        assert!(placed(Op::moved(3, 1, &list("a d b c")), &list("a d b c")).is_none());
+    }
+
+    #[test]
+    fn recording_a_move_matches_spotifys_reorder() {
+        let mut current = list("a b c d");
+        // Spotify: range_start 0, insert_before 3 → "b c a d".
+        Op::Move {
+            start: 0,
+            before: 3,
+            length: 1,
+            uri: None,
+            after: None,
+        }
+        .record(&mut current);
+        assert_eq!(current, list("b c a d"));
+        Op::Move {
+            start: 3,
+            before: 0,
+            length: 1,
+            uri: None,
+            after: None,
+        }
+        .record(&mut current);
+        assert_eq!(current, list("d b c a"));
     }
 }

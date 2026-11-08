@@ -33,6 +33,8 @@ pub struct LinkedPlaylist {
     pub readable: bool,
     pub image_url: Option<String>,
     pub cover_key: Option<String>,
+    /// Changes in the outbox.
+    pub pending_changes: u32,
 }
 
 /// One position of a Spotify playlist.
@@ -84,7 +86,8 @@ impl Database {
     pub fn linked_playlists(&self) -> Result<Vec<LinkedPlaylist>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, spotify_id, snapshot_id, source, editable, readable, spotify_image_url,
-                    spotify_cover_key
+                    spotify_cover_key,
+                    (SELECT COUNT(*) FROM spotify_outbox o WHERE o.playlist_id = playlist.id)
              FROM playlist WHERE spotify_id IS NOT NULL ORDER BY id",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -97,6 +100,7 @@ impl Database {
                 readable: row.get(5)?,
                 image_url: row.get(6)?,
                 cover_key: row.get(7)?,
+                pending_changes: row.get(8)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -898,6 +902,15 @@ impl Database {
             .prepare("SELECT DISTINCT playlist_id FROM spotify_outbox ORDER BY playlist_id")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A waiting change, rewritten (e.g. marked as maybe sent).
+    pub fn update_spotify_op(&mut self, op_id: i64, op: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE spotify_outbox SET op = ?2 WHERE id = ?1",
+            params![op_id, op],
+        )?;
+        Ok(())
     }
 
     pub fn remove_spotify_op(&mut self, op_id: i64) -> Result<()> {

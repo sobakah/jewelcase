@@ -50,6 +50,13 @@ mod imp {
         pub empty: TemplateChild<adw::StatusPage>,
         #[template_child]
         pub items: TemplateChild<gtk::ListBox>,
+        #[template_child]
+        pub arrange_banner: TemplateChild<adw::Banner>,
+        /// A Spotify playlist's songs can be dragged (see `arrange`).
+        pub arranging: std::cell::Cell<bool>,
+        /// The rows are to be built again (they can be dragged now, or
+        /// no longer).
+        pub rebuild: std::cell::Cell<bool>,
         pub playlist: RefCell<Option<PlaylistObject>>,
         pub entries: RefCell<Vec<PlaylistItem>>,
         /// Rows are built a batch per idle moment (playlists can have
@@ -76,7 +83,14 @@ mod imp {
             CoverBackdrop::ensure_type();
             klass.bind_template();
             klass.install_action("playlist.close", None, |panel, _, _| {
+                panel.finish_arranging();
                 panel.emit_by_name::<()>("close", &[]);
+            });
+            klass.install_action_async("playlist.rename-spotify", None, |panel, _, _| async move {
+                panel.rename_on_spotify().await;
+            });
+            klass.install_action("playlist.arrange", None, |panel, _, _| {
+                panel.arrange();
             });
             klass.install_action("playlist.play", None, |panel, _, _| panel.play(None, false));
             klass.install_action("playlist.play-next", None, |panel, _, _| {
@@ -212,6 +226,21 @@ mod imp {
             ));
             self.add_search
                 .connect_stop_search(|entry| entry.set_text(""));
+            self.arrange_banner.connect_button_clicked(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.finish_arranging()
+            ));
+            // Hidden (another view, the window closing): the new order goes.
+            obj.connect_unmap(|obj| obj.finish_arranging());
+            // Locked while its changes are being sent.
+            GatefoldApplication::get()
+                .spotify()
+                .connect_sending_notify(glib::clone!(
+                    #[weak]
+                    obj,
+                    move |_| obj.refresh()
+                ));
             obj.setup_sort();
             GatefoldApplication::get().library().connect_local(
                 "playlists-changed",
@@ -252,6 +281,9 @@ impl PlaylistPanel {
     pub fn set_playlist(&self, playlist: &PlaylistObject) {
         let imp = self.imp();
         let changed = self.playlist_id() != Some(playlist.id());
+        if changed {
+            self.finish_arranging();
+        }
         imp.playlist.replace(Some(playlist.clone()));
         if changed {
             imp.add_search.set_text("");
@@ -439,13 +471,15 @@ impl PlaylistPanel {
         );
         // Spotify doesn't say what a followed playlist holds.
         imp.meta.set_visible(info.readable);
-        imp.source.set_label(&source_line(info));
+        let sending = GatefoldApplication::get().spotify().is_sending(id);
+        imp.source.set_label(&source_line(info, sending));
         imp.source.set_visible(info.spotify_id.is_some());
         let editable = info.editable;
         let connected = GatefoldApplication::get().spotify().is_connected();
         let linked = info.spotify_id.is_some();
         let mirror = info.source == "spotify";
-        // Linked to Spotify: only adding and removing songs for now.
+        // Spotify playlists are renamed and reordered from the menu only,
+        // so they aren't changed by accident.
         let renamable = editable && !linked;
         imp.renamable.set(renamable);
         imp.name.set_cursor_from_name(renamable.then_some("text"));
@@ -455,7 +489,18 @@ impl PlaylistPanel {
         imp.name
             .set_tooltip_text(renamable.then(|| gettext("Rename")).as_deref());
         imp.add_search.set_visible(editable);
+        imp.add_search.set_sensitive(!sending);
+        imp.arrange_banner.set_button_label(Some(&if sending {
+            gettext("Sending…")
+        } else {
+            gettext("_Done")
+        }));
         self.action_set_enabled("playlist.rename", renamable);
+        self.action_set_enabled("playlist.rename-spotify", editable && linked);
+        self.action_set_enabled(
+            "playlist.arrange",
+            editable && linked && info.readable && !imp.arranging.get(),
+        );
         self.action_set_enabled("playlist.change-cover", !mirror);
         self.action_set_enabled("playlist.reset-cover", !mirror);
         self.action_set_enabled("playlist.publish", connected && !linked);
@@ -481,8 +526,10 @@ impl PlaylistPanel {
         imp.empty.set_visible(entries.is_empty() && !hidden);
         imp.items.set_visible(!entries.is_empty());
         // Unchanged (another playlist changed, a sync): keep the rows.
-        let same =
-            !sort_changed && *imp.entries.borrow() == entries && imp.items.first_child().is_some();
+        let same = !sort_changed
+            && !imp.rebuild.take()
+            && *imp.entries.borrow() == entries
+            && imp.items.first_child().is_some();
         if same {
             return;
         }
@@ -620,9 +667,10 @@ impl PlaylistPanel {
             .margin_top(6)
             .margin_bottom(6)
             .build();
-        // Reordering Spotify playlists comes later; adding and removing
-        // work. Sorted, the order can't be changed by dragging.
-        let reorderable = editable && !linked && self.in_own_order();
+        // Spotify playlists only after choosing "Change Order on Spotify".
+        // Sorted, the order can't be changed by dragging.
+        let reorderable =
+            editable && (!linked || self.imp().arranging.get()) && self.in_own_order();
         if reorderable {
             line.append(
                 &gtk::Image::builder()
@@ -966,6 +1014,57 @@ impl PlaylistPanel {
         tracks
     }
 
+    /// "Change Order on Spotify": the songs can be dragged until Done;
+    /// the new order goes to Spotify then, in one go.
+    fn arrange(&self) {
+        let imp = self.imp();
+        let Some(id) = self.playlist_id() else { return };
+        if imp.arranging.replace(true) {
+            return;
+        }
+        GatefoldApplication::get().spotify().hold_changes(id, true);
+        imp.arrange_banner.set_revealed(true);
+        imp.rebuild.set(true);
+        // Dragging works in the playlist's own order.
+        if !self.in_own_order() {
+            self.set_sort("custom", false);
+        } else {
+            self.refresh();
+        }
+    }
+
+    fn finish_arranging(&self) {
+        let imp = self.imp();
+        if !imp.arranging.replace(false) {
+            return;
+        }
+        imp.arrange_banner.set_revealed(false);
+        if let Some(id) = self.playlist_id() {
+            GatefoldApplication::get().spotify().hold_changes(id, false);
+        }
+        imp.rebuild.set(true);
+        self.refresh();
+    }
+
+    /// Spotify playlists are renamed here, not by clicking the name.
+    async fn rename_on_spotify(&self) {
+        let Some(playlist) = self.imp().playlist.borrow().clone() else {
+            return;
+        };
+        if let Some(name) = ask_name(
+            self,
+            &gettext("Rename on Spotify"),
+            &playlist.playlist().name,
+            &gettext("_Rename"),
+        )
+        .await
+        {
+            GatefoldApplication::get()
+                .library()
+                .rename_playlist(playlist.id(), &name);
+        }
+    }
+
     async fn rename(&self) {
         let Some(playlist) = self.imp().playlist.borrow().clone() else {
             return;
@@ -1267,7 +1366,7 @@ fn only_on_spotify_hint() -> String {
 }
 
 /// "Spotify playlist by Max · 2 changes waiting".
-fn source_line(info: &gatefold_core::db::Playlist) -> String {
+fn source_line(info: &gatefold_core::db::Playlist, sending: bool) -> String {
     let mut parts = Vec::new();
     let owner = info.spotify_owner.clone().unwrap_or_default();
     parts.push(match (info.source.as_str(), info.editable) {
@@ -1277,7 +1376,9 @@ fn source_line(info: &gatefold_core::db::Playlist) -> String {
         ("spotify", false) => gettext("Spotify playlist by {}, read-only").replace("{}", &owner),
         _ => gettext("Also on Spotify"),
     });
-    if info.pending_changes > 0 {
+    if sending {
+        parts.push(gettext("sending changes to Spotify…"));
+    } else if info.pending_changes > 0 {
         parts.push(
             ngettext(
                 "{} change waiting to be sent",

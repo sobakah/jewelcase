@@ -723,10 +723,15 @@ impl Library {
         let objects: Vec<PlaylistObject> = playlists
             .into_iter()
             .map(|playlist| {
-                let cover = playlist.custom_cover_key.clone().or_else(|| {
+                // Spotify playlists show Spotify's cover (its own image, or
+                // its mosaic of the whole playlist), not a mosaic of the
+                // few songs that are in the library.
+                let spotify = (playlist.source == "spotify")
+                    .then(|| playlist.spotify_cover_key.clone())
+                    .flatten();
+                let cover = playlist.custom_cover_key.clone().or(spotify).or_else(|| {
                     match playlist.cover_keys.len() {
-                        // Spotify's, for Spotify playlists without
-                        // library songs.
+                        // Not loaded yet: Spotify's, if there is one.
                         0 => playlist.spotify_cover_key.clone(),
                         1 => playlist.cover_keys.first().cloned(),
                         _ => {
@@ -847,19 +852,34 @@ impl Library {
         read_only
     }
 
-    /// Playlists linked to Spotify only take added and removed songs for
-    /// now; reordering and renaming come later.
-    fn refuse_linked(&self, id: i64) -> bool {
-        let linked = self.spotify_link(id).is_some();
-        if linked {
+    /// While a playlist's changes are on their way to Spotify, it waits
+    /// for Spotify's answer before taking new ones; says so.
+    fn refuse_while_sending(&self, id: i64) -> bool {
+        let sending = GatefoldApplication::get().spotify().is_sending(id);
+        if sending {
+            let name = self
+                .playlist(id)
+                .map(|p| p.playlist().name.clone())
+                .unwrap_or_default();
             self.emit_by_name::<()>(
                 "message",
-                &[&gettext(
-                    "Spotify playlists can't be reordered or renamed here yet",
-                )],
+                // Translators: {} is a playlist name.
+                &[
+                    &gettext("“{}” is being sent to Spotify; try again in a moment")
+                        .replace("{}", &name),
+                ],
             );
         }
-        linked
+        sending
+    }
+
+    /// An addition at `position` of a linked playlist, as it is now.
+    fn spotify_add(&self, id: i64, uris: Vec<String>, position: u32) -> crate::spotify::Op {
+        let current = self
+            .db()
+            .and_then(|db| db.spotify_uris(id).ok())
+            .unwrap_or_default();
+        crate::spotify::Op::add(uris, Some(position), &current)
     }
 
     fn queue_spotify_op(&self, id: i64, op: crate::spotify::Op) {
@@ -868,12 +888,14 @@ impl Library {
         {
             tracing::warn!("Cannot queue a Spotify change: {err}");
         }
+        // "1 change waiting to be sent".
+        self.reload_playlists();
         GatefoldApplication::get().spotify().changes_queued();
     }
 
     /// `announce`: confirm with a toast (not needed where the list shows it).
     pub fn add_to_playlist(&self, id: i64, tracks: &[i64], announce: bool) {
-        if self.refuse_read_only(id) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             return;
         }
         // Library songs, and Spotify songs (negative IDs, §9.4).
@@ -895,13 +917,8 @@ impl Library {
                     Some((db.item_uri(item).ok()??, db.remote_position(item).ok()??))
                 });
                 if let Some((uri, position)) = found {
-                    self.queue_spotify_op(
-                        id,
-                        crate::spotify::Op::Add {
-                            uris: vec![uri],
-                            position: Some(position),
-                        },
-                    );
+                    let op = self.spotify_add(id, vec![uri], position);
+                    self.queue_spotify_op(id, op);
                 }
             }
             // …library songs once their Spotify versions are found.
@@ -921,7 +938,7 @@ impl Library {
     }
 
     pub fn rename_playlist(&self, id: i64, name: &str) {
-        if self.refuse_read_only(id) || self.refuse_linked(id) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             self.reload_playlists();
             return;
         }
@@ -941,7 +958,7 @@ impl Library {
     }
 
     pub fn remove_playlist_item(&self, id: i64, item: i64) {
-        if self.refuse_read_only(id) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             return;
         }
         let uri = self
@@ -970,7 +987,7 @@ impl Library {
     }
 
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
-        if self.refuse_read_only(id) || self.refuse_linked(id) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             self.reload_playlists();
             return;
         }
@@ -988,15 +1005,11 @@ impl Library {
                 .and_then(|db| db.remote_position(item).ok().flatten())
             && start != end
         {
-            self.queue_spotify_op(
-                id,
-                crate::spotify::Op::Move {
-                    start,
-                    // Spotify counts the place before the move.
-                    before: if end > start { end + 1 } else { end },
-                    length: 1,
-                },
-            );
+            let current = self
+                .db()
+                .and_then(|db| db.spotify_uris(id).ok())
+                .unwrap_or_default();
+            self.queue_spotify_op(id, crate::spotify::Op::moved(start, end, &current));
         }
     }
 
@@ -1013,6 +1026,9 @@ impl Library {
 
     /// The suggested Spotify track is right: the entry goes to Spotify.
     pub fn accept_spotify_suggestion(&self, id: i64, item: i64, uri: &str) {
+        if self.refuse_while_sending(id) {
+            return;
+        }
         let mut position = None;
         self.playlist_op(|db, _| {
             db.set_item_spotify(item, uri)?;
@@ -1020,13 +1036,8 @@ impl Library {
             Ok(())
         });
         if let Some(position) = position {
-            self.queue_spotify_op(
-                id,
-                crate::spotify::Op::Add {
-                    uris: vec![uri.to_owned()],
-                    position: Some(position),
-                },
-            );
+            let op = self.spotify_add(id, vec![uri.to_owned()], position);
+            self.queue_spotify_op(id, op);
         }
     }
 

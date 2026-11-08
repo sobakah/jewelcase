@@ -71,6 +71,10 @@ mod imp {
         /// Playlists are being read or changes sent.
         #[property(get)]
         pub syncing: Cell<bool>,
+        /// The playlist whose changes are on their way to Spotify (0:
+        /// none); it can't be edited meanwhile.
+        #[property(get)]
+        pub sending: Cell<i64>,
         /// Streaming (§9.4): "off", "connecting", "ready" or "error".
         #[property(get)]
         pub stream_status: RefCell<String>,
