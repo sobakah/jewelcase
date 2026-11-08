@@ -664,6 +664,19 @@ impl Client {
         .map(drop)
     }
 
+    /// Removes a playlist from the user's library (`DELETE /me/library`,
+    /// since February 2026): unfollows someone else's playlist, deletes
+    /// one's own (Spotify keeps it restorable for a while).
+    pub fn remove_playlist_from_library(&self, id: &str) -> Result<()> {
+        self.call(
+            Method::Delete,
+            "/me/library",
+            &[("uris", format!("spotify:playlist:{id}"))],
+            None,
+        )
+        .map(drop)
+    }
+
     /// A new, private playlist of the user's.
     pub fn create_playlist(&self, name: &str, description: &str) -> Result<PlaylistSummary> {
         let value = self

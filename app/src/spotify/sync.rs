@@ -60,6 +60,12 @@ pub struct SyncState {
     create: Vec<Creation>,
     /// Spotify playlists created in this session, and when.
     created: Vec<(String, std::time::Instant)>,
+    /// Playlists to remove from the Spotify library: (playlist, keep it
+    /// here as a local one).
+    remove: Vec<(i64, bool)>,
+    /// Spotify playlists removed in this session, and when: Spotify's
+    /// list may still show them for a moment.
+    removed: Vec<(String, std::time::Instant)>,
 }
 
 /// "Create on Spotify", once the user said yes.
@@ -434,6 +440,7 @@ enum Job {
     Playlist(i64),
     Resolve(i64, bool),
     Create(Creation),
+    Remove(i64, bool),
 }
 
 fn remote_track(track: &gatefold_spotify::Track) -> RemoteTrack {
@@ -582,6 +589,9 @@ impl Spotify {
                         let mut state = spotify.imp().sync.borrow_mut();
                         if !state.create.is_empty() {
                             Some(Job::Create(state.create.remove(0)))
+                        } else if !state.remove.is_empty() {
+                            let (id, keep) = state.remove.remove(0);
+                            Some(Job::Remove(id, keep))
                         } else if std::mem::take(&mut state.full) {
                             state.flush = false;
                             state.playlists.clear();
@@ -609,6 +619,7 @@ impl Spotify {
                             spotify.resolve_entries(id, announce).await;
                         }
                         Job::Create(creation) => spotify.create(creation).await,
+                        Job::Remove(id, keep) => spotify.remove_playlist(id, keep).await,
                     }
                 }
                 spotify.imp().sync.borrow_mut().running = false;
@@ -705,7 +716,18 @@ impl Spotify {
                 .map(|p| (p.spotify_id.clone(), p))
                 .collect();
             let mut keep = Vec::new();
+            let removed: Vec<String> = {
+                let mut state = self.imp().sync.borrow_mut();
+                state
+                    .removed
+                    .retain(|(_, when)| when.elapsed() < NEW_PLAYLIST_GRACE);
+                state.removed.iter().map(|(id, _)| id.clone()).collect()
+            };
             for summary in &list {
+                // Just removed here: Spotify's list may lag behind.
+                if removed.contains(&summary.id) {
+                    continue;
+                }
                 let existing = linked.get(&summary.id);
                 let published = existing.is_some_and(|p| p.source == "local");
                 if !show_mirrors && !published {
@@ -1585,6 +1607,65 @@ impl Spotify {
         });
         self.run_jobs();
         true
+    }
+
+    /// "Delete on Spotify…" or "Unfollow…": the playlist leaves the user's
+    /// Spotify library (one's own is deleted, restorable on Spotify's
+    /// account page for a while). Here it stays as a local playlist
+    /// (`keep`, always for one published from here) or goes. Changes still
+    /// waiting for it are dropped.
+    pub fn remove_from_spotify(&self, id: i64, keep: bool) {
+        self.imp().sync.borrow_mut().remove.push((id, keep));
+        self.run_jobs();
+    }
+
+    async fn remove_playlist(&self, id: i64, keep: bool) {
+        let library = GatefoldApplication::get().library();
+        let Some(linked) = library
+            .db()
+            .and_then(|db| db.linked_playlist(id).ok().flatten())
+        else {
+            return;
+        };
+        let name = library
+            .playlist(id)
+            .map(|p| p.playlist().name.clone())
+            .unwrap_or_default();
+        let sid = linked.spotify_id.clone();
+        match self
+            .call(move |client| client.remove_playlist_from_library(&sid))
+            .await
+        {
+            Ok(()) => {
+                self.imp()
+                    .sync
+                    .borrow_mut()
+                    .removed
+                    .push((linked.spotify_id.clone(), std::time::Instant::now()));
+                if let Some(mut db) = library.db() {
+                    let result = if keep || linked.source == "local" {
+                        db.unlink_playlist(id)
+                    } else {
+                        db.delete_playlist(id)
+                    };
+                    if let Err(err) = result {
+                        tracing::warn!("Cannot update the removed playlist: {err}");
+                    }
+                }
+                library.reload_playlists();
+                // Translators: {} is a playlist name.
+                self.message(&gettext("Removed “{}” from Spotify").replace("{}", &name));
+            }
+            Err(err) => {
+                tracing::warn!("Cannot remove a playlist from Spotify: {err}");
+                self.message(&match err {
+                    Error::Status { status: 403, .. } => gettext(
+                        "Spotify didn't allow it; connect again in Preferences → Spotify (Gatefold needs one more permission), then try again",
+                    ),
+                    err => answer_error(&err),
+                });
+            }
+        }
     }
 
     /// Creates the Spotify playlist and links it (a sync job).

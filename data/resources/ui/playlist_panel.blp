@@ -409,6 +409,12 @@ menu playlist_menu {
       action: "playlist.unlink";
       hidden-when: "action-disabled";
     }
+
+    item {
+      label: _("Remo_ve from Spotify…");
+      action: "playlist.remove-spotify";
+      hidden-when: "action-disabled";
+    }
   }
 
   section {

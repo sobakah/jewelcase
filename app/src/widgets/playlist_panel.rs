@@ -161,6 +161,9 @@ mod imp {
             klass.install_action_async("playlist.unlink", None, |panel, _, _| async move {
                 panel.unlink().await;
             });
+            klass.install_action_async("playlist.remove-spotify", None, |panel, _, _| async move {
+                panel.remove_from_spotify().await;
+            });
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -512,6 +515,7 @@ impl PlaylistPanel {
         self.action_set_enabled("playlist.open-spotify", linked);
         self.action_set_enabled("playlist.duplicate", mirror && info.readable);
         self.action_set_enabled("playlist.unlink", linked && !mirror);
+        self.action_set_enabled("playlist.remove-spotify", linked && connected);
         self.action_set_enabled("playlist.delete", !mirror);
         let same_playlist = imp.playlist.borrow().as_ref().map(|p| p.id()) == Some(id);
         // What every row shows (remove buttons, "only in Gatefold").
@@ -1252,6 +1256,79 @@ impl PlaylistPanel {
             // Translators: {} is a playlist name.
             library.emit_by_name::<()>("message", &[&gettext("Created “{}”").replace("{}", &name)]);
         }
+    }
+
+    /// Deletes the playlist on Spotify (one's own) or unfollows it
+    /// (someone else's), after asking; it can stay here as a local one.
+    async fn remove_from_spotify(&self) {
+        let Some(playlist) = self.imp().playlist.borrow().clone() else {
+            return;
+        };
+        let info = playlist.playlist();
+        let app = GatefoldApplication::get();
+        let published = info.source == "local";
+        let own = published
+            || (info.editable
+                && info.spotify_owner.is_some()
+                && info.spotify_owner == app.spotify().account_name());
+        let (heading, body, button) = if own {
+            (
+                // Translators: {} is a playlist name.
+                gettext("Delete “{}” on Spotify?").replace("{}", &info.name),
+                gettext(
+                    "Spotify keeps deleted playlists for 90 days; you can restore it at spotify.com/account/recover-playlists. People who follow it keep it.",
+                ),
+                gettext("_Delete on Spotify"),
+            )
+        } else {
+            (
+                // Translators: {} is a playlist name.
+                gettext("Unfollow “{}”?").replace("{}", &info.name),
+                gettext("It leaves your Spotify library; you can follow it again in Spotify."),
+                gettext("_Unfollow"),
+            )
+        };
+        let dialog = adw::AlertDialog::builder()
+            .heading(heading)
+            .body(if published {
+                format!(
+                    "{body} {}",
+                    gettext("It stays in Gatefold as a local playlist.")
+                )
+            } else {
+                body
+            })
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        // A mirror can stay as a local playlist (when its songs are known).
+        let keep = (!published && info.readable).then(|| {
+            gtk::CheckButton::builder()
+                .label(gettext("_Keep It in Gatefold as a Local Playlist"))
+                .use_underline(true)
+                .active(own)
+                .build()
+        });
+        if let Some(keep) = &keep {
+            dialog.set_extra_child(Some(keep));
+        }
+        dialog.add_responses(&[("cancel", &gettext("_Cancel")), ("remove", &button)]);
+        dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+        if dialog.choose_future(Some(self)).await != "remove" {
+            return;
+        }
+        let id = playlist.id();
+        if app.spotify().is_sending(id) {
+            app.library().emit_by_name::<()>(
+                "message",
+                &[&gettext(
+                    "Changes are being sent to Spotify; try again in a moment",
+                )],
+            );
+            return;
+        }
+        let keep = published || keep.is_some_and(|k| k.is_active());
+        app.spotify().remove_from_spotify(id, keep);
     }
 
     async fn unlink(&self) {

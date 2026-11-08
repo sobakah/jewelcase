@@ -35,6 +35,8 @@ pub const SCOPES: &[&str] = &[
     // Saved albums and followed artists (§9.8).
     "user-library-read",
     "user-follow-read",
+    // Unfollowing and deleting playlists (`DELETE /me/library`).
+    "user-library-modify",
 ];
 
 const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";

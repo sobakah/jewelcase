@@ -1696,8 +1696,8 @@ impl GatefoldWindow {
                 }
             }
             // `GATEFOLD_SCREENSHOT_EDITS="move:0:2 remove:1 add:Title
-            // rename:Name cover:/path.jpg"`: edits of the open playlist, 3 s
-            // in.
+            // rename:Name cover:/path.jpg unspotify:keep|drop"`: edits of the
+            // open playlist, 3 s in.
             if let Ok(edits) = std::env::var("GATEFOLD_SCREENSHOT_EDITS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(3, move || {
@@ -1730,6 +1730,9 @@ impl GatefoldWindow {
                             ["rename", name] => {
                                 library.rename_playlist(id, &name.replace('_', " "))
                             }
+                            ["unspotify", keep] => GatefoldApplication::get()
+                                .spotify()
+                                .remove_from_spotify(id, *keep == "keep"),
                             ["cover", path] => {
                                 if let Ok(data) = std::fs::read(path) {
                                     let library = library.clone();
