@@ -235,7 +235,14 @@ fn answer(stream: TcpStream, state: &str, expected: &str) -> Option<Result<Strin
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return None;
     }
-    let result = parse_callback(query, state);
+    // Not this login's answer (another page asking this address): it
+    // can't end the login.
+    let Some(result) = parse_callback(query, state) else {
+        let _ = writer.write_all(
+            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+        return None;
+    };
     let (title, text) = match &result {
         Ok(_) => (
             "Connected to Spotify",
@@ -260,7 +267,9 @@ fn answer(stream: TcpStream, state: &str, expected: &str) -> Option<Result<Strin
     Some(result)
 }
 
-fn parse_callback(query: &str, state: &str) -> Result<String> {
+/// The code or error of the answer; `None` when it isn't for this login
+/// (the state doesn't match).
+fn parse_callback(query: &str, state: &str) -> Option<Result<String>> {
     let mut code = None;
     let mut got_state = None;
     let mut error = None;
@@ -274,18 +283,20 @@ fn parse_callback(query: &str, state: &str) -> Result<String> {
             _ => {}
         }
     }
+    if got_state.as_deref() != Some(state) {
+        return None;
+    }
     if let Some(error) = error {
-        return Err(if error == "access_denied" {
+        return Some(Err(if error == "access_denied" {
             Error::Cancelled
         } else {
             Error::Auth(error)
-        });
+        }));
     }
-    if got_state.as_deref() != Some(state) {
-        return Err(Error::Auth("the login answer doesn't match".into()));
-    }
-    code.filter(|c| !c.is_empty())
-        .ok_or_else(|| Error::Auth("no authorization code".into()))
+    Some(
+        code.filter(|c| !c.is_empty())
+            .ok_or_else(|| Error::Auth("no authorization code".into())),
+    )
 }
 
 /// Percent-encoding for query values (RFC 3986 unreserved characters
@@ -360,18 +371,19 @@ mod tests {
     #[test]
     fn callback_answers_are_checked() {
         assert_eq!(
-            parse_callback("code=AQ%2Bx&state=s1", "s1").unwrap(),
+            parse_callback("code=AQ%2Bx&state=s1", "s1")
+                .unwrap()
+                .unwrap(),
             "AQ+x"
         );
-        assert!(matches!(
-            parse_callback("code=AQ&state=other", "s1"),
-            Err(Error::Auth(_))
-        ));
+        // Not this login's: ignored, the login goes on waiting.
+        assert!(parse_callback("code=AQ&state=other", "s1").is_none());
+        assert!(parse_callback("error=access_denied", "s1").is_none());
         assert!(matches!(
             parse_callback("error=access_denied&state=s1", "s1"),
-            Err(Error::Cancelled)
+            Some(Err(Error::Cancelled))
         ));
-        assert!(parse_callback("state=s1", "s1").is_err());
+        assert!(parse_callback("state=s1", "s1").unwrap().is_err());
         assert_eq!(decode("a%20b+c%"), "a b c%");
     }
 

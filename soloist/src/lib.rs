@@ -218,7 +218,11 @@ pub enum Event {
     Volume(u8),
     Queue(Vec<Item>),
     /// An error answer to a command.
-    CommandError(String),
+    CommandError {
+        /// The control command it answers, when known.
+        command: Option<String>,
+        message: String,
+    },
     /// Soloist stopped; `expired`: its build is too old.
     Exited {
         code: Option<i32>,
@@ -266,7 +270,10 @@ impl Event {
                     })
                     .unwrap_or_default(),
             ),
-            "error" => Self::CommandError(value["message"].as_str().unwrap_or_default().to_owned()),
+            "error" => Self::CommandError {
+                command: None,
+                message: value["message"].as_str().unwrap_or_default().to_owned(),
+            },
             _ => return None,
         })
     }
@@ -559,10 +566,27 @@ fn talk(
             return;
         };
         let _ = events.send_blocking(Event::Connected);
+        // Control commands waiting for their answer: Soloist answers each
+        // with `command_result` or `error`, in order, and an error doesn't
+        // say which command it's about.
+        let mut unanswered: std::collections::VecDeque<String> = Default::default();
         loop {
             match socket.read() {
                 Ok(Message::Text(text)) => {
-                    if let Some(event) = Event::parse(&text)
+                    if let Some(name) = command_result(&text) {
+                        if let Some(i) = unanswered.iter().position(|c| *c == name) {
+                            unanswered.remove(i);
+                        }
+                        continue;
+                    }
+                    let event = match Event::parse(&text) {
+                        Some(Event::CommandError { message, .. }) => Some(Event::CommandError {
+                            command: unanswered.pop_front(),
+                            message,
+                        }),
+                        event => event,
+                    };
+                    if let Some(event) = event
                         && events.send_blocking(event).is_err()
                     {
                         return;
@@ -585,6 +609,10 @@ fn talk(
                     Ok(command) => {
                         if let Err(err) = socket.send(Message::text(command.to_string())) {
                             tracing::warn!("Cannot send to Soloist: {err}");
+                        } else if let Some(name) = command["command"].as_str()
+                            && !QUERIES.contains(&name)
+                        {
+                            unanswered.push_back(name.to_owned());
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
@@ -598,6 +626,15 @@ fn talk(
         let _ = events.send_blocking(Event::Disconnected);
     });
     (commands, thread)
+}
+
+/// Commands answered with their event, not with `command_result`.
+const QUERIES: [&str; 3] = ["get_auth_state", "get_state", "get_queue"];
+
+/// The command a `command_result` answers.
+fn command_result(text: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    (value["type"] == "command_result").then(|| value["command"].as_str().map(str::to_owned))?
 }
 
 /// The API has no authentication: never talk to it over the network.
@@ -681,11 +718,26 @@ pub fn find_running() -> Option<Running> {
             .unwrap_or_else(|| home.join(fallback))
     };
     // soloistd with its WebSocket on: its Soloist, even while it's just
-    // restarting (connecting waits for it).
+    // restarting (connecting waits for it). Not while the service is
+    // stopped, unless something answers there (`soloistd run` by hand).
     let config = soloistd_config();
     if let Some((addr, port)) = std::fs::read_to_string(&config)
         .ok()
         .and_then(|text| soloistd_websocket(&text))
+        .filter(|(addr, port)| {
+            use soloistd::ServiceState;
+            matches!(
+                soloistd::service_state(),
+                ServiceState::Running | ServiceState::Starting | ServiceState::Unknown
+            ) || std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::new(
+                    addr.parse().unwrap_or(std::net::Ipv4Addr::LOCALHOST.into()),
+                    *port,
+                ),
+                Duration::from_millis(300),
+            )
+            .is_ok()
+        })
     {
         return Some(Running {
             source: "soloistd",
@@ -786,9 +838,14 @@ mod tests {
         );
         assert_eq!(
             Event::parse(r#"{"type":"error","message":"command requires authentication"}"#),
-            Some(Event::CommandError(
-                "command requires authentication".into()
-            ))
+            Some(Event::CommandError {
+                command: None,
+                message: "command requires authentication".into()
+            })
+        );
+        assert_eq!(
+            command_result(r#"{"type":"command_result","command":"pause"}"#).as_deref(),
+            Some("pause")
         );
         assert_eq!(
             Event::parse(r#"{"type":"command_result","command":"pause"}"#),

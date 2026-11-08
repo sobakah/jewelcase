@@ -28,6 +28,9 @@ const RECONNECTS: u32 = 5;
 const RECONNECT_DELAY_S: u32 = 3;
 /// A song that hasn't started this long after asking is unavailable.
 const START_TIMEOUT_S: u32 = 10;
+/// After a started Soloist's connection closed, its exit is awaited this
+/// long (it says whether the build expired).
+const EXIT_WAIT_S: u32 = 3;
 
 #[derive(Default)]
 pub struct SoloistState {
@@ -142,6 +145,11 @@ impl Spotify {
 
     async fn soloist_connect(&self) {
         self.set_stream_status("connecting");
+        // Turned off or started again while this waits (for the keyring,
+        // say): this attempt stops, so only one Soloist starts.
+        let attempt = self.imp().stream.borrow().soloist.generation;
+        let superseded =
+            |spotify: &Self| spotify.imp().stream.borrow().soloist.generation != attempt;
         // A running one: soloistd's or the user's own, or one Gatefold
         // started before and that's still there.
         let own_dir = glib::user_data_dir().join(APP_ID).join("soloist");
@@ -159,6 +167,9 @@ impl Spotify {
         .await
         .ok()
         .flatten();
+        if superseded(self) {
+            return;
+        }
         let (soloist, events, source) = match running {
             Some(running) => {
                 tracing::info!(
@@ -198,6 +209,9 @@ impl Spotify {
                         return;
                     }
                 };
+                if superseded(self) {
+                    return;
+                }
                 let config = Config {
                     binary,
                     api_key: key,
@@ -344,6 +358,7 @@ impl Spotify {
             }
             Event::Device { is_active } => {
                 self.imp().stream.borrow_mut().soloist.is_active = is_active;
+                self.left_device(is_active);
             }
             Event::Options(options) => {
                 self.imp().stream.borrow_mut().soloist.take_options(options);
@@ -381,6 +396,9 @@ impl Spotify {
                     self.soloist_status(status);
                 }
                 self.receiver_check();
+                if is_active == Some(false) {
+                    self.left_device(false);
+                }
             }
             Event::TrackChanged(item) => {
                 self.imp().stream.borrow_mut().soloist.current = item.clone();
@@ -410,11 +428,15 @@ impl Spotify {
                 }
             }
             Event::Volume(_) => {}
-            Event::CommandError(message) => {
-                tracing::warn!("Soloist: {message}");
+            Event::CommandError { command, message } => {
+                tracing::warn!("Soloist refused {command:?}: {message}");
+                // Only the song's own start failing means it can't play
+                // (not shuffle or repeat sent before it).
                 let waiting = {
                     let state = &self.imp().stream.borrow().soloist;
-                    state.wanted.is_some() && !state.started
+                    state.wanted.is_some()
+                        && !state.started
+                        && command.as_deref().is_none_or(|c| c == "play")
                 };
                 if waiting {
                     self.soloist_unavailable();
@@ -422,6 +444,10 @@ impl Spotify {
             }
             Event::Exited { code, expired } => {
                 tracing::warn!("Soloist exited ({code:?})");
+                // Already reported (it stopped answering long before).
+                if self.soloist().is_none() {
+                    return;
+                }
                 if self.soloist_receiving() {
                     self.end_receiver(false);
                 }
@@ -436,6 +462,31 @@ impl Spotify {
             }
             Event::Disconnected => {
                 if self.soloist().is_none() {
+                    return;
+                }
+                // One Gatefold started: its exit follows and says why
+                // (expired or not); this says so only if it doesn't come.
+                let (own, generation) = {
+                    let state = &self.imp().stream.borrow().soloist;
+                    (state.source == Some("gatefold"), state.generation)
+                };
+                if own {
+                    glib::timeout_add_seconds_local_once(
+                        EXIT_WAIT_S,
+                        glib::clone!(
+                            #[weak(rename_to = spotify)]
+                            self,
+                            move || {
+                                let still_there = {
+                                    let state = &spotify.imp().stream.borrow().soloist;
+                                    state.generation == generation && state.soloist.is_some()
+                                };
+                                if still_there {
+                                    spotify.soloist_lost();
+                                }
+                            }
+                        ),
+                    );
                     return;
                 }
                 if self.soloist_receiving() {
@@ -467,10 +518,27 @@ impl Spotify {
                     );
                     return;
                 }
-                self.imp().stream.borrow_mut().soloist.reconnects = 0;
-                self.soloist_gone("error");
-                self.message(&gettext("Soloist can't be reached"));
+                self.soloist_lost();
             }
+        }
+    }
+
+    /// Soloist stopped answering for good.
+    fn soloist_lost(&self) {
+        if self.soloist_receiving() {
+            self.end_receiver(false);
+        }
+        self.imp().stream.borrow_mut().soloist.reconnects = 0;
+        self.soloist_gone("error");
+        self.message(&gettext("Soloist can't be reached"));
+    }
+
+    /// Soloist is no longer the active device (the phone moved playback
+    /// elsewhere): the receiver ends, its controls would steer nothing.
+    fn left_device(&self, is_active: bool) {
+        if !is_active && self.soloist_receiving() {
+            tracing::info!("Soloist is no longer the active device; leaving the receiver");
+            self.end_receiver(false);
         }
     }
 
@@ -755,11 +823,17 @@ impl Spotify {
             .clamp(0.0, 100.0) as u8
     }
 
+    /// Gatefold gives up on the song; Soloist is paused, so it doesn't
+    /// start it later after all.
     fn soloist_unavailable(&self) {
         {
             let mut stream = self.imp().stream.borrow_mut();
             stream.soloist.wanted = None;
             stream.soloist.started = false;
+        }
+        if let Some(soloist) = self.soloist() {
+            self.imp().stream.borrow_mut().soloist.pause_asked = Some(std::time::Instant::now());
+            soloist.pause();
         }
         GatefoldApplication::get()
             .player()

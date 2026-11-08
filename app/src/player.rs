@@ -848,11 +848,20 @@ impl Player {
         if !self.is_remote() {
             // A fade's other song stops too, not only the active engine.
             self.finish_crossfade();
-            if imp.state.get() == State::Playing
-                && let Some(engine) = self.engine()
-            {
-                engine.pause();
-                self.set_state(State::Paused);
+            if imp.state.get() == State::Playing {
+                if imp.streaming.get() {
+                    // A streamed song stops here too, not only once Spotify
+                    // Connect moves playback (not for the receiver: Soloist
+                    // plays someone else's music then).
+                    let spotify = self.spotify();
+                    if !spotify.soloist_receiving() {
+                        spotify.stream_pause();
+                        self.set_state(State::Paused);
+                    }
+                } else if let Some(engine) = self.engine() {
+                    engine.pause();
+                    self.set_state(State::Paused);
+                }
             }
             imp.local_position.set(self.position());
             imp.local_uid

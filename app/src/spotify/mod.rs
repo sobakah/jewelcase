@@ -191,6 +191,12 @@ impl Spotify {
     /// On start: reconnects with the stored logins.
     pub fn start(&self) {
         self.start_streaming();
+        self.start_account();
+    }
+
+    /// The Web API login only (retried while Spotify can't be reached;
+    /// streaming keeps running).
+    fn start_account(&self) {
         if self.settings().string("spotify-account").is_empty() || self.client_id().is_empty() {
             return;
         }
@@ -384,7 +390,7 @@ impl Spotify {
                 self,
                 move || {
                     if !spotify.is_connected() {
-                        spotify.start();
+                        spotify.start_account();
                     }
                 }
             ),
