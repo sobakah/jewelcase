@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed: at the end of a Spotify song played through Soloist, Gatefold could race through the rest of the album in a second and stop at its start. That happened when Soloist first played a song left in its queue from earlier: the next song's own start was then taken for that left-over playing again. Should songs ever keep ending right after they start, Gatefold now stops and says so. When Gatefold's Next makes Soloist skip and it lands on a song left in its queue, Gatefold plays its own song directly.
+- Gatefold now writes what it decides about Soloist (which song plays, why one ended) to the system log (`journalctl --user -t gatefold`).
 - Songs whose FLAC file doesn't say how long it is (some encoders leave that out) now get their length, so their progress bar, total time and seeking work. Such songs already in the library are read again once, on the next start. Until a song has a length, its bar stays empty instead of full.
 - On a Spotify album, the artist's name opens their page: the one in your library if you have them, otherwise their Spotify page (before, only artists in your library were links).
 - Clicking an album's title copies it (instead of putting a text cursor in it).

@@ -47,6 +47,15 @@ pub struct SoloistState {
     /// What Gatefold asked to play, and whether it's playing now.
     wanted: Option<String>,
     started: bool,
+    /// When Gatefold's song started (Soloist reports a start more than
+    /// once).
+    started_at: Option<std::time::Instant>,
+    /// Gatefold's songs that ended right after starting, in a row: a
+    /// loop, stopped (`RUNAWAY_ENDS`).
+    quick_ends: u32,
+    /// Gatefold's Next made Soloist skip to this song in its queue, from
+    /// the song that played then.
+    skip_to: Option<(String, Option<String>)>,
     /// Loaded without playing (a restored queue): played on "play".
     pending: Option<(String, u64)>,
     seek_after_start: Option<u64>,
@@ -112,6 +121,10 @@ const CHOSEN_ELSEWHERE_MS: u64 = 15_000;
 /// A left-over that left Soloist's queue report is still recognised
 /// this long (the report can come before the song starts).
 const PRUNED_KEPT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Gatefold's song ending this soon after it started is suspicious ...
+const QUICK_END: std::time::Duration = std::time::Duration::from_secs(2);
+/// ... and this many in a row are a loop: Gatefold stops.
+const RUNAWAY_ENDS: u32 = 4;
 /// A pause Gatefold asked for is reported within this.
 const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -616,16 +629,28 @@ impl Spotify {
                 let seek = {
                     let mut stream = self.imp().stream.borrow_mut();
                     stream.soloist.started = true;
+                    stream.soloist.started_at = Some(std::time::Instant::now());
+                    stream.soloist.skip_to = None;
                     stream.soloist.seek_after_start.take()
                 };
                 if let (Some(ms), Some(soloist)) = (seek, self.soloist()) {
                     soloist.seek(ms);
                 }
                 self.schedule_end();
-            } else if self.take_stale(uri) {
+            } else if self.started_a_while_ago() && self.take_stale(uri) {
                 // The same song again, from what was left in Soloist's
-                // queue: Gatefold's song is over.
-                self.soloist_ended();
+                // queue: Gatefold's song is over. (Not Soloist reporting
+                // the start twice: the song was loaded while a copy of it
+                // waited in the queue.)
+                self.soloist_ended("the copy left in Soloist's queue plays");
+            }
+        } else if !started && let Some(target) = self.skip_missed(uri) {
+            // Gatefold's Next made Soloist skip, but a song Gatefold didn't
+            // know of was ahead in its queue: Gatefold's song is started
+            // directly (its copy stays in the queue).
+            tracing::info!("Soloist skipped to {uri} instead of {target}; playing it directly");
+            if let Some(soloist) = self.soloist() {
+                soloist.play(Some(&target));
             }
         } else if started {
             let (chained, expected) = {
@@ -638,7 +663,7 @@ impl Spotify {
             if chained && !expected {
                 // Handed over, but Gatefold's queue changed meanwhile.
                 self.imp().stream.borrow_mut().soloist.queued_next = None;
-                self.soloist_ended();
+                self.soloist_ended("the handed-over song, but Gatefold's queue changed");
             } else if chained {
                 // The handed-over song plays: it's Gatefold's next one.
                 {
@@ -648,6 +673,7 @@ impl Spotify {
                     state.chained = Some(uri.to_owned());
                     state.wanted = Some(uri.to_owned());
                     state.started = true;
+                    state.started_at = Some(std::time::Instant::now());
                     state.position = None;
                 }
                 GatefoldApplication::get()
@@ -655,7 +681,7 @@ impl Spotify {
                     .stream_note(StreamNote::Ended);
             } else if self.take_stale(uri) {
                 // What was left in Soloist's queue: Gatefold's song is over.
-                self.soloist_ended();
+                self.soloist_ended("a song left in Soloist's queue plays");
             } else if GatefoldApplication::get().player().playing()
                 && left.is_some_and(|left| left > CHOSEN_ELSEWHERE_MS)
             {
@@ -667,13 +693,39 @@ impl Spotify {
             } else if GatefoldApplication::get().player().playing() {
                 // Soloist moved on at the end (its autoplay): Gatefold's
                 // next song.
-                self.soloist_ended();
+                self.soloist_ended("Soloist moved on by itself at the end");
             } else {
                 // Gatefold's song was paused and someone else plays now
                 // (cast from the phone): theirs is shown, not stopped.
                 self.soloist_release();
             }
         }
+    }
+
+    fn started_a_while_ago(&self) -> bool {
+        let state = &self.imp().stream.borrow().soloist;
+        state.started_at.is_some_and(|at| at.elapsed() >= QUICK_END)
+    }
+
+    /// Gatefold's Next skipped in Soloist's queue and Soloist didn't land
+    /// on Gatefold's song: the song, now known to wait behind others.
+    fn skip_missed(&self, uri: &str) -> Option<String> {
+        let mut stream = self.imp().stream.borrow_mut();
+        let state = &mut stream.soloist;
+        // A late report of the song skipped from isn't where it landed.
+        if state
+            .skip_to
+            .as_ref()
+            .is_none_or(|(_, from)| from.as_deref() == Some(uri))
+        {
+            return None;
+        }
+        let (target, _) = state.skip_to.take()?;
+        if state.wanted.as_deref() != Some(target.as_str()) {
+            return None;
+        }
+        state.stale_queue.push(target.clone());
+        Some(target)
     }
 
     /// Whether `uri` was left in Soloist's queue (and now isn't).
@@ -719,7 +771,7 @@ impl Spotify {
         };
         match self.soloist() {
             Some(soloist) => {
-                tracing::debug!("Skipping past {uri} in Soloist's queue");
+                tracing::info!("Soloist: skipping past {uri} in its queue");
                 soloist.set_volume(0);
                 self.imp().stream.borrow_mut().soloist.ducked = true;
                 soloist.skip_next();
@@ -770,15 +822,14 @@ impl Spotify {
                 self.schedule_end();
             }
             Status::Paused if self.soloist_paused_at_end() => {
-                tracing::debug!("Soloist paused at the end of the song: next one");
-                self.soloist_ended();
+                self.soloist_ended("Soloist paused at the end");
             }
             Status::Paused => {
                 player.stream_note(StreamNote::Paused);
                 // The end timers wait while paused.
                 self.schedule_end();
             }
-            Status::Idle if started => self.soloist_ended(),
+            Status::Idle if started => self.soloist_ended("Soloist is idle"),
             _ => {}
         }
     }
@@ -808,21 +859,46 @@ impl Spotify {
 
     /// Gatefold's song is over: Soloist is paused before it plays anything
     /// else, and the queue moves on.
-    fn soloist_ended(&self) {
-        {
+    fn soloist_ended(&self, why: &str) {
+        let uri = self.imp().stream.borrow().soloist.wanted.clone();
+        tracing::info!(
+            "Soloist: {} is over ({why})",
+            uri.as_deref().unwrap_or("the song")
+        );
+        let runaway = {
             let mut stream = self.imp().stream.borrow_mut();
-            stream.soloist.wanted = None;
-            stream.soloist.started = false;
-            stream.soloist.quiet_until = Some(std::time::Instant::now() + QUIET);
-            Self::forget_queued(&mut stream.soloist);
-        }
+            let state = &mut stream.soloist;
+            state.wanted = None;
+            state.started = false;
+            state.quiet_until = Some(std::time::Instant::now() + QUIET);
+            Self::forget_queued(state);
+            let quick = state
+                .started_at
+                .take()
+                .is_some_and(|at| at.elapsed() < QUICK_END);
+            state.quick_ends = if quick { state.quick_ends + 1 } else { 0 };
+            let runaway = state.quick_ends >= RUNAWAY_ENDS;
+            if runaway {
+                state.quick_ends = 0;
+            }
+            runaway
+        };
         if let Some(soloist) = self.soloist() {
             soloist.pause();
         }
         self.restore_volume();
-        GatefoldApplication::get()
-            .player()
-            .stream_note(StreamNote::Ended);
+        let player = GatefoldApplication::get().player();
+        if runaway {
+            // Songs ending as soon as they start: something keeps Soloist
+            // moving on. Stopped instead of racing through the queue.
+            tracing::warn!("Soloist's songs keep ending right away; stopping");
+            player.stop();
+            self.message(&gettext(
+                "Soloist kept skipping songs, so Gatefold stopped. Play again to go on.",
+            ));
+            return;
+        }
+        player.stream_note(StreamNote::Ended);
     }
 
     /// Gatefold's next song: a Spotify song (handed over while the
@@ -850,7 +926,7 @@ impl Spotify {
             })
         };
         if let (Some(next), Some(soloist)) = (next, self.soloist()) {
-            tracing::debug!("Handing {next} to Soloist's queue");
+            tracing::info!("Soloist: handing {next} to its queue");
             soloist.add_to_queue(&next);
             self.imp().stream.borrow_mut().soloist.queued_next = Some(next);
         }
@@ -975,6 +1051,10 @@ impl Spotify {
             if skip {
                 state.queued_next = None;
             }
+            state.skip_to = skip.then(|| {
+                let from = state.current.as_ref().map(|c| c.uri.clone());
+                (uri.to_owned(), from)
+            });
             skip
         };
         if !skip {
@@ -1019,8 +1099,10 @@ impl Spotify {
             soloist.set_repeat(Repeat::Off);
         }
         if skip {
+            tracing::info!("Soloist: {uri} by skipping to it in its queue");
             soloist.skip_next();
         } else {
+            tracing::info!("Soloist: playing {uri}");
             soloist.play(Some(uri));
         }
         // No start in time: Spotify can't play it.
