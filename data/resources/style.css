@@ -239,8 +239,14 @@
   transition: background-color 150ms ease-out;
 }
 
-.panel-resize-handle:hover {
+.panel-resize-handle:hover,
+.panel-resize-handle:focus-visible {
   background-color: alpha(currentColor, 0.08);
+}
+
+.panel-resize-handle:focus-visible {
+  outline: 2px solid alpha(@accent_color, 0.5);
+  outline-offset: -2px;
 }
 
 /* Quick actions on song rows stay quiet until the row is pointed at. */

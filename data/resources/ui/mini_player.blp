@@ -200,6 +200,9 @@ template $GatefoldMiniPlayer: Adw.Bin {
       }
 
       Gtk.Label duration_label {
+        // A button for assistive technology and the keyboard (Enter,
+        // Space): switches between length and remaining time.
+        accessible-role: button;
         label: "0:00";
         width-chars: 5;
         xalign: 0;

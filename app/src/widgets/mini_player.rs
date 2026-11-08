@@ -195,8 +195,9 @@ impl MiniPlayer {
     }
 }
 
-/// Clicking the time right of the seek bar switches between the song's
-/// length and the remaining time (a shared setting).
+/// Clicking the time right of the seek bar (or Enter or Space on it)
+/// switches between the song's length and the remaining time (a shared
+/// setting).
 pub(super) fn make_end_time_toggle(label: &gtk::Label, on_change: impl Fn() + 'static) {
     let player = GatefoldApplication::get().player();
     let settings = player.settings().clone();
@@ -209,6 +210,27 @@ pub(super) fn make_end_time_toggle(label: &gtk::Label, on_change: impl Fn() + 's
         let _ = toggle_settings.set_boolean("show-remaining-time", !remaining);
     });
     label.add_controller(click);
+    // The keyboard too: focusable, Enter or Space.
+    label.set_focusable(true);
+    label.update_property(&[gtk::accessible::Property::Label(&gettext(
+        "Show Remaining Time",
+    ))]);
+    let keys = gtk::EventControllerKey::new();
+    let key_settings = settings.clone();
+    keys.connect_key_pressed(move |_, key, _, _| {
+        use gtk::gdk::Key;
+        if matches!(
+            key,
+            Key::Return | Key::KP_Enter | Key::space | Key::KP_Space
+        ) {
+            let remaining = key_settings.boolean("show-remaining-time");
+            let _ = key_settings.set_boolean("show-remaining-time", !remaining);
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    label.add_controller(keys);
     settings.connect_changed(Some("show-remaining-time"), move |_, _| on_change());
 }
 

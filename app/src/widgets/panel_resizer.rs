@@ -10,6 +10,8 @@ const KEY: &str = "panel-width";
 const MIN_WIDTH: i32 = 280;
 /// Room the content keeps next to the panel.
 const MIN_CONTENT: i32 = 300;
+/// One key press (Left, Right).
+const KEY_STEP: i32 = 20;
 
 /// Wraps the sidebar of `split` (whose sidebar is at the end) with a handle.
 pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
@@ -21,6 +23,9 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
         .width_request(8)
         .halign(gtk::Align::Start)
         .css_classes(["panel-resize-handle"])
+        // Reachable with the keyboard: Left and Right change the width.
+        .focusable(true)
+        .accessible_role(gtk::AccessibleRole::Separator)
         .cursor(&gdk::Cursor::from_name("col-resize", None).expect("a standard cursor"))
         .build();
     handle.update_property(&[gtk::accessible::Property::Label(&gettextrs::gettext(
@@ -162,6 +167,51 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
         }
     });
     handle.add_controller(drag);
+
+    // Left widens (the handle is on the panel's left edge), Right narrows;
+    // with Ctrl in bigger steps.
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(glib::clone!(
+        #[weak]
+        split,
+        #[strong]
+        settings,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |_, key, _, modifiers| {
+            let step = if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+                KEY_STEP * 4
+            } else {
+                KEY_STEP
+            };
+            let change = match key {
+                gdk::Key::Left | gdk::Key::KP_Left => step,
+                gdk::Key::Right | gdk::Key::KP_Right => -step,
+                _ => return glib::Propagation::Proceed,
+            };
+            let now = split.sidebar().map_or(0, |s| s.width());
+            let max = (split.width() - MIN_CONTENT).max(MIN_WIDTH);
+            let width = (now + change).clamp(MIN_WIDTH, max);
+            let _ = settings.set_int(KEY, width);
+            glib::Propagation::Stop
+        }
+    ));
+    handle.add_controller(keys);
+    // Its value for assistive technology.
+    let describe = glib::clone!(
+        #[weak]
+        handle,
+        move |settings: &gio::Settings| {
+            let width = settings.int(KEY);
+            handle.update_property(&[
+                gtk::accessible::Property::ValueMin(f64::from(MIN_WIDTH)),
+                gtk::accessible::Property::ValueNow(f64::from(width.max(0))),
+            ]);
+        }
+    );
+    describe(settings);
+    let id = settings.connect_changed(Some(KEY), move |settings, _| describe(settings));
+    crate::widgets::disconnect_with(split, settings, id);
 }
 
 mod stable_imp {
