@@ -91,8 +91,7 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
     // Where in the handle it was grabbed, and the width the drag asks for.
     let grab = std::rc::Rc::new(std::cell::Cell::new(0.0));
     let wanted = std::rc::Rc::new(std::cell::Cell::new(None::<i32>));
-    // While dragging, only the panel changes: the grid behind keeps its
-    // width and reflows once at the end, instead of on every motion.
+    // While dragging, the grid behind follows the edge live.
     let begin_stable = stable.clone();
     let cancel_stable = stable.clone();
     drag.connect_drag_begin(glib::clone!(
@@ -104,7 +103,7 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
             grab.set(x);
             wanted.set(None);
             if let Some(stable) = &begin_stable {
-                stable.set_frozen(true);
+                stable.set_dragging(true);
             }
         }
     ));
@@ -153,14 +152,13 @@ pub fn attach(split: &adw::OverlaySplitView, settings: &gio::Settings) {
                 let _ = settings.set_int(KEY, width);
             }
             if let Some(stable) = &stable {
-                stable.set_frozen(false);
+                stable.set_dragging(false);
             }
         }
     ));
-    // A cancelled drag (e.g. a grab elsewhere) must not leave it frozen.
     drag.connect_cancel(move |_, _| {
         if let Some(stable) = &cancel_stable {
-            stable.set_frozen(false);
+            stable.set_dragging(false);
         }
     });
     handle.add_controller(drag);
@@ -179,8 +177,8 @@ mod stable_imp {
         pub split: glib::WeakRef<adw::OverlaySplitView>,
         /// The content width while the panel is shown.
         pub narrow: Cell<i32>,
-        /// While the panel's edge is dragged: the content keeps this width.
-        pub frozen: Cell<Option<i32>>,
+        /// While the panel's edge is dragged (not sliding in or out).
+        pub dragging: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -223,9 +221,8 @@ mod stable_imp {
                 return;
             };
             let child_width = match self.split.upgrade() {
-                Some(split) if !split.is_collapsed() && self.frozen.get().is_some() => {
-                    self.frozen.get().unwrap_or(width)
-                }
+                // The width the split view gives, in step with the panel.
+                Some(split) if !split.is_collapsed() && self.dragging.get() => width,
                 Some(split) if !split.is_collapsed() => {
                     let full = split.width();
                     if split.shows_sidebar() {
@@ -259,12 +256,10 @@ glib::wrapper! {
 }
 
 impl StableContent {
-    /// Keeps the content at its current width (resizing the panel), or
-    /// lets it follow again, with one reflow.
-    fn set_frozen(&self, frozen: bool) {
-        let imp = self.imp();
-        let width = imp.child.borrow().as_ref().map(|c| c.width());
-        imp.frozen.set(if frozen { width } else { None });
+    /// While the panel's edge is dragged, the content follows the width
+    /// the split view gives it.
+    fn set_dragging(&self, dragging: bool) {
+        self.imp().dragging.set(dragging);
         self.queue_allocate();
     }
 
