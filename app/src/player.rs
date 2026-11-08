@@ -116,6 +116,8 @@ mod imp {
         /// crossfade.
         pub engines: OnceCell<Vec<playback::Player>>,
         pub active: Cell<usize>,
+        /// Visualizers on screen; the spectrum is measured only then.
+        pub spectrum_users: Cell<u32>,
         /// A crossfade in progress: the engine fading out, and when.
         pub fade: RefCell<Option<Fade>>,
         /// Whether ReplayGain was on, to notice it being switched.
@@ -836,6 +838,32 @@ impl Player {
     }
 
     /// The song plays from Spotify: streamed, or on a Spotify device.
+    /// Bars for the visualizer (CONCEPT.md §4.3), low to high, 0 to 1:
+    /// the spectrum of the local song as it's heard now. None while
+    /// paused, for Spotify songs (Soloist plays them itself) and between
+    /// frames.
+    pub fn spectrum_bars(&self, count: usize) -> Option<Vec<f32>> {
+        if !self.imp().playing.get() || self.plays_from_spotify() {
+            return None;
+        }
+        let frame = self.engine()?.spectrum_now()?;
+        Some(playback::spectrum_bars(&frame, count))
+    }
+
+    /// A visualizer appeared (`true`) or went away.
+    pub fn use_spectrum(&self, on: bool) {
+        let imp = self.imp();
+        let users = if on {
+            imp.spectrum_users.get() + 1
+        } else {
+            imp.spectrum_users.get().saturating_sub(1)
+        };
+        imp.spectrum_users.set(users);
+        for engine in self.all_engines() {
+            engine.set_spectrum(users > 0);
+        }
+    }
+
     pub fn plays_from_spotify(&self) -> bool {
         self.is_remote() || self.current_track().is_some_and(|t| t.is_stand_in())
     }

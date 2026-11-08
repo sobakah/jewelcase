@@ -214,6 +214,16 @@ template $GatefoldPlayerView: Adw.Bin {
             orientation: vertical;
             spacing: 18;
 
+            // The music as bars, between the cover and the title.
+            Adw.Clamp {
+              maximum-size: 420;
+
+              child: $GatefoldVisualizer visualizer {
+                bars: 32;
+                height-request: 36;
+              };
+            }
+
             Gtk.CenterBox {
               center-widget: Gtk.Box {
                 orientation: vertical;

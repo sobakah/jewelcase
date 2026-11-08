@@ -58,6 +58,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             CoverImage::ensure_type();
+            crate::widgets::Visualizer::ensure_type();
             klass.bind_template();
         }
 

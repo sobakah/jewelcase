@@ -23,6 +23,7 @@ mod spotify_tile;
 pub mod statistics;
 mod track_info;
 mod track_row;
+mod visualizer;
 
 pub use album_panel::AlbumPanel;
 pub use album_tile::AlbumTile;
@@ -40,6 +41,7 @@ pub use search_view::SearchView;
 pub use sectioned_grid::SectionedGrid;
 pub use spotify_tile::{ShelfItem, tile_content};
 pub use track_row::TrackRow;
+pub use visualizer::Visualizer;
 
 /// Disconnects a handler `owner` put on a long-lived `source` (the
 /// library, player, settings) once `owner` is gone, so pages and dialogs

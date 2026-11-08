@@ -148,6 +148,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             CoverImage::ensure_type();
+            crate::widgets::Visualizer::ensure_type();
             LyricsView::ensure_type();
             QueueView::ensure_type();
             klass.bind_template();

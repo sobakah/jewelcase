@@ -247,6 +247,8 @@ Expanded: the **Lyrics** and **Queue** toggles open side panes. Whether they're 
 - Accent color: the dominant cover color is applied through a scoped CSS provider (`@accent_bg_color`, background gradient) **only inside the player view**, with contrast checked against WCAG AA. The rest of the app follows the system accent.
 - Cover sources, in priority order: embedded picture (front) → `cover.*`/`folder.*`/`front.*` in the album folder → (optional, opt-in) Cover Art Archive by release MBID. Cached thumbnails go in `~/.cache/io.github.sobakah.Gatefold/covers/` at 3 sizes (grid, panel, player), decoded with glycin.
 
+- **Visualizer** (November 2026): 32 bars between the cover and the title in the player, 4 between the cover and the title in the mini player, in the cover color, faint at rest and full when loud; they rise at once and fall back gently. A `spectrum` element ends both audio filters (with ReplayGain behind `rglimiter`, without it alone), so it shows the levelled music, not the volume slider; it posts only while a visualizer is on screen, 25 frames a second of 1024 bands. Frames wait until the sink plays them (their running time against the pipeline's and its latency), so the bars move with what's heard; after a seek or a new song the queue starts over. Bars are log-spaced from 50 Hz to 16 kHz, tilted against music's falling highs and scaled for ReplayGain'd music (measured on the reference library). Crossfades show the song fading in. A still, faint strip for Spotify songs (Soloist plays them itself; tapping its PipeWire output was left out as fragile), while paused and when nothing plays; then it stops drawing. Preferences → Playback → *Visualizer* (`visualizer`, on); off while GNOME's animations are off.
+
 ---
 
 ## 5. Lyrics
@@ -698,7 +700,6 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
-- **A simple visualizer**: a spectrum strip between cover and title in the player (about 32 bars in the cover color, falling back gently), and 4–5 bars between cover and title in the mini player, like a "now playing" icon but driven by the music. GStreamer's `spectrum` element (gstreamer1-plugins-good, already required) goes into the audio filter behind ReplayGain (so it shows the levelled music, not the volume slider; it must stay in when ReplayGain is off, where the filter is removed today), posting band magnitudes about 25 times a second; each message carries its running time, so the bars are shown when the audio is heard, not ahead by the sink's latency. Drawn only while visible and playing; a switch in Preferences → Playback, off when GNOME's animations are off. Crossfade: the bars follow the song fading in. Not for Spotify songs through Soloist (it plays them itself; tapping its PipeWire output would be possible but fragile) or on other Spotify devices. Effort: about one session. Where: `core/src/playback.rs` (filter bin, bus messages), a new widget, `player_view`, `mini_player`.
 
 ### Known issues (code review, November 2026)
 A review of the whole program (six areas, read in full) found about 85 problems; all but this one are fixed (the last ones on 2026-11-08: scans now write only what changed, and the reload after a scan runs on a worker thread).

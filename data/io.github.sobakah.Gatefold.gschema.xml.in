@@ -92,6 +92,11 @@
       <summary>Crossfade within albums</summary>
       <description>Off: songs of an album playing in order follow gaplessly.</description>
     </key>
+    <key name="visualizer" type="b">
+      <default>true</default>
+      <summary>Visualizer</summary>
+      <description>Bars that move with the music in the player and the mini player (local songs only; off while GNOME’s animations are off).</description>
+    </key>
     <key name="check-updates" type="b">
       <default>true</default>
       <summary>Check for updates</summary>

@@ -178,6 +178,12 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
           ]
         };
       }
+
+      Adw.SwitchRow visualizer_row {
+        title: _("_Visualizer");
+        subtitle: _("Bars that move with the music, in the player and the mini player; for songs from your library, while GNOME’s animations are on");
+        use-underline: true;
+      }
     }
 
     Adw.PreferencesGroup {

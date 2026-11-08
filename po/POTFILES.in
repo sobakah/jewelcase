@@ -46,4 +46,5 @@ app/src/widgets/shuffle_options.rs
 app/src/widgets/statistics.rs
 app/src/widgets/track_info.rs
 app/src/widgets/track_row.rs
+app/src/widgets/visualizer.rs
 app/src/window.rs

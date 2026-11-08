@@ -8,6 +8,11 @@
 //!   ReplayGain tags win over R128 ones (`prefer_replaygain_tags`).
 //!   Album or track gain can switch at any time; turning ReplayGain on or
 //!   off applies from the next [`Player::load`].
+//! - **Visualizer:** a `spectrum` element ends both filters (with and
+//!   without ReplayGain), so it sees the levelled music, not the volume
+//!   slider. It posts only while asked ([`Player::set_spectrum`]); frames
+//!   wait in a short queue until the sink plays them
+//!   ([`Player::spectrum_now`]), so the bars move with what's heard.
 //!
 //! - **M4A workaround:** after a seek inside an MP4 file, GStreamer's next
 //!   gapless track starts only after a delay as long as the seek jump (seen
@@ -66,9 +71,40 @@ fn is_mp4(uri: &str) -> bool {
         .any(|ext| lower.ends_with(ext))
 }
 
+/// Bands the `spectrum` element measures (linear, up to half the rate).
+const SPECTRUM_BANDS: u32 = 1024;
+/// A frame every 40 ms: 25 a second.
+const SPECTRUM_INTERVAL_MS: u64 = 40;
+/// Quieter bands (dB) count as silence.
+const SPECTRUM_THRESHOLD_DB: i32 = -80;
+/// Frames waiting for the sink, at most (a few seconds).
+const SPECTRUM_QUEUE: usize = 100;
+
+/// One spectrum measurement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpectrumFrame {
+    /// When it's heard: the end of the measured stretch, as running time.
+    running_time_ns: u64,
+    /// dB per band, from 0 Hz to half the rate.
+    pub magnitudes: Vec<f32>,
+    pub rate: u32,
+}
+
+#[derive(Debug, Default)]
+struct SpectrumQueue {
+    frames: std::collections::VecDeque<SpectrumFrame>,
+    /// The last frame due (kept, so several widgets can show it).
+    current: Option<SpectrumFrame>,
+}
+
 pub struct Player {
     playbin: gst::Element,
     filter: gst::Element,
+    /// Without ReplayGain: only the spectrum.
+    plain_filter: gst::Element,
+    spectrums: [gst::Element; 2],
+    spectrum: Arc<Mutex<SpectrumQueue>>,
+    latency_ns: Mutex<u64>,
     rgvolume: gst::Element,
     next: Arc<Mutex<NextTrack>>,
     gapless: Arc<Mutex<GaplessState>>,
@@ -92,8 +128,26 @@ impl Player {
             playbin.set_property("audio-sink", &sink);
         }
 
-        let filter = gst::parse::bin_from_description("rgvolume name=rgvolume ! rglimiter", true)?
+        let filter = gst::parse::bin_from_description(
+            "rgvolume name=rgvolume ! rglimiter ! spectrum name=spectrum",
+            true,
+        )?
+        .upcast::<gst::Element>();
+        let plain_filter = gst::parse::bin_from_description("spectrum name=spectrum", true)?
             .upcast::<gst::Element>();
+        let spectrum_of = |bin: &gst::Element| {
+            let spectrum = bin
+                .downcast_ref::<gst::Bin>()
+                .and_then(|bin| bin.by_name("spectrum"))
+                .ok_or_else(|| gst::glib::bool_error!("spectrum"))?;
+            spectrum.set_property("bands", SPECTRUM_BANDS);
+            spectrum.set_property("threshold", SPECTRUM_THRESHOLD_DB);
+            spectrum.set_property("interval", SPECTRUM_INTERVAL_MS * 1_000_000);
+            spectrum.set_property("post-messages", false);
+            spectrum.set_property("message-phase", false);
+            Ok::<_, gst::glib::BoolError>(spectrum)
+        };
+        let spectrums = [spectrum_of(&filter)?, spectrum_of(&plain_filter)?];
         let rgvolume = filter
             .downcast_ref::<gst::Bin>()
             .and_then(|bin| bin.by_name("rgvolume"))
@@ -110,8 +164,24 @@ impl Player {
         let (tx, rx) = async_channel::unbounded();
         let bus = playbin.bus().expect("playbin has a bus");
         let bus_tx = tx.clone();
+        let spectrum: Arc<Mutex<SpectrumQueue>> = Arc::default();
+        let spectrum_queue = spectrum.clone();
         bus.set_sync_handler(move |_, message| {
             use gst::MessageView;
+            if let MessageView::Element(element) = message.view()
+                && let Some(frame) = element
+                    .structure()
+                    .filter(|s| s.name() == "spectrum")
+                    .and_then(|s| spectrum_frame(s, message.src()))
+            {
+                if let Ok(mut queue) = spectrum_queue.lock() {
+                    if queue.frames.len() >= SPECTRUM_QUEUE {
+                        queue.frames.pop_front();
+                    }
+                    queue.frames.push_back(frame);
+                }
+                return gst::BusSyncReply::Drop;
+            }
             let event = match message.view() {
                 MessageView::StreamStart(_) => Some(PlayerEvent::StreamStarted),
                 MessageView::AsyncDone(_) => Some(PlayerEvent::AsyncDone),
@@ -153,6 +223,10 @@ impl Player {
         let player = Self {
             playbin,
             filter,
+            plain_filter,
+            spectrums,
+            spectrum,
+            latency_ns: Mutex::new(0),
             rgvolume,
             next,
             gapless,
@@ -166,6 +240,16 @@ impl Player {
     /// Lets the player react to its own events; call it for every event
     /// before handling it.
     pub fn handle_event(&self, event: &PlayerEvent) {
+        if *event == PlayerEvent::AsyncDone {
+            // How far the sink plays behind: frames wait that long.
+            let mut query = gst::query::Latency::new();
+            if self.playbin.query(&mut query) {
+                let (_, min, _) = query.result();
+                if let Ok(mut latency) = self.latency_ns.lock() {
+                    *latency = min.nseconds();
+                }
+            }
+        }
         if *event == PlayerEvent::AsyncDone
             && let Some(ms) = self.pending_seek_ms.lock().ok().and_then(|mut s| s.take())
         {
@@ -180,8 +264,13 @@ impl Player {
             *pending = None;
         }
         let _ = self.playbin.set_state(gst::State::Ready);
+        self.clear_spectrum();
         let replaygain = self.replaygain.lock().map_or(true, |r| *r);
-        let filter = replaygain.then_some(&self.filter);
+        let filter = if replaygain {
+            &self.filter
+        } else {
+            &self.plain_filter
+        };
         self.playbin.set_property("audio-filter", filter);
         self.playbin.set_property("uri", uri);
         if let Ok(mut gapless) = self.gapless.lock() {
@@ -225,6 +314,8 @@ impl Player {
         {
             gapless.seeked_mp4 = true;
         }
+        // Running time starts again after a flushing seek.
+        self.clear_spectrum();
         let flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         if let Err(err) = self
             .playbin
@@ -255,6 +346,43 @@ impl Player {
         if let Ok(mut slot) = self.next.lock() {
             *slot = next;
         }
+    }
+
+    /// Measures the spectrum for the visualizer (off: no cost).
+    pub fn set_spectrum(&self, enabled: bool) {
+        for spectrum in &self.spectrums {
+            spectrum.set_property("post-messages", enabled);
+        }
+        if !enabled {
+            self.clear_spectrum();
+        }
+    }
+
+    fn clear_spectrum(&self) {
+        if let Ok(mut queue) = self.spectrum.lock() {
+            *queue = SpectrumQueue::default();
+        }
+    }
+
+    /// The spectrum of what's heard now (the newest frame the sink has
+    /// played), if one is due.
+    pub fn spectrum_now(&self) -> Option<SpectrumFrame> {
+        let now = self.playbin.current_running_time()?.nseconds();
+        let latency = self.latency_ns.lock().map_or(0, |l| *l);
+        let heard = now.saturating_sub(latency);
+        let mut queue = self.spectrum.lock().ok()?;
+        while queue
+            .frames
+            .front()
+            .is_some_and(|f| f.running_time_ns <= heard)
+        {
+            queue.current = queue.frames.pop_front();
+        }
+        // Far older than now (a pause, a stall): nothing is heard.
+        let fresh = queue.current.as_ref().is_some_and(|f| {
+            heard.saturating_sub(f.running_time_ns) < 4 * SPECTRUM_INTERVAL_MS * 1_000_000
+        });
+        if fresh { queue.current.clone() } else { None }
     }
 
     pub fn set_replaygain(&self, enabled: bool) {
@@ -355,9 +483,109 @@ fn prefer_replaygain_tags(rgvolume: &gst::Element) {
     });
 }
 
+/// A `spectrum` message as a frame (the rate from the element's caps).
+fn spectrum_frame(
+    structure: &gst::StructureRef,
+    source: Option<&gst::Object>,
+) -> Option<SpectrumFrame> {
+    let end = structure
+        .get::<u64>("running-time")
+        .ok()?
+        .saturating_add(structure.get::<u64>("duration").unwrap_or(0));
+    let magnitudes = structure
+        .get::<gst::List>("magnitude")
+        .ok()?
+        .iter()
+        .filter_map(|v| v.get::<f32>().ok())
+        .collect::<Vec<f32>>();
+    let rate = source
+        .and_then(|s| s.downcast_ref::<gst::Element>())
+        .and_then(|e| e.static_pad("sink"))
+        .and_then(|pad| pad.current_caps())
+        .and_then(|caps| caps.structure(0)?.get::<i32>("rate").ok())
+        .unwrap_or(44_100);
+    Some(SpectrumFrame {
+        running_time_ns: end,
+        magnitudes,
+        rate: rate.max(1) as u32,
+    })
+}
+
+/// `count` bars from a frame, low to high, each 0 (silent) to 1 (loud):
+/// log-spaced from 50 Hz to 16 kHz, each the loudest band in its range,
+/// tilted against music's falling highs (+5 dB an octave above 1 kHz,
+/// −3 below) so all bars move. The scale fits ReplayGain'd music
+/// (measured on the reference library: about −45 dB in a typical bar).
+pub fn spectrum_bars(frame: &SpectrumFrame, count: usize) -> Vec<f32> {
+    const LOW_HZ: f32 = 50.0;
+    const HIGH_HZ: f32 = 16_000.0;
+    const FLOOR_DB: f32 = -62.0;
+    const CEILING_DB: f32 = -30.0;
+    let n = frame.magnitudes.len();
+    if n == 0 || count == 0 {
+        return vec![0.0; count];
+    }
+    let nyquist = frame.rate as f32 / 2.0;
+    let band_hz = nyquist / n as f32;
+    let high = HIGH_HZ.min(nyquist);
+    let ratio = (high / LOW_HZ).powf(1.0 / count as f32);
+    (0..count)
+        .map(|i| {
+            let lo = LOW_HZ * ratio.powi(i as i32);
+            let hi = lo * ratio;
+            let first = ((lo / band_hz) as usize).min(n - 1);
+            let last = ((hi / band_hz).ceil() as usize).clamp(first + 1, n);
+            let db = frame.magnitudes[first..last]
+                .iter()
+                .copied()
+                .fold(f32::MIN, f32::max);
+            // At the threshold: silence, whatever the tilt.
+            if db <= SPECTRUM_THRESHOLD_DB as f32 + 1.0 {
+                return 0.0;
+            }
+            let center = (lo * hi).sqrt();
+            let octaves = (center / 1000.0).log2();
+            let tilted = db + octaves * if octaves > 0.0 { 5.0 } else { 3.0 };
+            ((tilted - FLOOR_DB) / (CEILING_DB - FLOOR_DB)).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spectrum_bars_low_to_high() {
+        // A loud band at about 100 Hz, quiet elsewhere.
+        let mut magnitudes = vec![-80.0f32; 1024];
+        let band_hz = 48_000.0 / 2.0 / 1024.0;
+        magnitudes[(100.0 / band_hz) as usize] = -15.0;
+        let frame = SpectrumFrame {
+            running_time_ns: 0,
+            magnitudes,
+            rate: 48_000,
+        };
+        let bars = spectrum_bars(&frame, 32);
+        assert_eq!(bars.len(), 32);
+        let loudest = bars
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        // 100 Hz is one octave above 50 Hz, of about 8.3 octaves.
+        assert!((2..=5).contains(&loudest), "loudest bar {loudest}");
+        assert!(bars.iter().all(|b| (0.0..=1.0).contains(b)));
+        assert_eq!(bars[31], 0.0);
+        // Nothing measured: silent bars.
+        let empty = SpectrumFrame {
+            running_time_ns: 0,
+            magnitudes: Vec::new(),
+            rate: 48_000,
+        };
+        assert_eq!(spectrum_bars(&empty, 5), vec![0.0; 5]);
+    }
 
     /// rgvolume's target gain after a tag event with these tags.
     fn target_gain(tags: &[(&str, f64)]) -> Option<f64> {

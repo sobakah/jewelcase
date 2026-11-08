@@ -44,6 +44,8 @@ mod imp {
         #[template_child]
         pub stats_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub visualizer_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub delete_stats_row: TemplateChild<adw::ButtonRow>,
         #[template_child]
         pub lyrics_layout_row: TemplateChild<adw::ComboRow>,
@@ -136,6 +138,9 @@ mod imp {
                 .build();
             settings
                 .bind("listening-stats", &*self.stats_row, "active")
+                .build();
+            settings
+                .bind("visualizer", &*self.visualizer_row, "active")
                 .build();
             self.delete_stats_row.connect_activated(glib::clone!(
                 #[weak]

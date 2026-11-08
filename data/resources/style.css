@@ -355,3 +355,8 @@ button.smart-shuffle {
 .stats-flow > flowboxchild {
   padding: 0;
 }
+
+/* The visualizer (CONCEPT.md §4.3), in the cover color. */
+.visualizer {
+  color: var(--accent-color);
+}
