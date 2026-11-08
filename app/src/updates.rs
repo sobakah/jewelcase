@@ -145,12 +145,11 @@ fn check(window: glib::WeakRef<GatefoldWindow>) {
     if !settings().boolean("check-updates") {
         return;
     }
-    let itself = checks_itself();
     let current = test_version().unwrap_or(config::VERSION).to_owned();
     glib::spawn_future_local(async move {
         let found = gio::spawn_blocking(move || {
             let mut found = Vec::new();
-            if itself {
+            if checks_itself() {
                 match newest_release(gatefold_repo(), &current) {
                     Ok(Some(release)) => found.push(Update::Gatefold(release)),
                     Ok(None) => {}
@@ -162,7 +161,14 @@ fn check(window: glib::WeakRef<GatefoldWindow>) {
             }
             if let Some(installed) = soloistd_version() {
                 match newest_release(SOLOISTD_REPO, &installed) {
-                    Ok(Some(release)) => found.push(Update::Soloistd(release)),
+                    Ok(Some(mut release)) => {
+                        // Installed from here only when it came as an RPM
+                        // (else a second copy would land in /usr/bin).
+                        if !soloistd_from_rpm() {
+                            release.rpm = None;
+                        }
+                        found.push(Update::Soloistd(release));
+                    }
                     Ok(None) => {}
                     Err(err) => tracing::info!("No update check for soloistd: {err}"),
                 }
@@ -434,11 +440,27 @@ fn restart() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    if let Err(err) = started {
-        tracing::warn!("Cannot restart Gatefold: {err}");
-        return;
-    }
-    GatefoldApplication::get().activate_action("quit", None);
+    let mut helper = match started {
+        Ok(helper) => helper,
+        Err(err) => {
+            tracing::warn!("Cannot restart Gatefold: {err}");
+            return;
+        }
+    };
+    let app = GatefoldApplication::get();
+    app.activate_action("quit", None);
+    // Closing may keep the app (background playback) or be cancelled
+    // (a running tool asks first): quit for good once the windows are
+    // gone, else the restart is off.
+    glib::timeout_add_seconds_local_once(2, move || {
+        let app = GatefoldApplication::get();
+        if app.windows().is_empty() {
+            app.quit();
+        } else {
+            let _ = helper.kill();
+            let _ = helper.wait();
+        }
+    });
 }
 
 // ---- Checking (worker threads) ----
@@ -586,6 +608,12 @@ fn rpm_version(package: &str) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// soloistd is the one dnf installed (`/usr/bin/soloistd`).
+fn soloistd_from_rpm() -> bool {
+    gatefold_soloist::soloistd::binary().is_some_and(|b| b == Path::new("/usr/bin/soloistd"))
+        && rpm_version("soloistd").is_some()
 }
 
 fn soloistd_version() -> Option<String> {

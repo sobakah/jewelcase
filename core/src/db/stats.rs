@@ -187,8 +187,13 @@ enum Kind {
 }
 
 impl Kind {
-    /// The groups a play counts for, as (key, name, artist).
-    fn groups(self, entry: &PlayEntry) -> Vec<(String, String, Option<String>)> {
+    /// The groups a play counts for, as (key, name, artist). `names`
+    /// caches the names in artist credits (they repeat a lot).
+    fn groups(
+        self,
+        entry: &PlayEntry,
+        names: &mut HashMap<String, Vec<String>>,
+    ) -> Vec<(String, String, Option<String>)> {
         match self {
             // The same title and artist is the same song, also when it
             // played from the library once and from Spotify another time.
@@ -203,12 +208,18 @@ impl Kind {
             )],
             // Every credited artist ("A feat. B" counts for both).
             Kind::Artist => {
-                let credit = entry.artist.as_deref().or(entry.album_artist.as_deref());
-                let mut names = credit.map(track_artist_names).unwrap_or_default();
-                names.dedup_by_key(|n| n.to_lowercase());
+                let Some(credit) = entry.artist.as_deref().or(entry.album_artist.as_deref()) else {
+                    return Vec::new();
+                };
                 names
-                    .into_iter()
-                    .map(|name| (name.to_lowercase(), name, None))
+                    .entry(credit.to_owned())
+                    .or_insert_with(|| {
+                        let mut found = track_artist_names(credit);
+                        found.dedup_by_key(|n| n.to_lowercase());
+                        found
+                    })
+                    .iter()
+                    .map(|name| (name.to_lowercase(), name.clone(), None))
                     .collect()
             }
             Kind::Album => entry
@@ -252,8 +263,9 @@ impl Kind {
 /// Plays per group, most first (then listening time, then name).
 fn tally(entries: &[PlayEntry], kind: Kind) -> Vec<Ranked> {
     let mut groups: HashMap<String, Ranked> = HashMap::new();
+    let mut names = HashMap::new();
     for entry in entries {
-        for (key, name, artist) in kind.groups(entry) {
+        for (key, name, artist) in kind.groups(entry, &mut names) {
             let ranked = groups.entry(key).or_insert_with(|| Ranked {
                 name: name.clone(),
                 artist: artist.clone(),

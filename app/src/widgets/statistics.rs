@@ -191,6 +191,7 @@ pub fn show(parent: Option<&gtk::Window>) {
     toolbar.set_content(Some(&content));
     dialog.set_child(Some(&toolbar));
 
+    let generation = Rc::new(std::cell::Cell::new(0u64));
     let refresh = Rc::new(glib::clone!(
         #[weak]
         dialog,
@@ -198,9 +199,57 @@ pub fn show(parent: Option<&gtk::Window>) {
         content,
         #[weak]
         periods,
+        #[strong]
+        generation,
         move || {
             let period = Period::from_name(periods.active_name().as_deref().unwrap_or("month"));
-            content.set_child(Some(&page(&dialog, period)));
+            let loaded = match load(period) {
+                Ok(loaded) => loaded,
+                Err(status) => {
+                    content.set_child(Some(&status));
+                    return;
+                }
+            };
+            // Counting takes a moment with years of plays: on a worker
+            // thread, the page waits with a spinner.
+            let this = generation.get() + 1;
+            generation.set(this);
+            let spinner = adw::Spinner::builder()
+                .width_request(32)
+                .height_request(32)
+                .halign(gtk::Align::Center)
+                .valign(gtk::Align::Center)
+                .vexpand(true)
+                .build();
+            content.set_child(Some(&spinner));
+            glib::spawn_future_local(glib::clone!(
+                #[weak]
+                dialog,
+                #[weak]
+                content,
+                #[strong]
+                generation,
+                async move {
+                    let Loaded {
+                        buckets,
+                        current,
+                        previous,
+                    } = loaded;
+                    let counted = gio::spawn_blocking(move || {
+                        let summary = Summary::new(&current, &previous);
+                        (current, summary)
+                    })
+                    .await;
+                    let Ok((current, summary)) = counted else {
+                        return;
+                    };
+                    // Another period was chosen meanwhile.
+                    if generation.get() != this {
+                        return;
+                    }
+                    content.set_child(Some(&build(&dialog, period, &buckets, &current, &summary)));
+                }
+            ));
         }
     ));
     periods.connect_active_name_notify(glib::clone!(
@@ -212,8 +261,16 @@ pub fn show(parent: Option<&gtk::Window>) {
     dialog.present(parent);
 }
 
-/// The page for one period.
-fn page(dialog: &adw::Dialog, period: Period) -> gtk::Widget {
+/// A period's plays, ready to count.
+struct Loaded {
+    buckets: Vec<Bucket>,
+    current: Vec<PlayEntry>,
+    previous: Vec<PlayEntry>,
+}
+
+/// The plays of one period (and the one before), or the page saying
+/// there are none.
+fn load(period: Period) -> Result<Loaded, gtk::Widget> {
     let app = GatefoldApplication::get();
     let library = app.library();
     let now = glib::DateTime::now_local().unwrap_or_else(|_| glib::DateTime::now_utc().unwrap());
@@ -232,7 +289,7 @@ fn page(dialog: &adw::Dialog, period: Period) -> gtk::Widget {
             })
             .vexpand(true)
             .build();
-        return status.upcast();
+        return Err(status.upcast());
     };
     let buckets = buckets(period, &now, Some(first_play));
     let from = buckets.first().map_or(0, |b| b.start);
@@ -256,10 +313,23 @@ fn page(dialog: &adw::Dialog, period: Period) -> gtk::Widget {
             .description(gettext("Choose a longer time above"))
             .vexpand(true)
             .build();
-        return status.upcast();
+        return Err(status.upcast());
     }
-    let summary = Summary::new(&current, &previous);
+    Ok(Loaded {
+        buckets,
+        current,
+        previous,
+    })
+}
 
+/// The page for one period, once counted.
+fn build(
+    dialog: &adw::Dialog,
+    period: Period,
+    buckets: &[Bucket],
+    current: &[PlayEntry],
+    summary: &Summary,
+) -> gtk::Widget {
     let column = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(30)
@@ -268,8 +338,8 @@ fn page(dialog: &adw::Dialog, period: Period) -> gtk::Widget {
         .margin_start(12)
         .margin_end(12)
         .build();
-    column.append(&totals(&summary));
-    column.append(&timeline(&buckets, &current));
+    column.append(&totals(summary));
+    column.append(&timeline(buckets, current));
     let since = period.since();
     if !summary.artists.is_empty() {
         column.append(&section(

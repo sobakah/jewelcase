@@ -837,7 +837,6 @@ impl Player {
         self.imp().remote.borrow().is_some()
     }
 
-    /// The song plays from Spotify: streamed, or on a Spotify device.
     /// Bars for the visualizer (CONCEPT.md §4.3), low to high, 0 to 1:
     /// the spectrum of the local song as it's heard now. None while
     /// paused, for Spotify songs (Soloist plays them itself) and between
@@ -864,6 +863,7 @@ impl Player {
         }
     }
 
+    /// The song plays from Spotify: streamed, or on a Spotify device.
     pub fn plays_from_spotify(&self) -> bool {
         self.is_remote() || self.current_track().is_some_and(|t| t.is_stand_in())
     }
@@ -1108,7 +1108,7 @@ impl Player {
         imp.pending_next.set(None);
         let current = imp.queue.borrow().current().copied();
         let track = current.and_then(|item| self.track(item.track_id));
-        self.set_current_track(track.clone());
+        self.set_current_track_from(track.clone(), start_ms == 0);
 
         let Some(track) = track else {
             self.stop();
@@ -1687,7 +1687,10 @@ impl Player {
                         if let (Some(engine), Some(item)) = (self.engine(), current) {
                             self.apply_measured_gain(engine, item.track_id);
                         }
-                        self.set_current_track(current.and_then(|i| self.track(i.track_id)));
+                        self.set_current_track_from(
+                            current.and_then(|i| self.track(i.track_id)),
+                            true,
+                        );
                         self.set_position(0);
                         self.emit_by_name::<()>("seeked", &[]);
                         self.update_next();
@@ -1711,7 +1714,7 @@ impl Player {
                 self.set_state(State::Stopped);
                 imp.queue.borrow_mut().jump(0);
                 let current = imp.queue.borrow().current().copied();
-                self.set_current_track(current.and_then(|i| self.track(i.track_id)));
+                self.set_current_track_from(current.and_then(|i| self.track(i.track_id)), true);
                 self.set_position(0);
                 self.queue_changed();
             }
@@ -1813,13 +1816,22 @@ impl Player {
     }
 
     fn set_current_track(&self, track: Option<TrackObject>) {
+        self.set_current_track_from(track, false);
+    }
+
+    /// `from_start`: the song starts over from its beginning, so the same
+    /// song again (Repeat One, played twice) counts as a new play.
+    fn set_current_track_from(&self, track: Option<TrackObject>, from_start: bool) {
         let imp = self.imp();
         let changed = imp.current_track.borrow().as_ref().map(TrackObject::id)
             != track.as_ref().map(TrackObject::id);
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
         let previous = imp.current_track.replace(track);
-        // Leaving a song that really played: it goes into the history.
-        if changed && let Some(previous) = previous {
+        // Leaving a song that really played (or starting it over): it
+        // goes into the history and the statistics.
+        if (changed || from_start)
+            && let Some(previous) = previous
+        {
             let played = imp.position.get();
             if played > 0 && played >= (previous.duration_ms() / 2).min(HISTORY_MIN_MS) {
                 self.record_history(&previous, played);

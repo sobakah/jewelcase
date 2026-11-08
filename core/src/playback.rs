@@ -314,8 +314,6 @@ impl Player {
         {
             gapless.seeked_mp4 = true;
         }
-        // Running time starts again after a flushing seek.
-        self.clear_spectrum();
         let flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         if let Err(err) = self
             .playbin
@@ -323,6 +321,9 @@ impl Player {
         {
             tracing::debug!("Seek to {ms} ms failed: {err}");
         }
+        // Running time starts again after a flushing seek (frames from
+        // before it are also dropped in `spectrum_now`).
+        self.clear_spectrum();
     }
 
     pub fn position_ms(&self) -> Option<u64> {
@@ -371,6 +372,9 @@ impl Player {
         let latency = self.latency_ns.lock().map_or(0, |l| *l);
         let heard = now.saturating_sub(latency);
         let mut queue = self.spectrum.lock().ok()?;
+        // Far ahead of now: from before a seek; they'd hold back the rest.
+        let ahead = heard.saturating_add(2_000_000_000);
+        queue.frames.retain(|f| f.running_time_ns <= ahead);
         while queue
             .frames
             .front()
