@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -97,6 +97,16 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sun Nov 08 2026 sobakah - 0.2.2-1
+- Listening statistics: top artists, albums, songs and genres of the
+  week, month, year or all time, with listening time and trends
+- A visualizer for songs from the library, in the player and the mini
+  player
+- Update notices for Gatefold, Soloist and soloistd, installed only
+  when asked
+- Next in the Spotify app skips to Gatefold's next song while Soloist
+  plays; the Pre-Amp setting is gone (fixed at +4 dB)
+
 * Sun Nov 08 2026 sobakah - 0.2.1-1
 - Recently Played has the Spotify songs that played in Gatefold, with a
   menu to queue them again or add them to a playlist

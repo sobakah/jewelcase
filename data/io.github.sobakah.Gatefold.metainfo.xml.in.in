@@ -48,6 +48,18 @@
   </branding>
 
   <releases>
+    <release version="0.2.2" date="2026-11-08" type="development">
+      <description>
+        <p>Listening statistics, a visualizer and update notices.</p>
+        <ul>
+          <li>Listening Statistics: what played most this week, month, year or ever, with listening time and how it changed</li>
+          <li>A visualizer moves with songs from your library, in the player and the mini player</li>
+          <li>New versions of Gatefold, Soloist and soloistd are announced and installed when you choose to</li>
+          <li>Next in the Spotify app skips to Gatefold's next song while Soloist plays</li>
+          <li>The Pre-Amp setting is gone: local and Spotify songs play equally loud</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-08" type="development">
       <description>
         <p>Recently played Spotify songs, and adding the playing song to playlists.</p>

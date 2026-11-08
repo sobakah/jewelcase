@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 (pre-release)
+
+Listening statistics, a visualizer, and update notices. Gatefold's database is updated on the first start; after that, 0.2.1 can't open it any more. From this version on, Gatefold tells you about new versions itself and can install them; while the repository is private, it asks GitHub through the `gh` command, which must be logged in (`gh auth status`).
+
+- Listening Statistics (main menu): what played most in the last week, month, year or ever, as top artists, albums, songs and genres, with plays, listening time as bars, and how each entry moved against the period before (↑, ↓, New). Artists and albums open in the library, songs play, and the top songs can become the queue. Plays are logged on this computer only, starting with Recently Played; Preferences → Playback can turn it off or delete it.
+- A visualizer: bars in the cover color that move with songs from your library, between the cover and the title in the player, and next to the song in the mini player (more of them in a wide window). Spotify songs show a still strip. Preferences → Playback can turn it off; it's also off while GNOME's animations are off.
+- Update notices, when Gatefold starts and twice a day: a banner names a new Gatefold version, a new Soloist build or a new soloistd release. Its dialog shows what's new and installs it only when you choose to: Gatefold's package is checked against GitHub's checksum and installed after GNOME asks for your password, then Gatefold offers to restart; Soloist is updated through soloistd. Preferences → Online can turn it off.
+- Next in the Spotify app now skips to Gatefold's next song while a Spotify song plays through Soloist (when the next song is a Spotify song too).
+- The Pre-Amp setting is gone: it stays at +4 dB, where your files and Spotify songs play equally loud. "Volume of Spotify Songs" is still there for fine-tuning.
+
+### Install
+
+Download `gatefold-0.2.2-1.fc45.x86_64.rpm` below and install it:
+
+```sh
+sudo dnf install ./gatefold-0.2.2-1.fc45.x86_64.rpm
+```
+
 ## 0.2.1 (pre-release)
 
 Recently played Spotify songs, and adding the song that plays to a playlist. Gatefold's database is updated on the first start; after that, 0.2.0 can't open it any more. If lyrics of Spotify songs aren't romanized, update lyrembed to 1.1.1 (`pipx upgrade lyrembed`) and restart Gatefold: Preferences → Integrations shows whether romanization is available.
