@@ -73,10 +73,11 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
     group.add(&service);
 
     // Soloist itself.
-    let build = adw::ActionRow::builder()
-        .title(gettext("Soloist Build"))
-        .use_markup(false)
-        .build();
+    let build = {
+        let row = adw::ActionRow::builder().use_markup(false).build();
+        row.set_title(&gettext("Soloist Build"));
+        row
+    };
     let update = gtk::Button::builder()
         .label(gettext("Update Now"))
         .valign(gtk::Align::Center)

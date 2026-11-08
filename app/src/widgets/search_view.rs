@@ -167,14 +167,15 @@ impl SearchView {
             Ok(tracks) => tracks,
             Err(err) => {
                 tracing::warn!("Spotify search failed: {err}");
-                list.append(
-                    &adw::ActionRow::builder()
-                        .title(gettext("Spotify can’t be searched right now"))
-                        .subtitle(crate::spotify::search_error(&err))
+                list.append(&{
+                    let row = adw::ActionRow::builder()
                         .subtitle_lines(0)
                         .use_markup(false)
-                        .build(),
-                );
+                        .build();
+                    row.set_title(&gettext("Spotify can’t be searched right now"));
+                    row.set_subtitle(&crate::spotify::search_error(&err));
+                    row
+                });
                 return;
             }
         };
@@ -326,12 +327,15 @@ impl SearchView {
     }
 
     fn row(title: &str, subtitle: &str, prefix: &impl IsA<gtk::Widget>) -> adw::ActionRow {
-        let row = adw::ActionRow::builder()
-            .use_markup(false)
-            .title(title)
-            .subtitle(subtitle)
-            .activatable(true)
-            .build();
+        let row = {
+            let row = adw::ActionRow::builder()
+                .use_markup(false)
+                .activatable(true)
+                .build();
+            row.set_title(title);
+            row.set_subtitle(subtitle);
+            row
+        };
         row.add_prefix(prefix);
         row
     }

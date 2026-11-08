@@ -1511,22 +1511,27 @@ impl Spotify {
                 let check = gtk::CheckButton::builder()
                     .valign(gtk::Align::Center)
                     .build();
-                let row = adw::ActionRow::builder()
-                    .use_markup(false)
-                    .title(title_of(*track))
-                    .subtitle(
-                        // Translators: a Spotify search result, "Song — Artist".
-                        gettext("On Spotify: {}").replace(
-                            "{}",
-                            &[title.clone(), artist.clone()]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join(" — "),
+                let row = {
+                    let row = adw::ActionRow::builder()
+                        .use_markup(false)
+                        .activatable_widget(&check)
+                        .build();
+                    row.set_title(&title_of(*track));
+                    row.set_subtitle(
+                        &(
+                            // Translators: a Spotify search result, "Song — Artist".
+                            gettext("On Spotify: {}").replace(
+                                "{}",
+                                &[title.clone(), artist.clone()]
+                                    .into_iter()
+                                    .flatten()
+                                    .collect::<Vec<_>>()
+                                    .join(" — "),
+                            )
                         ),
-                    )
-                    .activatable_widget(&check)
-                    .build();
+                    );
+                    row
+                };
                 row.add_prefix(&check);
                 list.append(&row);
                 checks.push(check);
@@ -1549,12 +1554,11 @@ impl Spotify {
             );
             let list = boxed_list();
             for track in &unchecked {
-                list.append(
-                    &adw::ActionRow::builder()
-                        .use_markup(false)
-                        .title(title_of(*track))
-                        .build(),
-                );
+                list.append(&{
+                    let row = adw::ActionRow::builder().use_markup(false).build();
+                    row.set_title(&title_of(*track));
+                    row
+                });
             }
             content.append(&list);
         }
@@ -1564,12 +1568,11 @@ impl Spotify {
             )));
             let list = boxed_list();
             for track in &missing {
-                list.append(
-                    &adw::ActionRow::builder()
-                        .use_markup(false)
-                        .title(title_of(*track))
-                        .build(),
-                );
+                list.append(&{
+                    let row = adw::ActionRow::builder().use_markup(false).build();
+                    row.set_title(&title_of(*track));
+                    row
+                });
             }
             content.append(&list);
         }

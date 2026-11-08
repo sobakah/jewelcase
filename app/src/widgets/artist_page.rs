@@ -777,21 +777,24 @@ impl ArtistPage {
             .css_classes(["boxed-list"])
             .build();
         for track in tracks {
-            let row = adw::ActionRow::builder()
-                .use_markup(false)
-                .title(track.title())
-                .subtitle(
-                    [
+            let row = {
+                let row = adw::ActionRow::builder()
+                    .use_markup(false)
+                    .activatable(true)
+                    .build();
+                row.set_title(&track.title());
+                row.set_subtitle(
+                    &([
                         track.track().album_title.clone(),
                         track.track().album_artist.clone(),
                     ]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>()
-                    .join(" — "),
-                )
-                .activatable(true)
-                .build();
+                    .join(" — ")),
+                );
+                row
+            };
             let cover: CoverImage = glib::Object::builder()
                 .property("min-size", 40)
                 .property("natural-size", 40)

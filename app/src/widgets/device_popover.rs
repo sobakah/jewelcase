@@ -191,12 +191,15 @@ fn play_on(device: Device) {
 }
 
 fn device_row(icon: &str, name: &str, current: bool, usable: bool) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .use_markup(false)
-        .title(name)
-        .activatable(usable && !current)
-        .sensitive(usable)
-        .build();
+    let row = {
+        let row = adw::ActionRow::builder()
+            .use_markup(false)
+            .activatable(usable && !current)
+            .sensitive(usable)
+            .build();
+        row.set_title(name);
+        row
+    };
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     if current {
         row.add_suffix(&gtk::Image::from_icon_name("object-select-symbolic"));

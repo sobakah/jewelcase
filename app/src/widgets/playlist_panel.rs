@@ -399,17 +399,18 @@ impl PlaylistPanel {
             let Some(track) = tracks.get(id).cloned().map(TrackObject::new) else {
                 continue;
             };
-            let row = adw::ActionRow::builder()
-                .use_markup(false)
-                .title(track.title())
-                .subtitle(
-                    [track.artist(), track.track().album_title.clone()]
+            let row = {
+                let row = adw::ActionRow::builder().use_markup(false).build();
+                row.set_title(&track.title());
+                row.set_subtitle(
+                    &([track.artist(), track.track().album_title.clone()]
                         .into_iter()
                         .flatten()
                         .collect::<Vec<_>>()
-                        .join(" — "),
-                )
-                .build();
+                        .join(" — ")),
+                );
+                row
+            };
             let cover: CoverImage = glib::Object::builder()
                 .property("min-size", 40)
                 .property("natural-size", 40)
@@ -1826,18 +1827,21 @@ async fn choose_library_song(parent: Option<&gtk::Window>, query: &str) -> Optio
                 let Some(track) = tracks.get(&id).cloned().map(TrackObject::new) else {
                     continue;
                 };
-                let row = adw::ActionRow::builder()
-                    .use_markup(false)
-                    .title(track.title())
-                    .subtitle(
-                        [track.artist(), track.track().album_title.clone()]
+                let row = {
+                    let row = adw::ActionRow::builder()
+                        .use_markup(false)
+                        .activatable(true)
+                        .build();
+                    row.set_title(&track.title());
+                    row.set_subtitle(
+                        &([track.artist(), track.track().album_title.clone()]
                             .into_iter()
                             .flatten()
                             .collect::<Vec<_>>()
-                            .join(" — "),
-                    )
-                    .activatable(true)
-                    .build();
+                            .join(" — ")),
+                    );
+                    row
+                };
                 row.connect_activated(glib::clone!(
                     #[weak]
                     dialog,

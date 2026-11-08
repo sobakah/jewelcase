@@ -419,11 +419,12 @@ impl PreferencesDialog {
             || folder.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
         );
-        let row = adw::ActionRow::builder()
-            .use_markup(false)
-            .title(name)
-            .subtitle(folder.display().to_string())
-            .build();
+        let row = {
+            let row = adw::ActionRow::builder().use_markup(false).build();
+            row.set_title(&name);
+            row.set_subtitle(&folder.display().to_string());
+            row
+        };
         row.add_prefix(&gtk::Image::from_icon_name("folder-music-symbolic"));
 
         let remove = gtk::Button::builder()

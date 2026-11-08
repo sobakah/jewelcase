@@ -303,10 +303,11 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     group.add(&switch);
 
     // Soloist: the program (or soloistd) and the API key.
-    let program = adw::ActionRow::builder()
-        .title(gettext("Soloist"))
-        .use_markup(false)
-        .build();
+    let program = {
+        let row = adw::ActionRow::builder().use_markup(false).build();
+        row.set_title(&gettext("Soloist"));
+        row
+    };
     let download = gtk::Button::builder()
         .label(gettext("Download Page"))
         .valign(gtk::Align::Center)
@@ -373,10 +374,11 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     ));
     group.add(&offset);
 
-    let status = adw::ActionRow::builder()
-        .title(gettext("Status"))
-        .use_markup(false)
-        .build();
+    let status = {
+        let row = adw::ActionRow::builder().use_markup(false).build();
+        row.set_title(&gettext("Status"));
+        row
+    };
     group.add(&status);
 
     let update = glib::clone!(
@@ -478,12 +480,15 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
 }
 
 fn step(number: u32, title: &str, subtitle: Option<&str>) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .use_markup(false)
-        .title(title)
-        .subtitle(subtitle.unwrap_or_default())
-        .subtitle_selectable(subtitle.is_some())
-        .build();
+    let row = {
+        let row = adw::ActionRow::builder()
+            .use_markup(false)
+            .subtitle_selectable(subtitle.is_some())
+            .build();
+        row.set_title(title);
+        row.set_subtitle(subtitle.unwrap_or_default());
+        row
+    };
     row.add_prefix(
         &gtk::Label::builder()
             .label(number.to_string())

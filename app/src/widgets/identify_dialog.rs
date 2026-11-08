@@ -99,12 +99,15 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
                             .into_iter()
                             .flatten()
                             .collect();
-                            let row = adw::ActionRow::builder()
-                                .use_markup(false)
-                                .title(&candidate.name)
-                                .subtitle(details.join(" · "))
-                                .activatable(true)
-                                .build();
+                            let row = {
+                                let row = adw::ActionRow::builder()
+                                    .use_markup(false)
+                                    .activatable(true)
+                                    .build();
+                                row.set_title(&candidate.name);
+                                row.set_subtitle(&details.join(" · "));
+                                row
+                            };
                             row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
                             let mbid = candidate.mbid.clone();
                             row.connect_activated(glib::clone!(
