@@ -146,6 +146,11 @@
       <default>true</default>
       <summary>Artist photos from Deezer</summary>
     </key>
+    <key name="recent-searches" type="as">
+      <default>[]</default>
+      <summary>Recent searches</summary>
+      <description>The last five searches, newest first, shown when the search field is empty.</description>
+    </key>
     <key name="lyrics-lrclib" type="b">
       <default>true</default>
       <summary>Lyrics for Spotify songs from LRCLIB</summary>

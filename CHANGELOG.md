@@ -18,6 +18,13 @@
 - Spotify songs that aren't in your library get lyrics from LRCLIB, synced where LRCLIB has them. Gatefold asks only for the song that plays, only while the lyrics are shown, and remembers every answer. Preferences → Online → Lyrics turns it off.
 - Korean, Japanese and Chinese lyrics without romanization get it under each line, like lyrics lyrembed romanized in the files, also lyrics from LRCLIB. This needs lyrembed 1.1.1 or newer and writes nothing to the files.
 
+### Search
+
+- Search results are sorted by kind: artists, albums, songs and playlists, each with your library first and then what Spotify has, and an icon on every row says whether it's in your library or only on Spotify. Spotify's artists and albums open in Gatefold; its playlists play with Soloist or open in Spotify.
+- Spotify is asked once per search, not for every letter, and the same search isn't asked again while Gatefold runs.
+- The search field shows your last five searches while it's empty.
+- Names with "&" (such as "&TEAM") no longer cause GTK warnings in result lists.
+
 ### Soloist and Spotify Connect
 
 - Picking or skipping songs in the Spotify app while Gatefold plays through Soloist works: the app's song plays and Gatefold shows it, instead of replacing it with its own next song.

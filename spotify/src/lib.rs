@@ -816,6 +816,30 @@ impl Client {
     /// Without `market=from_token`: since 2026 Spotify answers a search
     /// that names it with "403 Insufficient client scope" (it would need
     /// `user-read-private`), though playlist reads still accept it.
+    /// Songs, artists, albums and playlists for a search, in one request
+    /// (at most `MAX_SEARCH_RESULTS` of each).
+    pub fn search_all(&self, query: &str) -> Result<SearchResults> {
+        let value = self.get(
+            "/search",
+            &[
+                ("q", query.to_owned()),
+                ("type", "track,artist,album,playlist".into()),
+                ("limit", MAX_SEARCH_RESULTS.to_string()),
+            ],
+        )?;
+        let items = |kind: &str| value[kind]["items"].as_array().cloned().unwrap_or_default();
+        Ok(SearchResults {
+            tracks: items("tracks").iter().filter_map(Track::parse).collect(),
+            artists: items("artists").iter().filter_map(Artist::parse).collect(),
+            albums: items("albums").iter().filter_map(Album::parse).collect(),
+            // Spotify lists removed playlists as null.
+            playlists: items("playlists")
+                .iter()
+                .filter_map(PlaylistSummary::parse)
+                .collect(),
+        })
+    }
+
     pub fn search_tracks(&self, query: &str, limit: u32) -> Result<Vec<Track>> {
         let value = self.get(
             "/search",
@@ -841,6 +865,15 @@ impl Client {
             .map(str::to_owned)
             .ok_or(Error::Format("no snapshot"))
     }
+}
+
+/// What a search found on Spotify, each kind in Spotify's order.
+#[derive(Debug, Clone, Default)]
+pub struct SearchResults {
+    pub tracks: Vec<Track>,
+    pub artists: Vec<Artist>,
+    pub albums: Vec<Album>,
+    pub playlists: Vec<PlaylistSummary>,
 }
 
 /// What to play.

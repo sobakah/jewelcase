@@ -878,8 +878,11 @@ impl GatefoldWindow {
     fn search_changed(&self, text: &str) {
         let imp = self.imp();
         let query = text.trim();
-        if query.is_empty() || !imp.search_bar.is_search_mode() {
+        if !imp.search_bar.is_search_mode() {
             self.show_search_results(false);
+        } else if query.is_empty() {
+            // An empty field shows the last searches, if there are any.
+            self.show_search_results(imp.search_view.show_recent());
         } else {
             imp.search_view.search(query);
             self.show_search_results(true);
@@ -907,12 +910,35 @@ impl GatefoldWindow {
                 #[weak(rename_to = window)]
                 self,
                 move |bar| {
+                    let imp = window.imp();
                     if bar.is_search_mode() {
-                        window.imp().search_entry.grab_focus();
+                        imp.search_entry.grab_focus();
+                    } else {
+                        // Searched, then closed: a recent search.
+                        imp.search_view.remember(&imp.search_entry.text());
                     }
-                    window.search_changed(&window.imp().search_entry.text());
+                    window.search_changed(&imp.search_entry.text());
                 }
             ));
+        // A recent search clicked: searched again.
+        imp.search_view.connect_local(
+            "query-chosen",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |values| {
+                    let query = values[1].get::<String>().ok()?;
+                    let entry = &window.imp().search_entry;
+                    entry.set_text(&query);
+                    entry.grab_focus();
+                    entry.set_position(-1);
+                    None
+                }
+            ),
+        );
         // Hidden once faded out, so they don't catch clicks.
         for revealer in [&*imp.search_dim, &*imp.search_revealer] {
             revealer.connect_child_revealed_notify(|revealer| {
