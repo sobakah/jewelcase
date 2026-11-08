@@ -66,15 +66,20 @@ template $GatefoldMiniPlayer: Adw.Bin {
         }
       }
 
-      // The music as bars, in the space between the song and the
-      // controls: as many as fit (more and taller in a wide window).
-      $GatefoldVisualizer {
-        slot: 7;
-        fill: 0.6;
-        min-bars: 4;
-        max-bars: 24;
+      // The space between the song and the controls, which keeps the
+      // controls on the right even with the visualizer off. In it, the
+      // music as bars: as many as fit (more and taller in a wide window).
+      Gtk.Box {
         hexpand: true;
-        height-request: 22;
+
+        $GatefoldVisualizer {
+          slot: 7;
+          fill: 0.6;
+          min-bars: 4;
+          max-bars: 24;
+          hexpand: true;
+          height-request: 22;
+        }
       }
 
       Gtk.Box {
