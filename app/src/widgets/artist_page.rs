@@ -517,7 +517,6 @@ impl ArtistPage {
                             .label(note)
                             .xalign(0.0)
                             .wrap(true)
-                            .selectable(true)
                             .css_classes(["dim-label"])
                             .build(),
                     );

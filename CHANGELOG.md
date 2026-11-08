@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Songs whose FLAC file doesn't say how long it is (some encoders leave that out) now get their length, so their progress bar, total time and seeking work. Such songs already in the library are read again once, on the next start. Until a song has a length, its bar stays empty instead of full.
+- On a Spotify album, the artist's name opens their page: the one in your library if you have them, otherwise their Spotify page (before, only artists in your library were links).
+- Clicking an album's title no longer puts a text cursor in it.
 
 ## 0.2.2 (pre-release)
 

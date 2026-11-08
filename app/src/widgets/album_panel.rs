@@ -266,35 +266,36 @@ impl AlbumPanel {
     }
 
     /// The album's artists: links to library artists of that name.
+    /// Each artist links to their page: the library's when they're in it,
+    /// else their Spotify page.
     fn fill_spotify_artists(&self, album: &gatefold_core::db::SpotifyAlbum) {
         let imp = self.imp();
         imp.artists.remove_all();
         let library = GatefoldApplication::get().library();
-        let artists = library.artists();
-        for name in album.artist.split(", ").filter(|n| !n.is_empty()) {
-            let local = (0..artists.n_items())
-                .filter_map(|i| {
-                    artists
-                        .item(i)
-                        .and_downcast::<crate::objects::ArtistObject>()
-                })
-                .find(|a| a.artist().name.eq_ignore_ascii_case(name));
-            let widget: gtk::Widget = match local {
-                Some(artist) => gtk::Button::builder()
-                    .label(name)
-                    .action_name("win.show-artist")
-                    .action_target(&artist.artist().id.to_variant())
-                    .tooltip_text(gettext("Go to {}").replace("{}", name))
-                    .css_classes(["flat", "artist-link", "heading"])
-                    .build()
-                    .upcast(),
-                None => gtk::Label::builder()
-                    .label(name)
-                    .css_classes(["heading"])
-                    .build()
-                    .upcast(),
+        for (name, spotify_id) in spotify_credits(album) {
+            let local = library.artist_for_spotify(spotify_id.unwrap_or_default(), &name);
+            let (action, target) = match (local, spotify_id) {
+                (Some(id), _) => ("win.show-artist", id.to_variant()),
+                (None, Some(id)) => ("win.show-spotify-artist", id.to_variant()),
+                (None, None) => {
+                    imp.artists.append(
+                        &gtk::Label::builder()
+                            .label(&name)
+                            .css_classes(["heading"])
+                            .build(),
+                    );
+                    continue;
+                }
             };
-            imp.artists.append(&widget);
+            imp.artists.append(
+                &gtk::Button::builder()
+                    .label(&name)
+                    .action_name(action)
+                    .action_target(&target)
+                    .tooltip_text(gettext("Go to {}").replace("{}", &name))
+                    .css_classes(["flat", "artist-link", "heading"])
+                    .build(),
+            );
         }
     }
 
@@ -532,5 +533,27 @@ fn release_type_name(album: &gatefold_core::db::Album) -> String {
         ReleaseType::Album => gettext("Album"),
         ReleaseType::Ep => gettext("EP"),
         ReleaseType::Single => gettext("Single"),
+    }
+}
+
+/// A Spotify album's artists with their Spotify IDs. The credit is the
+/// names joined with ", "; a name with a comma in it ("Tyler, the
+/// Creator") keeps the IDs from lining up, so then only a sole artist
+/// gets one.
+fn spotify_credits(album: &gatefold_core::db::SpotifyAlbum) -> Vec<(String, Option<&str>)> {
+    let names: Vec<&str> = album.artist.split(", ").filter(|n| !n.is_empty()).collect();
+    if names.len() == album.artist_ids.len() {
+        names
+            .into_iter()
+            .zip(album.artist_ids.iter().map(|id| Some(id.as_str())))
+            .map(|(name, id)| (name.to_owned(), id))
+            .collect()
+    } else if album.artist_ids.len() == 1 {
+        vec![(album.artist.clone(), Some(album.artist_ids[0].as_str()))]
+    } else {
+        names
+            .into_iter()
+            .map(|name| (name.to_owned(), None))
+            .collect()
     }
 }
