@@ -239,6 +239,19 @@ impl PlayerView {
             self,
             move |player| view.update_track(player)
         ));
+        // Whether Spotify songs have lyrics (LRCLIB) can change any time.
+        for key in ["lyrics-lrclib", "online-metadata"] {
+            player.settings().connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    #[weak]
+                    player,
+                    move |_, _| view.update_track(&player)
+                ),
+            );
+        }
         // The Spotify icon before the title (§9).
         let mark = imp.spotify_mark.get();
         let show_mark = move |player: &Player| mark.set_visible(player.plays_from_spotify());

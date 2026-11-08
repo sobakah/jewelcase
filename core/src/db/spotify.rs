@@ -574,10 +574,13 @@ impl Database {
             if new_state != state || new_local != local {
                 changed += 1;
             }
+            // Only if it's still as read: the reload after a scan matches on
+            // another connection, and the user may have chosen meanwhile.
             tx.execute(
                 "UPDATE playlist_item SET match_state = ?2, local_track_id = ?3,
-                   suggested_track_id = ?4 WHERE id = ?1",
-                params![item, new_state, new_local, suggested],
+                   suggested_track_id = ?4
+                 WHERE id = ?1 AND match_state = ?5 AND local_track_id IS ?6",
+                params![item, new_state, new_local, suggested, state, local],
             )?;
         }
         tx.commit()?;

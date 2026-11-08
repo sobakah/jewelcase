@@ -33,9 +33,11 @@ pub enum Error {
 }
 
 impl Error {
-    /// The service doesn't know what was asked for (404).
-    pub fn is_not_found(&self) -> bool {
-        matches!(self, Self::Http(ureq::Error::StatusCode(404)))
+    /// The service refused this request itself (4xx other than "too many
+    /// requests"): asking again won't help, other requests may work.
+    pub fn is_refused(&self) -> bool {
+        matches!(self, Self::Http(ureq::Error::StatusCode(status))
+            if (400..500).contains(status) && *status != 429)
     }
 }
 

@@ -1801,33 +1801,62 @@ impl Database {
     }
 
     /// Related artists among the library's, by lowercase name, with how
-    /// close they are (score over the artist's best score).
+    /// close they are (score over the artist's best score). Joined here,
+    /// not in SQL: no index covers coalesce(mbid, lookup_mbid), and
+    /// SQLite's lower() only knows A to Z (`Édith Piaf`).
     pub fn related_artists(&self) -> Result<crate::similar::RelatedArtists> {
-        let mut stmt = self.conn.prepare(
-            "SELECT lower(a.name), lower(b.name), s.score,
-                    (SELECT max(score) FROM similar_artist m WHERE m.artist_mbid = s.artist_mbid)
-             FROM similar_artist s
-             JOIN artist a ON coalesce(a.mbid, a.lookup_mbid) = s.artist_mbid
-             JOIN artist b ON coalesce(b.mbid, b.lookup_mbid) = s.similar_mbid
-             WHERE a.id != b.id",
-        )?;
+        let mut names: HashMap<String, Vec<String>> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT coalesce(mbid, lookup_mbid), name FROM artist
+                 WHERE coalesce(mbid, lookup_mbid) IS NOT NULL",
+            )?;
+            for row in stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })? {
+                let (mbid, name) = row?;
+                names.entry(mbid).or_default().push(name.to_lowercase());
+            }
+        }
         let mut related = crate::similar::RelatedArtists::new();
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })?;
-        for row in rows {
-            let (artist, other, score, best) = row?;
-            let closeness = if best > 0 {
-                score as f64 / best as f64
+        let mut best: HashMap<String, i64> = HashMap::new();
+        let mut rows = Vec::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT artist_mbid, similar_mbid, score FROM similar_artist")?;
+            for row in stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })? {
+                let (artist, other, score) = row?;
+                let top = best.entry(artist.clone()).or_default();
+                *top = (*top).max(score);
+                rows.push((artist, other, score));
+            }
+        }
+        for (artist, other, score) in rows {
+            let (Some(artist_names), Some(other_names)) = (names.get(&artist), names.get(&other))
+            else {
+                continue;
+            };
+            let top = best.get(&artist).copied().unwrap_or(0);
+            let closeness = if top > 0 {
+                score as f64 / top as f64
             } else {
                 0.0
             };
-            related.entry(artist).or_default().insert(other, closeness);
+            for name in artist_names {
+                for other_name in other_names.iter().filter(|o| *o != name) {
+                    related
+                        .entry(name.clone())
+                        .or_default()
+                        .insert(other_name.clone(), closeness);
+                }
+            }
         }
         Ok(related)
     }
@@ -2700,6 +2729,32 @@ mod tests {
         let mix = db.create_playlist("Mix", 4).unwrap();
         db.rebuild_search(&aliases).unwrap();
         assert_eq!(db.search("mix", 10).unwrap().playlists, [mix]);
+    }
+
+    #[test]
+    fn related_artists_match_names_with_any_capitals() {
+        let mut db = Database::open_in_memory().unwrap();
+        for (key, name, mbid) in [
+            ("edith", "Édith Piaf", "e"),
+            ("aznavour", "Charles Aznavour", "c"),
+        ] {
+            db.conn
+                .execute(
+                    "INSERT INTO artist (key, name, sort_name, lookup_mbid) VALUES (?1, ?2, ?2, ?3)",
+                    params![key, name, mbid],
+                )
+                .unwrap();
+        }
+        db.set_related_artists("e", &[("c".into(), 50), ("x".into(), 100)], 1)
+            .unwrap();
+        let related = db.related_artists().unwrap();
+        // The key is lowercased as SongFeatures.artist is (all letters).
+        let edith = related
+            .get("édith piaf")
+            .expect("found by its lowercase name");
+        // Closeness against the best score, also an artist not in the library.
+        assert_eq!(edith.get("charles aznavour"), Some(&0.5));
+        assert_eq!(edith.len(), 1);
     }
 
     #[test]

@@ -208,6 +208,24 @@ impl LyricsView {
                 }
             ),
         );
+        // LRCLIB turned on or off: the Spotify song that plays shows (or
+        // stops showing) its lyrics now.
+        for key in ["lyrics-lrclib", "online-metadata"] {
+            imp.settings.connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    move |_, _| {
+                        let track = GatefoldApplication::get().player().current_track();
+                        if track.as_ref().is_some_and(TrackObject::is_stand_in) {
+                            view.imp().track_id.set(None);
+                            view.set_track(track);
+                        }
+                    }
+                ),
+            );
+        }
         // Tools write lyrics into the files; rescans bring them here live.
         GatefoldApplication::get().library().connect_local(
             "reloaded",
@@ -386,7 +404,13 @@ impl LyricsView {
             #[weak(rename_to = view)]
             self,
             async move {
-                let state = crate::lrclib::lyrics(&track).await;
+                let wanted = view.downgrade();
+                let still_wanted = move || {
+                    wanted
+                        .upgrade()
+                        .is_some_and(|v| v.imp().track_id.get() == id)
+                };
+                let state = crate::lrclib::lyrics(&track, still_wanted).await;
                 if view.imp().track_id.get() != id {
                     return;
                 }

@@ -1017,6 +1017,17 @@ impl Library {
     }
 
     fn playlist_op(&self, op: impl FnOnce(&mut Database, i64) -> gatefold_core::db::Result<()>) {
+        self.playlist_op_quiet(op);
+        self.reload_playlists();
+    }
+
+    /// A playlist change without reloading the playlists: for edits that
+    /// also queue Spotify changes and reload once afterwards (with "1
+    /// change waiting to be sent" in it).
+    fn playlist_op_quiet(
+        &self,
+        op: impl FnOnce(&mut Database, i64) -> gatefold_core::db::Result<()>,
+    ) {
         let result = match self.db() {
             Some(mut db) => op(&mut db, metadata::now()),
             None => return,
@@ -1025,7 +1036,6 @@ impl Library {
             tracing::warn!("Playlist change failed: {err}");
             self.emit_by_name::<()>("message", &[&gettext("The playlist couldn't be changed")]);
         }
-        self.reload_playlists();
     }
 
     /// Creates a playlist, optionally with tracks; returns its ID.
@@ -1100,8 +1110,7 @@ impl Library {
         {
             tracing::warn!("Cannot queue a Spotify change: {err}");
         }
-        // "1 change waiting to be sent".
-        self.reload_playlists();
+        // The caller reloads the playlists once ("1 change waiting").
         GatefoldApplication::get().spotify().changes_queued();
     }
 
@@ -1113,7 +1122,7 @@ impl Library {
         // Library songs, and Spotify songs (negative IDs, §9.4).
         let (local, streams): (Vec<i64>, Vec<i64>) = tracks.iter().partition(|t| **t > 0);
         let mut added_streams = Vec::new();
-        self.playlist_op(|db, now| {
+        self.playlist_op_quiet(|db, now| {
             if !local.is_empty() {
                 db.add_to_playlist(id, &local, None, now)?;
             }
@@ -1138,6 +1147,7 @@ impl Library {
                 GatefoldApplication::get().spotify().resolve_soon(id, true);
             }
         }
+        self.reload_playlists();
         if !announce {
             return;
         }
@@ -1154,7 +1164,7 @@ impl Library {
             self.reload_playlists();
             return;
         }
-        self.playlist_op(|db, now| db.rename_playlist(id, name, now));
+        self.playlist_op_quiet(|db, now| db.rename_playlist(id, name, now));
         if self.spotify_link(id).is_some() {
             self.queue_spotify_op(
                 id,
@@ -1163,6 +1173,7 @@ impl Library {
                 },
             );
         }
+        self.reload_playlists();
     }
 
     pub fn delete_playlist(&self, id: i64) {
@@ -1176,7 +1187,7 @@ impl Library {
         let uri = self
             .spotify_link(id)
             .and_then(|_| self.db()?.item_uri(item).ok().flatten());
-        self.playlist_op(|db, now| db.remove_playlist_item(id, item, now));
+        self.playlist_op_quiet(|db, now| db.remove_playlist_item(id, item, now));
         if let Some(uri) = uri {
             // Spotify removes every occurrence; the others go back in.
             let restore = self
@@ -1196,6 +1207,7 @@ impl Library {
                 },
             );
         }
+        self.reload_playlists();
     }
 
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
@@ -1210,7 +1222,7 @@ impl Library {
             uri?;
             Some((item, db.remote_position(item).ok().flatten()?))
         });
-        self.playlist_op(|db, now| db.move_playlist_item(id, from, to, now));
+        self.playlist_op_quiet(|db, now| db.move_playlist_item(id, from, to, now));
         if let Some((item, start)) = moved
             && let Some(end) = self
                 .db()
@@ -1223,6 +1235,7 @@ impl Library {
                 .unwrap_or_default();
             self.queue_spotify_op(id, crate::spotify::Op::moved(start, end, &current));
         }
+        self.reload_playlists();
     }
 
     /// A Spotify entry plays this library song (or, `None`, whatever
@@ -1242,7 +1255,7 @@ impl Library {
             return;
         }
         let mut position = None;
-        self.playlist_op(|db, _| {
+        self.playlist_op_quiet(|db, _| {
             db.set_item_spotify(item, uri)?;
             position = db.remote_position(item)?;
             Ok(())
@@ -1251,6 +1264,7 @@ impl Library {
             let op = self.spotify_add(id, vec![uri.to_owned()], position);
             self.queue_spotify_op(id, op);
         }
+        self.reload_playlists();
     }
 
     /// Drops a suggestion; for Spotify suggestions, the song counts as
@@ -1295,11 +1309,12 @@ impl Library {
         })
         .await
         .map_err(|_| "the cover job failed".to_owned())??;
-        self.playlist_op(|db, now| db.set_playlist_cover(id, Some(&key), now));
+        self.playlist_op_quiet(|db, now| db.set_playlist_cover(id, Some(&key), now));
         // Spotify gets it too, for playlists that are synced and editable.
         if self.spotify_link(id).is_some_and(|p| p.editable) {
             self.queue_spotify_op(id, crate::spotify::Op::Cover { key });
         }
+        self.reload_playlists();
         Ok(())
     }
 

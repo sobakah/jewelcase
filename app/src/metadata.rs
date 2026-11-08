@@ -243,8 +243,9 @@ impl Worker {
                         .set_release_isrcs(&release, &isrcs, now())
                         .map(|()| isrcs.len())
                         .map_err(|e| e.to_string()),
-                    // Gone from MusicBrainz (merged): not asked again soon.
-                    Err(err) if err.is_not_found() => self
+                    // Gone from MusicBrainz (merged), or an ID it refuses:
+                    // not asked again soon, and no reason to stop the rest.
+                    Err(err) if err.is_refused() => self
                         .db
                         .set_release_isrcs(&release, &[], now())
                         .map(|()| 0)

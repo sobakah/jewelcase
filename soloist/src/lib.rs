@@ -585,25 +585,26 @@ fn talk(
             return;
         };
         let _ = events.send_blocking(Event::Connected);
-        // Control commands waiting for their answer: Soloist answers each
-        // with `command_result` or `error`, in order, and an error doesn't
-        // say which command it's about.
-        let mut unanswered: std::collections::VecDeque<String> = Default::default();
+        let mut unanswered = Unanswered::default();
         loop {
             match socket.read() {
                 Ok(Message::Text(text)) => {
                     if let Some(name) = command_result(&text) {
-                        if let Some(i) = unanswered.iter().position(|c| *c == name) {
-                            unanswered.remove(i);
-                        }
+                        unanswered.answered(&name);
                         continue;
                     }
                     let event = match Event::parse(&text) {
                         Some(Event::CommandError { message, .. }) => Some(Event::CommandError {
-                            command: unanswered.pop_front(),
+                            command: unanswered.failed(),
                             message,
                         }),
-                        event => event,
+                        Some(event) => {
+                            if let Some(query) = answers_query(&event) {
+                                unanswered.answered(query);
+                            }
+                            Some(event)
+                        }
+                        None => None,
                     };
                     if let Some(event) = event
                         && events.send_blocking(event).is_err()
@@ -628,10 +629,8 @@ fn talk(
                     Ok(command) => {
                         if let Err(err) = socket.send(Message::text(command.to_string())) {
                             tracing::warn!("Cannot send to Soloist: {err}");
-                        } else if let Some(name) = command["command"].as_str()
-                            && !QUERIES.contains(&name)
-                        {
-                            unanswered.push_back(name.to_owned());
+                        } else if let Some(name) = command["command"].as_str() {
+                            unanswered.sent(name);
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
@@ -647,8 +646,41 @@ fn talk(
     (commands, thread)
 }
 
-/// Commands answered with their event, not with `command_result`.
-const QUERIES: [&str; 3] = ["get_auth_state", "get_state", "get_queue"];
+/// Commands waiting for their answer. Soloist answers each in order:
+/// control commands with `command_result` or `error`, queries
+/// (`get_state`, `get_queue`, `get_auth_state`) with their event or
+/// `error`; an error doesn't say which command it's about, so it belongs
+/// to the oldest one waiting.
+#[derive(Debug, Default)]
+struct Unanswered(std::collections::VecDeque<String>);
+
+impl Unanswered {
+    fn sent(&mut self, command: &str) {
+        self.0.push_back(command.to_owned());
+    }
+
+    fn answered(&mut self, command: &str) {
+        if let Some(i) = self.0.iter().position(|c| c == command) {
+            self.0.remove(i);
+        }
+    }
+
+    /// The command an error answers (`None`: nothing was waiting, an error
+    /// of Soloist's own).
+    fn failed(&mut self) -> Option<String> {
+        self.0.pop_front()
+    }
+}
+
+/// The query an event answers (it may also come unasked).
+fn answers_query(event: &Event) -> Option<&'static str> {
+    match event {
+        Event::Playback { .. } => Some("get_state"),
+        Event::Queue(_) => Some("get_queue"),
+        Event::Auth { .. } => Some("get_auth_state"),
+        _ => None,
+    }
+}
 
 /// The command a `command_result` answers.
 fn command_result(text: &str) -> Option<String> {
@@ -961,5 +993,35 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret");
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn errors_go_to_the_command_they_answer() {
+        let mut waiting = Unanswered::default();
+        waiting.sent("get_queue");
+        waiting.sent("play");
+        // The queue's error is the queue's, not play's.
+        assert_eq!(waiting.failed().as_deref(), Some("get_queue"));
+        assert_eq!(waiting.failed().as_deref(), Some("play"));
+        assert_eq!(
+            waiting.failed(),
+            None,
+            "nothing waiting: Soloist's own error"
+        );
+        // Answered queries and commands leave the line.
+        waiting.sent("get_state");
+        waiting.sent("pause");
+        waiting.sent("play");
+        let snapshot = Event::Playback {
+            status: None,
+            item: None,
+            position: None,
+            volume: None,
+            is_active: None,
+            options: None,
+        };
+        waiting.answered(answers_query(&snapshot).unwrap());
+        waiting.answered("pause");
+        assert_eq!(waiting.failed().as_deref(), Some("play"));
     }
 }

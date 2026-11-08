@@ -21,6 +21,9 @@ use crate::metadata::now;
 
 /// The helper stops after this long without requests.
 const IDLE: Duration = Duration::from_secs(5 * 60);
+/// An answer takes this long at most (a long song in Japanese, the first
+/// request with Python starting: a few seconds).
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Helper {
     program: PathBuf,
@@ -67,7 +70,7 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
         return cached.map(|text| lyrics.with_romanization(&text));
     }
     let request = text.clone();
-    let answer = gio::spawn_blocking(move || ask(&program, &request, hint))
+    let answer = gio::spawn_blocking(move || ask(&program, &request, hint, ANSWER_TIMEOUT))
         .await
         .unwrap_or_else(|_| Err("the romanization job failed".into()));
     match answer {
@@ -88,7 +91,12 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
 
 /// One request to the helper (started if needed). `Ok(None)`: nothing to
 /// romanize (Latin, already romanized, a backend missing).
-fn ask(program: &Path, lyrics: &str, hint: Option<&str>) -> Result<Option<String>, String> {
+fn ask(
+    program: &Path,
+    lyrics: &str,
+    hint: Option<&str>,
+    timeout: Duration,
+) -> Result<Option<String>, String> {
     let mut guard = HELPER.lock().unwrap_or_else(|e| e.into_inner());
     if guard.as_ref().is_some_and(|h| h.program != program) {
         *guard = None;
@@ -100,9 +108,37 @@ fn ask(program: &Path, lyrics: &str, hint: Option<&str>) -> Result<Option<String
     helper.last_used = Instant::now();
     let request = json!({"id": 1, "lyrics": lyrics, "han_hint": hint});
     let mut answer = String::new();
+    // A helper that doesn't answer is stopped, so reading ends and the lock
+    // is free again (otherwise every later request would wait for good).
+    let answered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watchdog = {
+        let answered = answered.clone();
+        let pid = libc::pid_t::try_from(helper.child.id()).ok();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < timeout {
+                if answered.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if let Some(pid) = pid
+                && !answered.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                tracing::warn!("lyrembed doesn't answer; stopping it");
+                // SAFETY: a plain signal to our own child, still running
+                // (it's only reaped after the answer or this signal).
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        })
+    };
     let result = writeln!(helper.stdin, "{request}")
         .and_then(|()| helper.stdin.flush())
         .and_then(|()| helper.stdout.read_line(&mut answer));
+    answered.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = watchdog.join();
     match result {
         Ok(read) if read > 0 => {}
         // Gone (crashed, killed): started again next time.
@@ -172,5 +208,45 @@ fn stop_if(condition: impl Fn(&Helper) -> bool) {
     if guard.as_ref().is_some_and(condition) {
         tracing::debug!("Stopping lyrembed romanize --stdio");
         *guard = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_lyrembed(name: &str, script: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::env::temp_dir().join(format!("gatefold-test-{}-{name}", std::process::id()));
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_helper_that_doesnt_answer_is_stopped_and_started_again() {
+        let silent = fake_lyrembed("silent", "exec sleep 600");
+        let start = Instant::now();
+        let result = ask(&silent, "사랑해", None, Duration::from_millis(500));
+        assert!(result.is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "didn't wait for good"
+        );
+        assert!(
+            HELPER.lock().unwrap().is_none(),
+            "the stuck helper is gone, the next request starts a new one"
+        );
+        // One that answers works afterwards (the lock is free).
+        let answering = fake_lyrembed(
+            "answering",
+            r#"while read line; do echo '{"id":1,"lyrics":"x\ny","language":"ko","reason":""}'; done"#,
+        );
+        let result = ask(&answering, "사랑해", None, Duration::from_secs(5));
+        assert_eq!(result, Ok(Some("x\ny".to_owned())));
+        stop();
+        let _ = std::fs::remove_file(silent);
+        let _ = std::fs::remove_file(answering);
     }
 }

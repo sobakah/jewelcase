@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use gatefold_core::db::OnlineLyricsRow;
 use gatefold_lyrics::LyricsState;
-use gtk::gio;
 use gtk::prelude::*;
+use gtk::{gio, glib};
 
 use crate::application::GatefoldApplication;
 use crate::config;
@@ -30,6 +30,8 @@ const MISS_AGAIN_S: i64 = 30 * 24 * 3600;
 const BUSY_PAUSE: Duration = Duration::from_secs(3600);
 /// After a network error.
 const OFFLINE_PAUSE: Duration = Duration::from_secs(600);
+/// How often a song waiting for another song's request looks again.
+const ASKING_POLL: Duration = Duration::from_millis(200);
 
 thread_local! {
     static PAUSED_UNTIL: Cell<Option<Instant>> = const { Cell::new(None) };
@@ -49,9 +51,11 @@ pub fn enabled() -> bool {
 }
 
 /// What LRCLIB knows about a Spotify song (`LyricsState::None`: nothing).
-/// `None`: it wasn't asked (turned off, waiting after an error, already
-/// asking, not a Spotify song).
-pub async fn lyrics(track: &TrackObject) -> Option<LyricsState> {
+/// `None`: it wasn't asked (turned off, waiting after an error, no longer
+/// wanted, not a Spotify song). While another song is being asked for,
+/// this waits for it, as long as `still_wanted` says so (the song may be
+/// skipped meanwhile).
+pub async fn lyrics(track: &TrackObject, still_wanted: impl Fn() -> bool) -> Option<LyricsState> {
     if !enabled() || !track.is_stand_in() {
         return None;
     }
@@ -59,19 +63,24 @@ pub async fn lyrics(track: &TrackObject) -> Option<LyricsState> {
     let uri = GatefoldApplication::get()
         .spotify()
         .stand_in_uri(track.id())?;
-    let cached = library.db()?.online_lyrics(&uri).ok()?;
-    match cached {
-        Some(row) if row.found => return Some(state(&row)),
-        Some(row) if now() - row.checked < MISS_AGAIN_S => return Some(LyricsState::None),
-        _ => {}
+    if let Some(known) = cached(&uri) {
+        return Some(known);
+    }
+    // One request at a time.
+    while ASKING.with_borrow(Option::is_some) {
+        glib::timeout_future(ASKING_POLL).await;
+        if !still_wanted() {
+            return None;
+        }
+    }
+    // The request before may have been for this song.
+    if let Some(known) = cached(&uri) {
+        return Some(known);
     }
     if PAUSED_UNTIL
         .get()
         .is_some_and(|until| Instant::now() < until)
     {
-        return None;
-    }
-    if ASKING.with_borrow(Option::is_some) {
         return None;
     }
     ASKING.set(Some(uri.clone()));
@@ -123,6 +132,19 @@ pub async fn lyrics(track: &TrackObject) -> Option<LyricsState> {
         tracing::warn!("Cannot keep the lyrics: {err}");
     }
     Some(state(&row))
+}
+
+/// The cached answer, while it holds ("not found" for 30 days).
+fn cached(uri: &str) -> Option<LyricsState> {
+    let library = GatefoldApplication::get().library();
+    let row = library.db()?.online_lyrics(uri).ok()??;
+    if row.found {
+        Some(state(&row))
+    } else if now() - row.checked < MISS_AGAIN_S {
+        Some(LyricsState::None)
+    } else {
+        None
+    }
 }
 
 fn state(row: &OnlineLyricsRow) -> LyricsState {

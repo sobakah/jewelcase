@@ -137,9 +137,17 @@ pub fn scan(
         .collect();
 
     summary.moved = find_moves(db, &mut changed, &mut removed, &stamps)?;
-    summary.read = read_files(db, &changed, progress, &mut summary.failed)?;
+    let mut unread = Vec::new();
+    summary.read = read_files(db, &changed, progress, &mut unread)?;
+    summary.failed = unread.len();
     summary.removed = removed.len();
     db.delete_tracks(&removed)?;
+    // A file that couldn't be read keeps its old change time, so the next
+    // scan tries again (a change of mtime or size would anyway).
+    let new_ctimes: Vec<(PathBuf, i64)> = new_ctimes
+        .into_iter()
+        .filter(|(path, _)| !unread.contains(path))
+        .collect();
     db.set_ctimes(&new_ctimes)?;
     let covers_changed = update_folder_covers(db, &seen)?;
 
@@ -352,7 +360,7 @@ fn read_files(
     db: &mut Database,
     files: &[FoundFile],
     progress: &(dyn Fn(ScanProgress) + Sync),
-    failed: &mut usize,
+    failed: &mut Vec<PathBuf>,
 ) -> Result<usize, DbError> {
     let total = files.len();
     if total == 0 {
@@ -390,7 +398,7 @@ fn read_files(
                     read += 1;
                 }
                 Err((path, err)) => {
-                    *failed += 1;
+                    failed.push(path.clone());
                     tracing::warn!("Skipping {}: {err}", path.display());
                 }
             }
@@ -738,6 +746,9 @@ mod tests {
         .unwrap();
         let summary = scan_now(&mut db);
         assert_eq!(summary.read + summary.failed, 1, "read again");
+        // It couldn't be read: the next scan tries again.
+        let summary = scan_now(&mut db);
+        assert_eq!(summary.failed, 1, "tried again");
     }
 
     #[test]
