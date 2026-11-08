@@ -129,6 +129,20 @@ mod imp {
                 move |_| obj.update_playing()
             ));
             crate::widgets::disconnect_with(&*obj, &player, id);
+            // A click on the title copies it.
+            self.title.set_cursor_from_name(Some("pointer"));
+            self.title
+                .set_tooltip_text(Some(&gettext("Click to copy the title")));
+            let click = gtk::GestureClick::new();
+            click.connect_released(glib::clone!(
+                #[weak]
+                obj,
+                move |gesture, _, _, _| {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    obj.copy_title();
+                }
+            ));
+            self.title.add_controller(click);
         }
     }
 
@@ -165,6 +179,17 @@ impl AlbumPanel {
         self.set_songs_actions(true);
         self.setup_versions(album, version);
         self.show_version(version);
+    }
+
+    fn copy_title(&self) {
+        let title = self.imp().title.label();
+        if title.is_empty() {
+            return;
+        }
+        self.clipboard().set_text(&title);
+        if let Some(window) = self.root().and_downcast::<crate::window::GatefoldWindow>() {
+            window.show_toast(&gettext("Title copied"));
+        }
     }
 
     /// Playing and queueing need the songs (a Spotify album's load first).
