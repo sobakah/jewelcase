@@ -21,8 +21,46 @@ use crate::objects::TrackObject;
 /// Discographies are read again after this long.
 const DISCOGRAPHY_AGE_S: i64 = 24 * 3600;
 
+/// Something that can be in the user's Spotify library: a saved album,
+/// a followed artist.
+#[derive(Debug, Clone)]
+pub enum LibraryItem {
+    Album(SpotifyAlbum),
+    Artist { id: String, name: String },
+}
+
+impl LibraryItem {
+    fn uri(&self) -> String {
+        match self {
+            Self::Album(album) => format!("spotify:album:{}", album.spotify_id),
+            Self::Artist { id, .. } => format!("spotify:artist:{id}"),
+        }
+    }
+
+    fn done_text(&self, on: bool) -> String {
+        match (self, on) {
+            // Translators: {} is an album title.
+            (Self::Album(album), true) => {
+                gettext("Saved “{}” on Spotify").replace("{}", &album.name)
+            }
+            (Self::Album(album), false) => {
+                gettext("Removed “{}” from your Spotify albums").replace("{}", &album.name)
+            }
+            // Translators: {} is an artist name.
+            (Self::Artist { name, .. }, true) => {
+                gettext("Following {} on Spotify").replace("{}", name)
+            }
+            (Self::Artist { name, .. }, false) => {
+                gettext("Unfollowed {} on Spotify").replace("{}", name)
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct LibraryState {
+    /// Saves and follows on their way (by URI).
+    pending: std::collections::HashSet<String>,
     /// Spotify refused to show saved albums or followed artists: the login
     /// predates those permissions; connecting again grants them.
     pub needs_permission: bool,
@@ -348,53 +386,64 @@ impl Spotify {
         }
     }
 
-    pub fn is_album_saved(&self, album_id: &str) -> bool {
+    /// Saved or followed, as Gatefold last knew.
+    pub fn in_library(&self, item: &LibraryItem) -> bool {
         GatefoldApplication::get()
             .library()
             .db()
-            .and_then(|db| db.is_album_saved(album_id).ok())
+            .and_then(|db| match item {
+                LibraryItem::Album(album) => db.is_album_saved(&album.spotify_id).ok(),
+                LibraryItem::Artist { id, .. } => db.is_artist_followed(id).ok(),
+            })
             .unwrap_or(false)
     }
 
-    pub fn is_artist_followed(&self, artist_id: &str) -> bool {
-        GatefoldApplication::get()
-            .library()
-            .db()
-            .and_then(|db| db.is_artist_followed(artist_id).ok())
-            .unwrap_or(false)
+    /// A save or follow on its way to Spotify (its button waits).
+    pub fn library_pending(&self, item: &LibraryItem) -> bool {
+        self.imp().library.borrow().pending.contains(&item.uri())
     }
 
-    /// Saves an album to the Spotify library or removes it; says so with
-    /// Undo (which `undo` leaves out, being the undo).
-    pub async fn set_album_saved(&self, album: SpotifyAlbum, saved: bool, undo: bool) {
-        let uri = format!("spotify:album:{}", album.spotify_id);
+    /// Asks Spotify whether the item is saved or followed (it may have
+    /// changed in the Spotify app since the last sync).
+    pub async fn check_in_library(&self, item: LibraryItem) {
+        let uri = item.uri();
+        let Ok(on) = self.call(move |client| client.library_contains(&uri)).await else {
+            return;
+        };
+        if on != self.in_library(&item) {
+            self.store_in_library(&item, on);
+            self.emit_by_name::<()>("library-changed", &[]);
+        }
+    }
+
+    /// Saves an album or follows an artist, or the other way round; says
+    /// so with Undo (which `undo` leaves out, being the undo).
+    pub async fn set_in_library(&self, item: LibraryItem, on: bool, undo: bool) {
+        let uri = item.uri();
+        if !self.imp().library.borrow_mut().pending.insert(uri.clone()) {
+            return;
+        }
+        self.emit_by_name::<()>("library-changed", &[]);
+        let call_uri = uri.clone();
         let result = self
             .call(move |client| {
-                if saved {
-                    client.save_to_library(&uri)
+                if on {
+                    client.save_to_library(&call_uri)
                 } else {
-                    client.remove_from_library(&uri)
+                    client.remove_from_library(&call_uri)
                 }
             })
             .await;
+        self.imp().library.borrow_mut().pending.remove(&uri);
         if let Err(err) = result {
-            tracing::warn!("Cannot change a saved Spotify album: {err}");
+            tracing::warn!("Cannot change {uri} in the Spotify library: {err}");
+            self.emit_by_name::<()>("library-changed", &[]);
             self.library_error(&err);
             return;
         }
-        if let Some(mut db) = GatefoldApplication::get().library().db()
-            && let Err(err) = db.set_album_saved(&album, saved)
-        {
-            tracing::warn!("Cannot store the saved Spotify album: {err}");
-        }
+        self.store_in_library(&item, on);
         self.emit_by_name::<()>("library-changed", &[]);
-        let text = if saved {
-            // Translators: {} is an album title.
-            gettext("Saved “{}” on Spotify")
-        } else {
-            gettext("Removed “{}” from your Spotify albums")
-        }
-        .replace("{}", &album.name);
+        let text = item.done_text(on);
         if !undo {
             self.message(&text);
             return;
@@ -402,63 +451,23 @@ impl Spotify {
         let spotify = self.clone();
         crate::window::undo_toast(&text, move || {
             let spotify = spotify.clone();
-            let album = album.clone();
-            glib::spawn_future_local(
-                async move { spotify.set_album_saved(album, !saved, false).await },
-            );
+            let item = item.clone();
+            glib::spawn_future_local(async move { spotify.set_in_library(item, !on, false).await });
         });
     }
 
-    /// Follows an artist on Spotify or unfollows them; says so with Undo.
-    pub async fn set_artist_followed(
-        &self,
-        artist_id: String,
-        name: String,
-        followed: bool,
-        undo: bool,
-    ) {
-        let uri = format!("spotify:artist:{artist_id}");
-        let result = self
-            .call(move |client| {
-                if followed {
-                    client.save_to_library(&uri)
-                } else {
-                    client.remove_from_library(&uri)
-                }
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!("Cannot follow or unfollow a Spotify artist: {err}");
-            self.library_error(&err);
+    fn store_in_library(&self, item: &LibraryItem, on: bool) {
+        let library = GatefoldApplication::get().library();
+        let Some(mut db) = library.db() else {
             return;
+        };
+        let stored = match item {
+            LibraryItem::Album(album) => db.set_album_saved(album, on),
+            LibraryItem::Artist { id, name } => db.set_artist_followed(id, name, on),
+        };
+        if let Err(err) = stored {
+            tracing::warn!("Cannot store a change of the Spotify library: {err}");
         }
-        if let Some(mut db) = GatefoldApplication::get().library().db()
-            && let Err(err) = db.set_artist_followed(&artist_id, &name, followed)
-        {
-            tracing::warn!("Cannot store the followed Spotify artist: {err}");
-        }
-        self.emit_by_name::<()>("library-changed", &[]);
-        let text = if followed {
-            // Translators: {} is an artist name.
-            gettext("Following {} on Spotify")
-        } else {
-            gettext("Unfollowed {} on Spotify")
-        }
-        .replace("{}", &name);
-        if !undo {
-            self.message(&text);
-            return;
-        }
-        let spotify = self.clone();
-        crate::window::undo_toast(&text, move || {
-            let spotify = spotify.clone();
-            let (id, name) = (artist_id.clone(), name.clone());
-            glib::spawn_future_local(async move {
-                spotify
-                    .set_artist_followed(id, name, !followed, false)
-                    .await;
-            });
-        });
     }
 
     /// Spotify albums by Spotify ID, from the database.

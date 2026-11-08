@@ -200,6 +200,8 @@ mod imp {
                 #[weak]
                 obj,
                 move |_| {
+                    obj.update_follow_button();
+                    obj.check_followed();
                     if obj.spotify_artist_id().is_none() {
                         obj.fill_sections();
                     }
@@ -479,15 +481,28 @@ impl ArtistPage {
             .follow
             .replace(Some((spotify_id.to_owned(), name.to_owned())));
         self.update_follow_button();
+        self.check_followed();
+    }
+
+    /// Spotify's own answer (the Spotify app may have changed it).
+    fn check_followed(&self) {
+        let spotify = GatefoldApplication::get().spotify();
+        if let Some(item) = self.library_item().filter(|_| spotify.is_connected()) {
+            glib::spawn_future_local(async move { spotify.check_in_library(item).await });
+        }
+    }
+
+    fn library_item(&self) -> Option<crate::spotify::LibraryItem> {
+        let (id, name) = self.imp().follow.borrow().clone()?;
+        Some(crate::spotify::LibraryItem::Artist { id, name })
     }
 
     fn update_follow_button(&self) {
         let imp = self.imp();
         let spotify = GatefoldApplication::get().spotify();
-        let follow = imp.follow.borrow().clone();
-        match follow.filter(|_| spotify.is_connected()) {
-            Some((id, _)) => {
-                let followed = spotify.is_artist_followed(&id);
+        match self.library_item().filter(|_| spotify.is_connected()) {
+            Some(item) => {
+                let followed = spotify.in_library(&item);
                 imp.follow_button.set_label(&if followed {
                     gettext("Following")
                 } else {
@@ -498,7 +513,8 @@ impl ArtistPage {
                 } else {
                     gettext("Follow on Spotify")
                 }));
-                imp.follow_button.set_sensitive(true);
+                // Waiting for Spotify's answer.
+                self.action_set_enabled("artist.toggle-follow", !spotify.library_pending(&item));
                 imp.follow_button.set_visible(true);
             }
             None => imp.follow_button.set_visible(false),
@@ -507,22 +523,17 @@ impl ArtistPage {
     }
 
     fn toggle_follow(&self) {
-        let imp = self.imp();
-        let Some((id, name)) = imp.follow.borrow().clone() else {
+        let Some(item) = self.library_item() else {
             return;
         };
         let spotify = GatefoldApplication::get().spotify();
-        let followed = spotify.is_artist_followed(&id);
-        // Until Spotify answers.
-        imp.follow_button.set_sensitive(false);
-        glib::spawn_future_local(glib::clone!(
-            #[weak(rename_to = page)]
-            self,
-            async move {
-                spotify.set_artist_followed(id, name, !followed, true).await;
-                page.update_follow_button();
-            }
-        ));
+        if spotify.library_pending(&item) {
+            return;
+        }
+        let followed = spotify.in_library(&item);
+        glib::spawn_future_local(
+            async move { spotify.set_in_library(item, !followed, true).await },
+        );
     }
 
     fn fill_sections(&self) {

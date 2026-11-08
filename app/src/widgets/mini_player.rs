@@ -95,6 +95,12 @@ mod imp {
                 obj,
                 move |player| obj.update_progress(player)
             ));
+            // A length learned while paused (a file that doesn't say).
+            player.connect_duration_notify(glib::clone!(
+                #[weak]
+                obj,
+                move |player| obj.update_progress(player)
+            ));
             player.connect_repeat_notify(glib::clone!(
                 #[weak]
                 obj,

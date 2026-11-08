@@ -31,7 +31,7 @@ use gtk::{gio, glib};
 use crate::application::GatefoldApplication;
 use crate::config::APP_ID;
 
-pub use library::album_from;
+pub use library::{LibraryItem, album_from};
 pub use remote::RemoteCommand;
 pub use stream::{StreamNote, fetch_covers, fetch_covers_in_batches, image_cover_key};
 pub use sync::{Op, answer_error, parse_suggestion, search_error};
@@ -83,6 +83,9 @@ mod imp {
 
         pub settings: OnceCell<gio::Settings>,
         pub client: RefCell<Option<Arc<Client>>>,
+        /// Counts logins put to use: a replaced client's refreshed tokens
+        /// don't go into the keyring any more.
+        pub login_generation: Cell<u64>,
         pub user_id: RefCell<Option<String>>,
         pub cancel_login: RefCell<Option<Arc<AtomicBool>>>,
         pub sync: RefCell<sync::SyncState>,
@@ -134,6 +137,10 @@ impl Default for Spotify {
         glib::Object::new()
     }
 }
+
+/// The Spotify user ID last connected (app_state), to notice another
+/// account.
+const ACCOUNT_KEY: &str = "spotify-user-id";
 
 impl Spotify {
     pub fn new() -> Self {
@@ -239,9 +246,6 @@ impl Spotify {
                 return;
             }
         };
-        // Connecting again (new permissions): the current login stays in
-        // use if this one doesn't work out.
-        let was_connected = self.is_connected() && self.client().is_some();
         self.set_status(Status::Connecting);
         let pkce = Pkce::new();
         let url = auth::authorize_url(&client_id, &pkce);
@@ -280,7 +284,9 @@ impl Spotify {
             .unwrap_or(Err(Error::Cancelled)),
             Err(err) => Err(err),
         };
-        let back = if was_connected {
+        // Connecting again (new permissions): the current login stays in
+        // use if this one doesn't work out (and it's still there).
+        let back = if self.is_connected() {
             Status::Connected
         } else {
             Status::Disconnected
@@ -331,20 +337,39 @@ impl Spotify {
                 }
             }
         });
-        // Refreshed tokens go back into the keyring.
+        // Refreshed tokens go back into the keyring, while this login is
+        // the one in use (an older client finishing a call after Connect
+        // Again would put its tokens back).
+        let generation = self.imp().login_generation.get() + 1;
+        let spotify = self.downgrade();
         glib::spawn_future_local(async move {
             while let Ok(tokens) = receiver.recv().await {
+                let current = spotify
+                    .upgrade()
+                    .is_some_and(|s| s.imp().login_generation.get() == generation);
+                if !current {
+                    continue;
+                }
                 if let Err(err) = keyring::save(tokens).await {
                     tracing::warn!("Cannot store the Spotify login: {err}");
                 }
             }
         });
+        // Connect Again while connected: if the new login fails, the
+        // current one stays in use.
+        let keep_current = fresh_login && self.is_connected();
         let check = client.clone();
         let me = gio::spawn_blocking(move || check.me())
             .await
             .unwrap_or(Err(Error::Cancelled));
         let user = match me {
             Ok(user) => user,
+            Err(err) if keep_current => {
+                tracing::warn!("The new Spotify login doesn't work: {err}");
+                self.set_status(Status::Connected);
+                self.message(&gettext("Couldn't connect to Spotify"));
+                return;
+            }
             Err(Error::LoggedOut) => {
                 self.logged_out();
                 return;
@@ -362,21 +387,12 @@ impl Spotify {
             }
         };
         let name = user.display_name.clone().unwrap_or_else(|| user.id.clone());
-        let previous = self.imp().user_id.replace(Some(user.id.clone()));
-        if previous.is_some_and(|previous| previous != user.id) {
-            // Connected again with another account: the other one's
-            // playlists go, as when disconnecting.
-            let library = GatefoldApplication::get().library();
-            if let Some(mut db) = library.db()
-                && let Err(err) = db.forget_spotify()
-            {
-                tracing::warn!("Cannot remove the Spotify playlists: {err}");
-            }
-            library.reload_playlists();
-        }
+        self.imp().user_id.replace(Some(user.id.clone()));
+        self.check_account(&user.id);
         self.imp().account_name.replace(Some(name.clone()));
         self.notify_account_name();
         self.imp().client.replace(Some(client));
+        self.imp().login_generation.set(generation);
         let _ = self.settings().set_string("spotify-account", &name);
         self.set_status(Status::Connected);
         if fresh_login {
@@ -400,6 +416,36 @@ impl Spotify {
             ));
         }
         self.sync_soon();
+    }
+
+    /// Another account than the last one connected: the other one's
+    /// playlists, saved albums and followed artists go, as when
+    /// disconnecting. (Remembered in the database, so a login that
+    /// couldn't be checked at start counts too.)
+    fn check_account(&self, user_id: &str) {
+        let library = GatefoldApplication::get().library();
+        let Some(mut db) = library.db() else {
+            return;
+        };
+        let last = db.app_state(ACCOUNT_KEY).ok().flatten();
+        let other = last
+            .as_deref()
+            .is_some_and(|last| !last.is_empty() && last != user_id);
+        if other {
+            tracing::info!("Connected with another Spotify account; forgetting the other one's");
+            if let Err(err) = db.forget_spotify() {
+                tracing::warn!("Cannot remove the Spotify playlists: {err}");
+            }
+        }
+        if last.as_deref() != Some(user_id)
+            && let Err(err) = db.set_app_state(ACCOUNT_KEY, user_id)
+        {
+            tracing::warn!("Cannot remember the Spotify account: {err}");
+        }
+        drop(db);
+        if other {
+            library.reload_playlists();
+        }
     }
 
     fn retry_start_later(&self) {
@@ -430,10 +476,11 @@ impl Spotify {
             tracing::warn!("Cannot remove the Spotify login: {err}");
         }
         let library = GatefoldApplication::get().library();
-        if let Some(mut db) = library.db()
-            && let Err(err) = db.forget_spotify()
-        {
-            tracing::warn!("Cannot remove the Spotify playlists: {err}");
+        if let Some(mut db) = library.db() {
+            if let Err(err) = db.forget_spotify() {
+                tracing::warn!("Cannot remove the Spotify playlists: {err}");
+            }
+            let _ = db.set_app_state(ACCOUNT_KEY, "");
         }
         library.reload_playlists();
     }

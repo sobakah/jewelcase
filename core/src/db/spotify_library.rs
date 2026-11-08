@@ -117,6 +117,53 @@ fn upsert_album(conn: &rusqlite::Connection, album: &SpotifyAlbum) -> rusqlite::
     Ok(())
 }
 
+/// The saved albums' or followed artists' order column.
+#[derive(Clone, Copy)]
+enum LibraryList {
+    Saved,
+    Followed,
+}
+
+impl LibraryList {
+    fn table_and_column(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Saved => ("spotify_album", "saved_position"),
+            Self::Followed => ("spotify_artist", "followed_position"),
+        }
+    }
+}
+
+/// Puts an item first in its list, or takes it out.
+fn set_position(
+    conn: &rusqlite::Connection,
+    list: LibraryList,
+    spotify_id: &str,
+    on: bool,
+) -> rusqlite::Result<()> {
+    let (table, column) = list.table_and_column();
+    let sql = if on {
+        format!(
+            "UPDATE {table} SET {column} = (SELECT COALESCE(MIN({column}), 0) - 1 FROM {table})
+             WHERE spotify_id = ?1 AND {column} IS NULL"
+        )
+    } else {
+        format!("UPDATE {table} SET {column} = NULL WHERE spotify_id = ?1")
+    };
+    conn.execute(&sql, [spotify_id]).map(drop)
+}
+
+fn is_listed(conn: &rusqlite::Connection, list: LibraryList, spotify_id: &str) -> Result<bool> {
+    let (table, column) = list.table_and_column();
+    Ok(conn
+        .query_row(
+            &format!("SELECT {column} IS NOT NULL FROM {table} WHERE spotify_id = ?1"),
+            [spotify_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
 impl Database {
     /// The saved albums as Spotify lists them now (the latest first).
     pub fn replace_saved_albums(&mut self, albums: &[SpotifyAlbum]) -> Result<()> {
@@ -165,33 +212,13 @@ impl Database {
     pub fn set_album_saved(&mut self, album: &SpotifyAlbum, saved: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
         upsert_album(&tx, album)?;
-        if saved {
-            tx.execute(
-                "UPDATE spotify_album SET saved_position =
-                   (SELECT COALESCE(MIN(saved_position), 0) - 1 FROM spotify_album)
-                 WHERE spotify_id = ?1 AND saved_position IS NULL",
-                [&album.spotify_id],
-            )?;
-        } else {
-            tx.execute(
-                "UPDATE spotify_album SET saved_position = NULL WHERE spotify_id = ?1",
-                [&album.spotify_id],
-            )?;
-        }
+        set_position(&tx, LibraryList::Saved, &album.spotify_id, saved)?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn is_album_saved(&self, spotify_id: &str) -> Result<bool> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT saved_position IS NOT NULL FROM spotify_album WHERE spotify_id = ?1",
-                [spotify_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(false))
+        is_listed(&self.conn, LibraryList::Saved, spotify_id)
     }
 
     /// One artist followed (first) or not any more.
@@ -207,33 +234,13 @@ impl Database {
              ON CONFLICT(spotify_id) DO NOTHING",
             [spotify_id, name],
         )?;
-        if followed {
-            tx.execute(
-                "UPDATE spotify_artist SET followed_position =
-                   (SELECT COALESCE(MIN(followed_position), 0) - 1 FROM spotify_artist)
-                 WHERE spotify_id = ?1 AND followed_position IS NULL",
-                [spotify_id],
-            )?;
-        } else {
-            tx.execute(
-                "UPDATE spotify_artist SET followed_position = NULL WHERE spotify_id = ?1",
-                [spotify_id],
-            )?;
-        }
+        set_position(&tx, LibraryList::Followed, spotify_id, followed)?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn is_artist_followed(&self, spotify_id: &str) -> Result<bool> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT followed_position IS NOT NULL FROM spotify_artist WHERE spotify_id = ?1",
-                [spotify_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(false))
+        is_listed(&self.conn, LibraryList::Followed, spotify_id)
     }
 
     /// The followed artists as Spotify lists them now.

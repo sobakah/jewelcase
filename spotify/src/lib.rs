@@ -684,6 +684,17 @@ impl Client {
         .map(drop)
     }
 
+    /// Whether an item is in the user's library: an album saved, an
+    /// artist followed (`GET /me/library/contains`).
+    pub fn library_contains(&self, uri: &str) -> Result<bool> {
+        let value = self.get("/me/library/contains", &[("uris", uri.to_owned())])?;
+        value
+            .as_array()
+            .and_then(|answers| answers.first())
+            .and_then(Value::as_bool)
+            .ok_or(Error::Format("library contains"))
+    }
+
     /// Takes an item out of the user's library (`DELETE /me/library`):
     /// removes a saved album, unfollows an artist.
     pub fn remove_from_library(&self, uri: &str) -> Result<()> {

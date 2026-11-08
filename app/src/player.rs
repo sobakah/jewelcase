@@ -81,6 +81,9 @@ mod imp {
         /// Milliseconds.
         #[property(get)]
         pub duration: Cell<u64>,
+        /// The duration came from GStreamer, not the library: it may be
+        /// estimated anew.
+        pub duration_learned: Cell<bool>,
         #[property(get)]
         pub shuffle: Cell<bool>,
         /// "off", "all" or "one".
@@ -953,6 +956,7 @@ impl Player {
                     .and_then(|t| t.cover_key().map(str::to_owned));
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
         imp.current_track.replace(track);
+        imp.duration_learned.set(false);
         if imp.duration.replace(duration) != duration {
             self.notify_duration();
         }
@@ -1057,6 +1061,7 @@ impl Player {
         let duration = track.as_ref().map_or(0, TrackObject::duration_ms);
         imp.current_track.replace(track);
         imp.duration.replace(duration);
+        imp.duration_learned.set(false);
         self.notify_duration();
         self.notify_current_track();
         self.set_position(imp.local_position.get());
@@ -1755,14 +1760,15 @@ impl Player {
     /// bar and seeking work.
     fn learn_duration(&self) {
         let imp = self.imp();
-        if imp.duration.get() != 0 || self.plays_from_spotify() {
+        let known = imp.duration.get() != 0 && !imp.duration_learned.get();
+        if known || self.plays_from_spotify() {
             return;
         }
         let Some(ms) = self.engine().and_then(playback::Player::duration_ms) else {
             return;
         };
-        if ms > 0 {
-            imp.duration.set(ms);
+        if ms > 0 && imp.duration.replace(ms) != ms {
+            imp.duration_learned.set(true);
             self.notify_duration();
         }
     }
@@ -1854,6 +1860,7 @@ impl Player {
                 self.record_history(&previous, played);
             }
         }
+        imp.duration_learned.set(false);
         if imp.duration.replace(duration) != duration {
             self.notify_duration();
         }
