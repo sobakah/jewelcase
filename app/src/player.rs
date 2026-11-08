@@ -577,7 +577,11 @@ impl Player {
         }
     }
 
-    fn record_history(&self, track_id: i64) {
+    /// Library songs and Spotify songs (streamed, or a device's).
+    fn record_history(&self, track: &TrackObject) {
+        let Some(track_id) = self.spotify().durable_id(track) else {
+            return;
+        };
         let recorded = self
             .library()
             .db()
@@ -1789,7 +1793,7 @@ impl Player {
         if changed && let Some(previous) = previous {
             let played = imp.position.get();
             if played > 0 && played >= (previous.duration_ms() / 2).min(HISTORY_MIN_MS) {
-                self.record_history(previous.id());
+                self.record_history(&previous);
             }
         }
         if imp.duration.replace(duration) != duration {

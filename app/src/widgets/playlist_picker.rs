@@ -1,7 +1,9 @@
 //! "Add to Playlist…" and the name dialog for new or renamed playlists.
 
+use std::collections::HashMap;
+
 use adw::prelude::*;
-use gettextrs::gettext;
+use gettextrs::{gettext, ngettext};
 use gtk::glib;
 
 use crate::application::GatefoldApplication;
@@ -130,6 +132,16 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
             .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
             .collect()
     };
+    // Which playlists have the songs already (as themselves, or as their
+    // Spotify versions), and how many of them.
+    let mut has: HashMap<i64, usize> = HashMap::new();
+    if let Some(db) = library.db() {
+        for track in &tracks {
+            for playlist in db.playlists_containing(*track, None).unwrap_or_default() {
+                *has.entry(playlist).or_default() += 1;
+            }
+        }
+    }
     for playlist in &playlists {
         let row = {
             let row = adw::ActionRow::builder()
@@ -137,7 +149,30 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                 .activatable(true)
                 .build();
             row.set_title(&playlist.playlist().name);
-            row.set_subtitle(&crate::format::song_count(playlist.playlist().item_count));
+            let count = crate::format::song_count(playlist.playlist().item_count);
+            let subtitle = match has.get(&playlist.id()).copied().unwrap_or(0) {
+                0 => count,
+                n => {
+                    let note = if tracks.len() == 1 {
+                        gettext("Has this song")
+                    } else if n >= tracks.len() {
+                        gettext("Has all of these songs")
+                    } else {
+                        // Translators: {} is a number of songs, e.g. "Has 3 of these songs".
+                        ngettext("Has {} of these songs", "Has {} of these songs", n as u32)
+                            .replace("{}", &n.to_string())
+                    };
+                    row.add_suffix(
+                        &gtk::Image::builder()
+                            .icon_name("object-select-symbolic")
+                            .tooltip_text(&note)
+                            .css_classes(["dim-label"])
+                            .build(),
+                    );
+                    format!("{note} · {count}")
+                }
+            };
+            row.set_subtitle(&subtitle);
             row
         };
         list.append(&row);

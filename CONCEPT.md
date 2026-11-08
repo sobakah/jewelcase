@@ -238,6 +238,10 @@ Default (sleek):
 
 The artist and album under the title open their pages: the library's for library songs; for Spotify songs (streamed, or on a Spotify device) the song is looked up on Spotify, and the artist's page is the library's when the artist is there.
 
+The header has "Add to Playlist…" for the song that plays; its tooltip names the playlists that already have it. Song Info lists them too. A song shown from a Spotify device is first kept as a song to stream (`stream_track`), as its stand-in ID is only a hash.
+
+**Which playlists have a song:** the playlists with an entry for it (`local_track_id`), or for its Spotify URI. A library song's URI counts only for sure matches, and a streamed song also finds the library song that surely matches it. "Add to Playlist…" marks those playlists ("Has this song", or "Has 3 of these songs" for several).
+
 Expanded: the **Lyrics** and **Queue** toggles open side panes. Whether they're open when Gatefold starts is a preference each (as last left, shown, hidden). On wide windows the cover moves left and the pane sits next to it (`AdwMultiLayoutView` switching between "cover only", "cover + lyrics", "cover + queue" and "cover + lyrics + queue" layouts depending on width). On narrow windows the pane replaces the cover and a small cover stays in the header.
 
 - Accent color: the dominant cover color is applied through a scoped CSS provider (`@accent_bg_color`, background gradient) **only inside the player view**, with contrast checked against WCAG AA. The rest of the app follows the system accent.
@@ -310,6 +314,7 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 - **Play next** inserts after the current track. **Add to queue** appends to the user section, so it plays before the rest of the context (Spotify-style "Next up" vs. "Next from: Album").
 - The queue view is a `GtkListView` with drag-and-drop reordering, swipe/right-click remove, "Clear upcoming" and "Save as playlist".
 - Items have sections: *Now playing*, *Next up* (user-added), *Next from: \<Album/Playlist\>*. Suggested tracks (§7) have a subtle badge and can be removed individually.
+- **Recently Played** sits above *Now playing* (the last 30 songs; the database keeps 200). It has library songs and Spotify songs that played in Gatefold (streamed: `-stream_track.id`), each with a menu (button and right-click): *Play next*, *Add to queue*, *Add to playlist…*. A click plays the song now. Since migration 026, `play_history` has no foreign key on `track`; a trigger removes deleted library songs. While a Spotify device plays, the section is hidden.
 - **Persistence:** queue and state are written to SQLite (debounced, about every 2 s and on shutdown). On start, the queue is restored **paused** at the previous position. Missing files are skipped with a toast. Restoring can be disabled in Preferences.
 - Background playback: closing the window while playing can keep playback going (`GApplication` hold + GNOME's Background portal). This is a setting that defaults to *off* (closing quits, and the queue is saved).
 

@@ -1057,6 +1057,19 @@ impl Library {
         created
     }
 
+    /// The playlists that have this song, local or Spotify ones, as itself
+    /// or as its Spotify version.
+    pub fn playlists_containing(&self, track: &TrackObject) -> Vec<i64> {
+        let device_uri = GatefoldApplication::get()
+            .spotify()
+            .device_song_uri(track.id());
+        // A device's stand-in ID means nothing to the database.
+        let id = if device_uri.is_some() { 0 } else { track.id() };
+        self.db()
+            .and_then(|db| db.playlists_containing(id, device_uri.as_deref()).ok())
+            .unwrap_or_default()
+    }
+
     /// The playlist's Spotify link, when edits go to Spotify too (§9.6).
     fn spotify_link(&self, id: i64) -> Option<LinkedPlaylist> {
         self.db()?.linked_playlist(id).ok().flatten()

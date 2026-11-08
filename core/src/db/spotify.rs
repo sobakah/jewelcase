@@ -1288,6 +1288,113 @@ mod tests {
     }
 
     #[test]
+    fn streamed_songs_go_into_the_history() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/A/B/01.flac", "B", "Local", 1)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let local: i64 = db
+            .conn
+            .query_row("SELECT id FROM track", [], |row| row.get(0))
+            .unwrap();
+        let stream = db
+            .stream_track_id(&StreamInfo {
+                uri: "spotify:track:s".into(),
+                title: "Streamed".into(),
+                duration_ms: 1000,
+                ..StreamInfo::default()
+            })
+            .unwrap();
+        db.add_history(local, 10).unwrap();
+        db.add_history(stream, 11).unwrap();
+        // Neither a library song nor a streamed one (a device's stand-in).
+        db.add_history(-987_654, 12).unwrap();
+        db.add_history(987_654, 13).unwrap();
+        assert_eq!(db.history(10).unwrap(), [local, stream]);
+        assert_eq!(db.tracks(&[stream]).unwrap().len(), 1);
+        // A removed library song leaves the history.
+        db.delete_tracks(&[std::path::PathBuf::from("/m/A/B/01.flac")])
+            .unwrap();
+        assert_eq!(db.history(10).unwrap(), [stream]);
+    }
+
+    #[test]
+    fn playlists_containing_a_song_as_itself_or_on_spotify() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/A/B/01.flac", "B", "One", 1),
+                file("/m/A/B/02.flac", "B", "Two", 2),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let id = |db: &Database, title: &str| -> i64 {
+            db.conn
+                .query_row(
+                    "SELECT t.id FROM track t WHERE t.title = ?1",
+                    [title],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let (one, two) = (id(&db, "One"), id(&db, "Two"));
+        // "One" is spotify:track:one for sure; "Two" only likely.
+        for (track, uri, confidence) in [
+            (one, "spotify:track:one", Confidence::Sure),
+            (two, "spotify:track:two", Confidence::Likely),
+        ] {
+            db.set_spotify_version(
+                track,
+                &SpotifyVersion {
+                    uri: Some(uri.into()),
+                    confidence: Some(confidence),
+                    title: None,
+                    artist: None,
+                    checked: 1,
+                },
+            )
+            .unwrap();
+        }
+        let mine = db.create_playlist("Mine", 1).unwrap();
+        let theirs = db.create_playlist("Theirs", 1).unwrap();
+        let other = db.create_playlist("Other", 1).unwrap();
+        db.add_to_playlist(mine, &[one], None, 1).unwrap();
+        for (playlist, uri) in [(theirs, "spotify:track:one"), (other, "spotify:track:two")] {
+            db.conn
+                .execute(
+                    "INSERT INTO playlist_item (playlist_id, position, spotify_uri, match_state)
+                     VALUES (?1, 0, ?2, 'spotify_only')",
+                    params![playlist, uri],
+                )
+                .unwrap();
+        }
+        let mut found = db.playlists_containing(one, None).unwrap();
+        found.sort_unstable();
+        assert_eq!(found, [mine, theirs]);
+        // Only a likely match: the Spotify entry may be another version.
+        assert!(db.playlists_containing(two, None).unwrap().is_empty());
+        // The streamed song finds the library song's playlist too.
+        let stream = db
+            .stream_track_id(&StreamInfo {
+                uri: "spotify:track:one".into(),
+                title: "One".into(),
+                duration_ms: 1000,
+                ..StreamInfo::default()
+            })
+            .unwrap();
+        let mut found = db.playlists_containing(stream, None).unwrap();
+        found.sort_unstable();
+        assert_eq!(found, [mine, theirs]);
+        // A device's song, known by its URI only.
+        assert_eq!(
+            db.playlists_containing(0, Some("spotify:track:two")).unwrap(),
+            [other]
+        );
+    }
+
+    #[test]
     fn spotify_songs_get_negative_track_ids() {
         let mut db = Database::open_in_memory().unwrap();
         let info = StreamInfo {
@@ -1335,9 +1442,6 @@ mod tests {
             db.stream_covers(&[late_id]).unwrap(),
             [(late_id, "https://i/late".into())]
         );
-        // Not kept in the history.
-        db.add_history(id, 1).unwrap();
-        assert!(db.history(10).unwrap().is_empty());
     }
 
     #[test]

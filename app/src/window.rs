@@ -1887,6 +1887,18 @@ impl GatefoldWindow {
                     }
                 });
             }
+            // `GATEFOLD_SCREENSHOT_SONG_MENU=picker`: 10 s in, the player's
+            // "Add to Playlist…"; `=history:N`: the menu of the Nth
+            // Recently Played song, `=history:N:song.add-to-queue` one of its
+            // actions.
+            if let Ok(which) = std::env::var("GATEFOLD_SCREENSHOT_SONG_MENU") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(10, move || {
+                    if let Some(window) = window.upgrade() {
+                        window.imp().player_view.open_song_menu(&which);
+                    }
+                });
+            }
             // `GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS=playlist.play`: actions of
             // the playlist panel, 4 s in.
             if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS") {

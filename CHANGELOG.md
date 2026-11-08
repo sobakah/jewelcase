@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Recently Played (above the queue) now has the Spotify songs that played in Gatefold too, kept only on this computer. Each song has a menu (⋮ or right-click) to play it next, add it back to the queue or add it to a playlist.
+- Songs in the queue have "Add to Playlist…" in their right-click menu.
+- The player has "Add to Playlist…" for the song that plays. Its tooltip, Song Info and the song details in album and playlist panels name the playlists that already have the song, local or Spotify ones (also as its Spotify version). "Add to Playlist…" puts a check mark on them.
+
 ## 0.2.0 (pre-release)
 
 Spotify playlists you can fully edit, a new search, lyrics for Spotify songs, and a round of fixes from a review of the whole program. Gatefold's database is updated on the first start; after that, 0.1.1 can't open it any more. Automatic romanization needs lyrembed 1.1.1 (click **Update** on lyrembed's page, or `pipx upgrade lyrembed`). You may be asked to connect to Spotify again once, for the permission to delete or unfollow playlists.

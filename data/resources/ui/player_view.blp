@@ -65,8 +65,6 @@ template $GatefoldPlayerView: Adw.Bin {
             action-name: "win.close-player";
           }
 
-          // More about the song: format, bitrate, release, tags.
-
           // Spotify Connect devices (CONCEPT.md §9.3).
           [end]
           Gtk.MenuButton devices_button {
@@ -83,6 +81,7 @@ template $GatefoldPlayerView: Adw.Bin {
             ]
           }
 
+          // More about the song: format, bitrate, release, tags.
           [end]
           Gtk.MenuButton info_button {
             icon-name: "info-outline-symbolic";
@@ -90,6 +89,19 @@ template $GatefoldPlayerView: Adw.Bin {
             direction: down;
 
             popover: Gtk.Popover info_popover {};
+
+            styles [
+              "flat",
+              "circular",
+            ]
+          }
+
+          // The song into a playlist (it says which have it already).
+          [end]
+          Gtk.Button playlist_button {
+            icon-name: "view-list-bullet-symbolic";
+            tooltip-text: _("Add to Playlist…");
+            sensitive: false;
 
             styles [
               "flat",

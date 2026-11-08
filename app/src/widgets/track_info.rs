@@ -4,6 +4,7 @@
 use gettextrs::gettext;
 use gtk::prelude::*;
 
+use crate::application::GatefoldApplication;
 use crate::format;
 use crate::objects::TrackObject;
 
@@ -112,6 +113,23 @@ pub fn grid(track: &TrackObject, full: bool) -> gtk::Grid {
             add(gettext("Barcode"), barcode.clone());
         }
     }
+    // The playlists that have it, local or Spotify ones.
+    let library = GatefoldApplication::get().library();
+    let mut playlists: Vec<String> = library
+        .playlists_containing(track)
+        .into_iter()
+        .filter_map(|id| library.playlist(id))
+        .map(|p| p.playlist().name.clone())
+        .collect();
+    playlists.sort_by_key(|name| name.to_lowercase());
+    add(
+        gettext("Playlists"),
+        if playlists.is_empty() {
+            gettext("None")
+        } else {
+            playlists.join(", ")
+        },
+    );
     // What kind of lyrics there are, not the text.
     let path = &track.track().record.path;
     let mut lyrics = Vec::new();

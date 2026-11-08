@@ -103,6 +103,8 @@ mod imp {
         #[template_child]
         pub info_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub playlist_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub devices_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub shuffle_button: TemplateChild<gtk::ToggleButton>,
@@ -331,6 +333,49 @@ impl PlayerView {
             &imp.devices_popover,
             &imp.remote_banner,
         );
+
+        // The current song into a playlist; a device's song is kept as a
+        // streamed one for it.
+        imp.playlist_button.connect_clicked(|button| {
+            let app = GatefoldApplication::get();
+            let id = app
+                .player()
+                .current_track()
+                .and_then(|track| app.spotify().durable_id(&track));
+            if let Some(id) = id {
+                super::playlist_picker::show(button, vec![id]);
+            }
+        });
+        // Its tooltip names the playlists that have the song, asked when
+        // it shows (playlists change meanwhile).
+        imp.playlist_button.set_has_tooltip(true);
+        imp.playlist_button
+            .connect_query_tooltip(|_, _, _, _, tooltip| {
+                let app = GatefoldApplication::get();
+                let library = app.library();
+                let mut names: Vec<String> = app
+                    .player()
+                    .current_track()
+                    .map(|track| library.playlists_containing(&track))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|id| library.playlist(id))
+                    .map(|p| p.playlist().name.clone())
+                    .collect();
+                names.sort_by_key(|name| name.to_lowercase());
+                let text = if names.is_empty() {
+                    gettext("Add to Playlist…")
+                } else {
+                    // Translators: {} is a list of playlist names.
+                    format!(
+                        "{}\n{}",
+                        gettext("Add to Playlist…"),
+                        gettext("Already in {}").replace("{}", &names.join(", "))
+                    )
+                };
+                tooltip.set_text(Some(&text));
+                true
+            });
 
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {
@@ -617,6 +662,20 @@ impl PlayerView {
         }
     }
 
+    /// For screenshots: `picker` opens "Add to Playlist…", `history:N` the
+    /// menu of a Recently Played song, `history:N:action` runs one of its
+    /// actions.
+    pub fn open_song_menu(&self, which: &str) {
+        let imp = self.imp();
+        let mut parts = which.split(':');
+        match (parts.next(), parts.next(), parts.next()) {
+            (Some("history"), n, action) => imp
+                .queue_view
+                .open_history_menu(n.and_then(|n| n.parse().ok()).unwrap_or(0), action),
+            _ => imp.playlist_button.emit_clicked(),
+        }
+    }
+
     fn update_track(&self, player: &Player) {
         let imp = self.imp();
         let track = player.current_track();
@@ -642,6 +701,7 @@ impl PlayerView {
             }
         }
         imp.seek.set_sensitive(track.is_some());
+        imp.playlist_button.set_sensitive(track.is_some());
         // Spotify songs not in the library have lyrics only from LRCLIB
         // (when it's on in Preferences).
         let stand_in =

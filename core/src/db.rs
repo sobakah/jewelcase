@@ -49,6 +49,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/023_lrclib.sql")),
     M::up(include_str!("db/024_similar_artists.sql")),
     M::up(include_str!("db/025_romanized.sql")),
+    M::up(include_str!("db/026_spotify_history.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1872,14 +1873,14 @@ impl Database {
     }
 
     /// Records that a song was played; keeps the newest `HISTORY_KEEP`.
+    /// Library songs and streamed Spotify songs (`-stream_track.id`);
+    /// other IDs are ignored.
     pub fn add_history(&mut self, track_id: i64, now: i64) -> Result<()> {
-        // Streamed Spotify songs aren't kept in the history.
-        if track_id < 0 {
-            return Ok(());
-        }
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO play_history (track_id, played) VALUES (?1, ?2)",
+            "INSERT INTO play_history (track_id, played) SELECT ?1, ?2
+             WHERE EXISTS (SELECT 1 FROM track WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM stream_track WHERE id = -?1)",
             params![track_id, now],
         )?;
         tx.execute(
@@ -1894,6 +1895,30 @@ impl Database {
     pub fn clear_history(&mut self) -> Result<()> {
         self.conn.execute("DELETE FROM play_history", [])?;
         Ok(())
+    }
+
+    /// The playlists that have this song (`track_id`: a library song, or
+    /// a streamed one as `-stream_track.id`; `uri`: its Spotify URI, when
+    /// known otherwise): as itself, or as the same song on Spotify.
+    pub fn playlists_containing(&self, track_id: i64, uri: Option<&str>) -> Result<Vec<i64>> {
+        let mut stmt = self.conn.prepare_cached(
+            "WITH uri(uri) AS (
+                 SELECT uri FROM stream_track WHERE id = -?1
+                 UNION SELECT uri FROM spotify_track
+                   WHERE track_id = ?1 AND confidence = 'sure' AND uri IS NOT NULL
+                 UNION SELECT ?2 WHERE ?2 IS NOT NULL
+             ), local(id) AS (
+                 SELECT ?1 WHERE ?1 > 0
+                 UNION SELECT track_id FROM spotify_track
+                   WHERE confidence = 'sure' AND uri IN (SELECT uri FROM uri)
+             )
+             SELECT DISTINCT playlist_id FROM playlist_item
+             WHERE spotify_uri IN (SELECT uri FROM uri)
+                OR local_track_id IN (SELECT id FROM local)",
+        )?;
+        stmt.query_map(params![track_id, uri], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
     }
 
     /// The last `limit` played songs, oldest first.

@@ -1,6 +1,8 @@
 //! The queue pane of the player (CONCEPT.md §6.2): sections *Now Playing*,
 //! *Next Up* (added by the user) and *Next From: <album>*, reordering by
-//! drag and drop, removing by button or right-click, "Clear".
+//! drag and drop, removing by button or right-click, "Clear". Above it,
+//! *Recently Played* (library and Spotify songs), each with a menu to queue
+//! it again or add it to a playlist.
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
@@ -330,6 +332,25 @@ impl QueueView {
         self.set_child(Some(&content));
     }
 
+    /// For screenshots: opens the menu of the `index`th Recently Played
+    /// song, or runs one of its actions (`song.add-to-queue`).
+    pub fn open_history_menu(&self, index: i32, action: Option<&str>) {
+        let row = self.imp().history.row_at_index(index);
+        if let (Some(row), Some(action)) = (&row, action) {
+            if let Err(err) = row.activate_action(action, None) {
+                tracing::warn!("Screenshot action {action}: {err}");
+            }
+            return;
+        }
+        let button = row
+            .and_then(|row| row.child())
+            .and_then(|line| line.last_child())
+            .and_downcast::<gtk::MenuButton>();
+        if let Some(button) = button {
+            button.popup();
+        }
+    }
+
     fn fill_history(&self) {
         let imp = self.imp();
         let tracks = GatefoldApplication::get().player().history(HISTORY_SHOWN);
@@ -397,13 +418,7 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
         .valign(gtk::Align::Center)
         .hexpand(true)
         .build();
-    text.append(
-        &gtk::Label::builder()
-            .label(track.title())
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build(),
-    );
+    text.append(&super::spotify_title(&track.title(), track.is_stand_in()));
     if let Some(artist) = track.artist() {
         text.append(
             &gtk::Label::builder()
@@ -429,10 +444,104 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
             .css_classes(["dim-label", "numeric"])
             .build(),
     );
+    let more = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .tooltip_text(gettext("More"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular"])
+        .build();
+    line.append(&more);
     let row = gtk::ListBoxRow::builder().child(&line).build();
     row.add_css_class("history-row");
     row.set_tooltip_text(Some(&gettext("Play Now")));
+    song_menu(&row, track, None, Some(&more));
     row
+}
+
+/// The song's menu, on right-click and on `button`: Play Next and Add to
+/// Queue for a played song, Remove from Queue for a queued one (`queued`:
+/// its offset), Add to Playlist… for both.
+fn song_menu(
+    row: &gtk::ListBoxRow,
+    track: &TrackObject,
+    queued: Option<usize>,
+    button: Option<&gtk::MenuButton>,
+) {
+    let menu = gtk::gio::Menu::new();
+    let actions = gtk::gio::SimpleActionGroup::new();
+    let add = |name: &str, activate: Box<dyn Fn()>| {
+        let action = gtk::gio::SimpleAction::new(name, None);
+        action.connect_activate(move |_, _| activate());
+        actions.add_action(&action);
+    };
+    let player = GatefoldApplication::get().player();
+    if let Some(offset) = queued {
+        add(
+            "remove",
+            Box::new(glib::clone!(
+                #[weak]
+                player,
+                move || player.remove_upcoming(offset)
+            )),
+        );
+    } else {
+        let next = track.clone();
+        add(
+            "play-next",
+            Box::new(glib::clone!(
+                #[weak]
+                player,
+                move || player.play_next(vec![next.clone()])
+            )),
+        );
+        let later = track.clone();
+        add(
+            "add-to-queue",
+            Box::new(glib::clone!(
+                #[weak]
+                player,
+                move || player.add_to_queue(vec![later.clone()])
+            )),
+        );
+        menu.append(Some(&gettext("Play _Next")), Some("song.play-next"));
+        menu.append(Some(&gettext("Add to _Queue")), Some("song.add-to-queue"));
+    }
+    let id = track.id();
+    add(
+        "add-to-playlist",
+        Box::new(glib::clone!(
+            #[weak]
+            row,
+            move || super::playlist_picker::show(&row, vec![id])
+        )),
+    );
+    menu.append(
+        Some(&gettext("Add to _Playlist…")),
+        Some("song.add-to-playlist"),
+    );
+    if queued.is_some() {
+        menu.append(Some(&gettext("_Remove from Queue")), Some("song.remove"));
+    }
+    row.insert_action_group("song", Some(&actions));
+    if let Some(button) = button {
+        button.set_menu_model(Some(&menu));
+    }
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(row);
+    popover.set_has_arrow(false);
+    let click = gtk::GestureClick::builder()
+        .button(gdk::BUTTON_SECONDARY)
+        .build();
+    click.connect_pressed(glib::clone!(
+        #[weak]
+        popover,
+        move |_, _, x, y| {
+            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            popover.popup();
+        }
+    ));
+    row.add_controller(click);
+    row.connect_destroy(move |_| popover.unparent());
 }
 
 /// The entry a row shows: rows are in model order.
@@ -622,37 +731,8 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     ));
     line.append(&remove);
 
-    // Right-click: remove.
-    let menu = gtk::gio::Menu::new();
-    menu.append(
-        Some(&gettext("_Remove from Queue")),
-        Some("queue-row.remove"),
-    );
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
-    popover.set_parent(&row);
-    popover.set_has_arrow(false);
-    let actions = gtk::gio::SimpleActionGroup::new();
-    let remove_action = gtk::gio::SimpleAction::new("remove", None);
-    remove_action.connect_activate(glib::clone!(
-        #[weak]
-        player,
-        move |_, _| player.remove_upcoming(offset)
-    ));
-    actions.add_action(&remove_action);
-    row.insert_action_group("queue-row", Some(&actions));
-    let click = gtk::GestureClick::builder()
-        .button(gdk::BUTTON_SECONDARY)
-        .build();
-    click.connect_pressed(glib::clone!(
-        #[weak]
-        popover,
-        move |_, _, x, y| {
-            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-            popover.popup();
-        }
-    ));
-    row.add_controller(click);
-    row.connect_destroy(move |_| popover.unparent());
+    // Right-click: Add to Playlist…, Remove from Queue.
+    song_menu(&row, track, Some(offset), None);
 
     // Drag and drop to reorder (§6.2), within the row's section.
     super::reorder::attach(

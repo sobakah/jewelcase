@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use gatefold_core::db::{SpotifyVersion, Track};
+use gatefold_core::db::{SpotifyVersion, StreamInfo, Track};
 use gatefold_core::library::TrackRecord;
 use gatefold_core::library::tags::TrackTags;
 use gatefold_core::matching::{Confidence, RemoteTrack};
@@ -669,6 +669,42 @@ impl Spotify {
             .stream_uri(track_id)
             .ok()
             .flatten()
+    }
+
+    /// A device's song (shown while it plays on a Spotify device) by its
+    /// URI, `None` for others.
+    pub fn device_song_uri(&self, track_id: i64) -> Option<String> {
+        self.imp().remote.borrow().stand_ins.get(&track_id).cloned()
+    }
+
+    /// The ID a song is kept under (history, playlists): library and
+    /// streamed songs keep theirs; a device's song becomes a streamed one
+    /// (`stream_track`), as its stand-in ID is only a hash of its URI.
+    pub fn durable_id(&self, track: &TrackObject) -> Option<i64> {
+        let Some(uri) = self.device_song_uri(track.id()) else {
+            return Some(track.id());
+        };
+        let tags = &track.track().record.tags;
+        let info = StreamInfo {
+            uri,
+            title: track.title(),
+            artist: tags.artist.clone(),
+            album: tags.album.clone(),
+            duration_ms: tags.duration_ms,
+            isrc: tags.isrc.clone(),
+            image_url: None,
+        };
+        let id = GatefoldApplication::get()
+            .library()
+            .db()?
+            .stream_track_id(&info);
+        match id {
+            Ok(id) => Some(id),
+            Err(err) => {
+                tracing::warn!("Cannot keep the Spotify song: {err}");
+                None
+            }
+        }
     }
 
     /// Downloads Spotify's covers in the background, in the order given
