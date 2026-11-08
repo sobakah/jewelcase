@@ -129,6 +129,14 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           };
         }
 
+        // New versions of Gatefold, Soloist or soloistd (updates.rs).
+        [top]
+        Adw.Banner update_banner {
+          button-label: _("_Details…");
+          action-name: "app.show-update";
+          revealed: false;
+        }
+
         [top]
         Adw.Banner cd_banner {
           title: _("Audio CD detected");

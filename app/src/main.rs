@@ -15,6 +15,7 @@ mod romanizer;
 mod spotify;
 mod theme;
 mod tools;
+mod updates;
 mod widgets;
 mod window;
 

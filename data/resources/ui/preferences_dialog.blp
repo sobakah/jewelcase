@@ -280,6 +280,16 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     }
 
     Adw.PreferencesGroup {
+      title: _("Updates");
+
+      Adw.SwitchRow updates_row {
+        title: _("Check for _Updates");
+        subtitle: _("New versions of Gatefold, Soloist and soloistd, when Gatefold starts and twice a day; installed only when you choose to");
+        use-underline: true;
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: _("Links");
 
       Adw.SwitchRow spotify_app_row {

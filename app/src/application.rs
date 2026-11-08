@@ -186,6 +186,16 @@ impl GatefoldApplication {
                 crate::widgets::statistics::show(app.active_window().as_ref());
             })
             .build();
+        let show_update = gio::ActionEntry::builder("show-update")
+            .activate(|app: &Self, _, _| {
+                if let Some(window) = app
+                    .active_window()
+                    .and_downcast::<crate::window::GatefoldWindow>()
+                {
+                    crate::updates::show_dialog(&window);
+                }
+            })
+            .build();
         let rescan = gio::ActionEntry::builder("rescan")
             .activate(|app: &Self, _, _| app.library().rescan_all())
             .build();
@@ -210,6 +220,7 @@ impl GatefoldApplication {
             shortcuts,
             about,
             statistics,
+            show_update,
             rescan,
             import_cd,
             continue_import,

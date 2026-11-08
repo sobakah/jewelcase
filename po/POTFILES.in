@@ -24,6 +24,7 @@ app/src/spotify/soloist.rs
 app/src/spotify/stream.rs
 app/src/spotify/sync.rs
 app/src/tools.rs
+app/src/updates.rs
 app/src/widgets/album_panel.rs
 app/src/widgets/album_tile.rs
 app/src/widgets/artist_page.rs

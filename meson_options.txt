@@ -11,3 +11,9 @@ option(
   value: false,
   description: 'Build librespot streaming (Cargo feature spotify-stream, CONCEPT.md §9.4)',
 )
+option(
+  'update_check',
+  type: 'boolean',
+  value: true,
+  description: 'Look for new Gatefold releases on GitHub (off for builds that update otherwise, e.g. a Flatpak)',
+)

@@ -44,6 +44,8 @@ mod imp {
         #[template_child]
         pub cd_banner: TemplateChild<adw::Banner>,
         #[template_child]
+        pub update_banner: TemplateChild<adw::Banner>,
+        #[template_child]
         pub unfinished_banner: TemplateChild<adw::Banner>,
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
@@ -1226,6 +1228,7 @@ impl GatefoldWindow {
             ),
         );
         self.update_tool_banners(&tools);
+        crate::updates::start(self);
         // A CD import or lyrembed page needs Gatefold while it runs (its
         // output comes through Gatefold): closing asks first, then stops it
         // cleanly and closes when it's done.
@@ -1281,6 +1284,19 @@ impl GatefoldWindow {
         });
         // Should it hang, Gatefold still closes.
         glib::timeout_add_seconds_local_once(30, close);
+    }
+
+    /// Shows the first update found (`None`: hides the banner).
+    pub fn set_update_banner(&self, title: Option<&str>) {
+        let banner = &self.imp().update_banner;
+        if let Some(title) = title {
+            banner.set_title(title);
+        }
+        banner.set_revealed(title.is_some());
+    }
+
+    pub fn show_toast(&self, message: &str) {
+        imp_toast(self, message);
     }
 
     fn update_tool_banners(&self, tools: &crate::tools::Tools) {

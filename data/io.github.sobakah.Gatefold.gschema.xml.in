@@ -92,6 +92,16 @@
       <summary>Crossfade within albums</summary>
       <description>Off: songs of an album playing in order follow gaplessly.</description>
     </key>
+    <key name="check-updates" type="b">
+      <default>true</default>
+      <summary>Check for updates</summary>
+      <description>When Gatefold starts and twice a day: new Gatefold releases (the RPM build), new Soloist builds and soloistd releases. Nothing is installed without asking.</description>
+    </key>
+    <key name="skipped-updates" type="as">
+      <default>[]</default>
+      <summary>Updates skipped</summary>
+      <description>Updates the user chose to skip, e.g. “gatefold:v0.2.2” or “soloist:&lt;ETag&gt;”; not offered again.</description>
+    </key>
     <key name="statistics-period" type="s">
       <choices>
         <choice value="week"/>
