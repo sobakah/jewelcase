@@ -33,7 +33,7 @@ jobs:
           dnf -y install git make tar xz rpm-build dnf5-plugins
           rust-srpm-macros cargo-rpm-macros
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the build dependencies
         run: dnf -y builddep gatefold.spec
@@ -55,7 +55,7 @@ jobs:
       - name: Build
         run: rpmbuild -ba --define "_topdir $PWD/rpmbuild" gatefold.spec
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gatefold-${{ steps.version.outputs.version }}-rpms
           path: |
@@ -72,12 +72,12 @@ jobs:
     if: github.ref_type == 'tag' || inputs.release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: CHANGELOG.md
           sparse-checkout-cone-mode: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: gatefold-${{ needs.rpm.outputs.version }}-rpms
           path: dist
