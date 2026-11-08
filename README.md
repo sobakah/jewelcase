@@ -2,7 +2,7 @@
 
 A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. Cover art is the main way around your library; lyrics, the queue and details open when you want them. Spotify is optional and stays in its own sections.
 
-**Status:** 0.2.0 is the current pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
+**Status:** 0.2.1 is the current pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
 
 ## Features
 
@@ -35,7 +35,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 Fedora 45: download the RPM from the [releases page](https://github.com/sobakah/gatefold/releases) and install it with
 
 ```sh
-sudo dnf install ./gatefold-0.2.0-1.fc45.x86_64.rpm
+sudo dnf install ./gatefold-0.2.1-1.fc45.x86_64.rpm
 ```
 
 To build the RPM yourself, install the build dependencies (`sudo dnf builddep gatefold.spec`) and run `make rpm`; the packages end up in `rpmbuild/RPMS/`.

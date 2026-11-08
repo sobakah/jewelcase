@@ -48,6 +48,17 @@
   </branding>
 
   <releases>
+    <release version="0.2.1" date="2026-11-08" type="development">
+      <description>
+        <p>Recently played Spotify songs, and adding the playing song to playlists.</p>
+        <ul>
+          <li>Recently Played has the Spotify songs that played in Gatefold, with a menu to queue them again or add them to a playlist</li>
+          <li>Add the playing song to a playlist from the player or the queue</li>
+          <li>Playlists that have a song come first in "Add to Playlist"; choosing one again removes it</li>
+          <li>Song Info lists the playlists that have the song</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-08" type="development">
       <description>
         <p>Spotify playlists you can fully edit, a new search, and lyrics for Spotify songs.</p>

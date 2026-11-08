@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "futures-lite",
@@ -1165,7 +1165,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "bliss-audio",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-lyrics"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "lofty",
  "tempfile",
@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-metadata"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-soloist"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "libc",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-spotify"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.1",
  "rand 0.9.5",
@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-stream"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -1250,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "gatefold-tools"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde_json",
  "tempfile",

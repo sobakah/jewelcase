@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -97,6 +97,13 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sun Nov 08 2026 sobakah - 0.2.1-1
+- Recently Played has the Spotify songs that played in Gatefold, with a
+  menu to queue them again or add them to a playlist
+- "Add to Playlist…" for the playing song (+ next to its title, and in
+  the queue); playlists that have the song come first and choosing one
+  again removes it; Song Info lists them
+
 * Sun Nov 08 2026 sobakah - 0.2.0-1
 - Spotify playlists: reorder and rename from the menu, covers, delete
   or unfollow; safer sending (placed by song, no doubles, locked while
