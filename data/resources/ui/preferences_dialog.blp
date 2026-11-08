@@ -260,6 +260,13 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         use-underline: true;
         sensitive: bind online_row.active;
       }
+
+      Adw.SwitchRow lrclib_row {
+        title: _("_Lyrics for Spotify Songs");
+        subtitle: _("From LRCLIB, for songs that aren’t in your library, while the lyrics are shown");
+        use-underline: true;
+        sensitive: bind online_row.active;
+      }
     }
 
     Adw.PreferencesGroup {

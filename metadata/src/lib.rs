@@ -23,6 +23,9 @@ const MAX_JSON_BYTES: u64 = 4 * 1024 * 1024;
 pub enum Error {
     #[error("network error: {0}")]
     Http(#[from] ureq::Error),
+    /// The service asks to wait (429, `Retry-After`), or is failing (5xx).
+    #[error("the service asks to wait {0:?}")]
+    Busy(Duration),
     #[error("unexpected answer from {0}")]
     Format(&'static str),
 }
@@ -363,6 +366,54 @@ impl Client {
         Ok(parse_release_isrcs(&json))
     }
 
+    /// Lyrics from LRCLIB (`/api/get`: title, artist, album, length in
+    /// seconds). `Ok(None)`: LRCLIB doesn't have the song. A 429 or 5xx
+    /// is `Error::Busy` with how long to wait (`Retry-After`, if given).
+    pub fn lrclib(
+        &self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        duration_s: u64,
+    ) -> Result<Option<OnlineLyrics>> {
+        let mut request = self
+            .agent
+            .get("https://lrclib.net/api/get")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Accept", "application/json")
+            .query("track_name", title)
+            .query("artist_name", artist)
+            .query("duration", duration_s.to_string());
+        if let Some(album) = album.filter(|a| !a.is_empty()) {
+            request = request.query("album_name", album);
+        }
+        let mut response = request.call()?;
+        let status = response.status().as_u16();
+        match status {
+            404 => return Ok(None),
+            429 | 500..=599 => {
+                let wait = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                return Err(Error::Busy(Duration::from_secs(wait)));
+            }
+            200 => {}
+            _ => return Err(Error::Format("LRCLIB")),
+        }
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_JSON_BYTES)
+            .read_to_string()?;
+        let json: Value = serde_json::from_str(&text).map_err(|_| Error::Format("LRCLIB"))?;
+        Ok(Some(parse_lrclib(&json)))
+    }
+
     /// Downloads an image (a portrait candidate).
     pub fn download(&self, url: &str) -> Result<Vec<u8>> {
         let mut response = self.agent.get(url).call()?;
@@ -458,6 +509,23 @@ pub fn artist_from_release(release: &Value, name: &str) -> Option<String> {
 }
 
 /// The single item of a Wikidata search, or None (none, or ambiguous).
+/// Lyrics from an online source (LRCLIB).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OnlineLyrics {
+    /// LRC text with timestamps.
+    pub synced: Option<String>,
+    pub plain: Option<String>,
+    pub instrumental: bool,
+}
+
+pub fn parse_lrclib(json: &Value) -> OnlineLyrics {
+    OnlineLyrics {
+        synced: text(json, "syncedLyrics"),
+        plain: text(json, "plainLyrics"),
+        instrumental: json["instrumental"].as_bool().unwrap_or(false),
+    }
+}
+
 pub fn parse_release_isrcs(release: &Value) -> Vec<(u32, u32, String)> {
     let number = |value: &Value| value.as_u64().and_then(|n| u32::try_from(n).ok());
     let mut isrcs = Vec::new();

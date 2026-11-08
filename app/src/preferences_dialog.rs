@@ -80,6 +80,8 @@ mod imp {
         #[template_child]
         pub deezer_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub lrclib_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub spotify_app_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub analysis_row: TemplateChild<adw::ComboRow>,
@@ -154,6 +156,9 @@ mod imp {
                 .build();
             settings
                 .bind("metadata-deezer", &*self.deezer_row, "active")
+                .build();
+            settings
+                .bind("lyrics-lrclib", &*self.lrclib_row, "active")
                 .build();
             settings
                 .bind("spotify-links-in-app", &*self.spotify_app_row, "active")

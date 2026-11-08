@@ -14,6 +14,8 @@ pub use lrc::Line;
 pub enum Source {
     Sidecar,
     Embedded,
+    /// LRCLIB, for songs that aren't in the library (shown only).
+    Online,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +77,25 @@ pub fn load(path: &Path, title: Option<&str>) -> LyricsState {
         return LyricsState::Lyrics(unsynced(&text, Source::Sidecar));
     }
     LyricsState::None
+}
+
+/// Lyrics from an online source: synced text (LRC) if it has timestamps,
+/// else plain text.
+pub fn from_online(
+    synced_text: Option<&str>,
+    plain: Option<&str>,
+    instrumental: bool,
+) -> LyricsState {
+    if instrumental {
+        return LyricsState::Instrumental;
+    }
+    if let Some(text) = synced_text.filter(|t| lrc::has_timestamps(t)) {
+        return LyricsState::Lyrics(synced(text, None, Source::Online));
+    }
+    match plain.filter(|t| !t.trim().is_empty()) {
+        Some(text) => LyricsState::Lyrics(unsynced(text, Source::Online)),
+        None => LyricsState::None,
+    }
 }
 
 fn synced(text: &str, romanized: Option<&str>, source: Source) -> Lyrics {
@@ -166,5 +187,25 @@ mod tests {
         assert!(!lyrics.synced);
         assert_eq!(lyrics.lines.len(), 2);
         assert_eq!(load(&song, Some("Song (Inst.)")), LyricsState::Instrumental);
+    }
+
+    #[test]
+    fn online_lyrics_prefer_synced_text() {
+        let LyricsState::Lyrics(lyrics) = from_online(
+            Some("[00:01.00]Hello\n[00:03.00]World"),
+            Some("Hello\nWorld"),
+            false,
+        ) else {
+            panic!("no lyrics");
+        };
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.source, Source::Online);
+        assert_eq!(lyrics.lines.len(), 2);
+        let LyricsState::Lyrics(plain) = from_online(None, Some("Hello"), false) else {
+            panic!("no lyrics");
+        };
+        assert!(!plain.synced);
+        assert_eq!(from_online(None, None, true), LyricsState::Instrumental);
+        assert_eq!(from_online(Some(""), Some("  "), false), LyricsState::None);
     }
 }

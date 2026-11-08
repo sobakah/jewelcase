@@ -45,6 +45,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/020_musicbrainz_isrcs.sql")),
     M::up(include_str!("db/021_ctime.sql")),
     M::up(include_str!("db/022_playlist_search_rowids.sql")),
+    M::up(include_str!("db/023_lrclib.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -205,6 +206,16 @@ impl SearchResults {
 }
 
 /// A file found by the scanner, with its stat data and tags.
+/// Lyrics LRCLIB gave for a Spotify song, or that it had none.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OnlineLyricsRow {
+    pub checked: i64,
+    pub found: bool,
+    pub synced: Option<String>,
+    pub plain: Option<String>,
+    pub instrumental: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ScannedFile {
     pub path: PathBuf,
@@ -375,6 +386,44 @@ impl Database {
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Cached online lyrics of a Spotify song: (checked, found, synced,
+    /// plain, instrumental).
+    pub fn online_lyrics(&self, uri: &str) -> Result<Option<OnlineLyricsRow>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT checked, found, synced, plain, instrumental FROM online_lyrics
+                 WHERE uri = ?1",
+                [uri],
+                |row| {
+                    Ok(OnlineLyricsRow {
+                        checked: row.get(0)?,
+                        found: row.get(1)?,
+                        synced: row.get(2)?,
+                        plain: row.get(3)?,
+                        instrumental: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn set_online_lyrics(&mut self, uri: &str, row: &OnlineLyricsRow) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO online_lyrics (uri, checked, found, synced, plain, instrumental)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uri,
+                row.checked,
+                row.found,
+                row.synced,
+                row.plain,
+                row.instrumental
+            ],
+        )?;
         Ok(())
     }
 

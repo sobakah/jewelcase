@@ -5,6 +5,7 @@ mod covers;
 mod format;
 mod library;
 mod library_folders;
+mod lrclib;
 mod metadata;
 mod mpris;
 mod objects;

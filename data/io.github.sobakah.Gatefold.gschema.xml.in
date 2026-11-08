@@ -146,6 +146,11 @@
       <default>true</default>
       <summary>Artist photos from Deezer</summary>
     </key>
+    <key name="lyrics-lrclib" type="b">
+      <default>true</default>
+      <summary>Lyrics for Spotify songs from LRCLIB</summary>
+      <description>For songs that aren't in the library, while the lyrics are shown; with online lookups on.</description>
+    </key>
     <key name="lyrembed-path" type="s">
       <default>""</default>
       <summary>lyrembed program</summary>

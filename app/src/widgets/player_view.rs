@@ -629,8 +629,10 @@ impl PlayerView {
             }
         }
         imp.seek.set_sensitive(track.is_some());
-        // Spotify songs not in the library have no lyrics (remote mode).
-        let stand_in = track.as_ref().is_some_and(TrackObject::is_stand_in);
+        // Spotify songs not in the library have lyrics only from LRCLIB
+        // (when it's on in Preferences).
+        let stand_in =
+            track.as_ref().is_some_and(TrackObject::is_stand_in) && !crate::lrclib::enabled();
         imp.lyrics_button.set_sensitive(!stand_in);
         imp.lyrics_button.set_tooltip_text(Some(&if stand_in {
             gettext("No lyrics for songs that aren't in your library")

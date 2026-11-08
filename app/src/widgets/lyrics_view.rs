@@ -54,6 +54,9 @@ mod imp {
         /// Before a late first line: three dots that fill over its last
         /// three seconds, and the time it starts.
         pub count_in: RefCell<Option<(u64, gtk::Box)>>,
+        /// A Spotify song's lyrics are to be asked for once the view shows
+        /// (LRCLIB is only asked while the lyrics are on screen).
+        pub online_pending: Cell<bool>,
     }
 
     impl Default for LyricsView {
@@ -93,6 +96,7 @@ mod imp {
                     .halign(gtk::Align::Center)
                     .build(),
                 count_in: RefCell::default(),
+                online_pending: Cell::default(),
             }
         }
     }
@@ -128,6 +132,14 @@ glib::wrapper! {
 impl LyricsView {
     fn setup(&self) {
         let imp = self.imp();
+        self.connect_map(|view| {
+            if view.imp().online_pending.take()
+                && let Some(track) = GatefoldApplication::get().player().current_track()
+                && Some(track.id()) == view.imp().track_id.get()
+            {
+                view.load_online(track);
+            }
+        });
         let clamp = adw::Clamp::builder()
             .maximum_size(640)
             .child(&imp.lines_box)
@@ -288,7 +300,22 @@ impl LyricsView {
             self.show_status("gatefold-lyrics-symbolic", &gettext("No Lyrics"), None);
             return;
         };
-        // Spotify gives apps no lyrics; songs from the library have theirs.
+        imp.online_pending.set(false);
+        // Spotify gives apps no lyrics; LRCLIB may have them (Preferences).
+        if track.is_stand_in() && crate::lrclib::enabled() {
+            imp.status_actions.set_visible(false);
+            self.show_status(
+                "gatefold-lyrics-symbolic",
+                &gettext("Looking for Lyrics…"),
+                Some(&gettext("On LRCLIB")),
+            );
+            if self.is_mapped() {
+                self.load_online(track);
+            } else {
+                imp.online_pending.set(true);
+            }
+            return;
+        }
         if track.is_stand_in() {
             imp.status_actions.set_visible(false);
             self.show_status(
@@ -311,6 +338,34 @@ impl LyricsView {
                 // The track may have changed while loading.
                 if view.imp().track_id.get() == id {
                     view.show_lyrics(state);
+                }
+            }
+        ));
+    }
+
+    /// A Spotify song's lyrics from LRCLIB.
+    fn load_online(&self, track: TrackObject) {
+        let id = Some(track.id());
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            async move {
+                let state = crate::lrclib::lyrics(&track).await;
+                if view.imp().track_id.get() != id {
+                    return;
+                }
+                match state {
+                    Some(LyricsState::None) => view.show_status(
+                        "folder-remote-symbolic",
+                        &gettext("No Lyrics for This Song"),
+                        Some(&gettext("LRCLIB doesn't have lyrics for it")),
+                    ),
+                    Some(state) => view.show_lyrics(state),
+                    None => view.show_status(
+                        "folder-remote-symbolic",
+                        &gettext("No Lyrics for This Song"),
+                        Some(&gettext("LRCLIB can't be asked right now")),
+                    ),
                 }
             }
         ));
