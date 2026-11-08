@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use rusqlite_migration::{M, Migrations};
 
@@ -579,82 +580,154 @@ impl Database {
     /// Replaces the album and artist tables with freshly grouped data.
     /// Albums and artists keep their ID while their identity key stays the
     /// same; artists keep their online metadata.
-    pub fn replace_library(&mut self, albums: &[AlbumInfo], artists: &[ArtistInfo]) -> Result<()> {
+    /// Returns how many albums, song links and artists it wrote.
+    pub fn replace_library(
+        &mut self,
+        albums: &[AlbumInfo],
+        artists: &[ArtistInfo],
+    ) -> Result<(usize, usize, usize)> {
+        // Everything is grouped afresh, but only what differs is written:
+        // after a scan that found one new CD, the transaction is short (the
+        // main thread may be waiting to write, e.g. the play history).
         let tx = self.conn.transaction()?;
         let mut album_ids: HashMap<&str, i64> = HashMap::new();
         let mut artist_ids = HashSet::new();
+        let mut written = (0usize, 0usize, 0usize);
         {
+            // What's there: albums by key (id and stored values), the
+            // songs' album links, the artists by key.
+            let mut stored_albums: HashMap<String, (i64, Vec<Value>)> = HashMap::new();
+            {
+                let mut stmt = tx.prepare(&format!("SELECT id, key, {ALBUM_STORED} FROM album"))?;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let values = (2..2 + ALBUM_STORED_COUNT)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    stored_albums.insert(row.get(1)?, (row.get(0)?, values));
+                }
+            }
+            let stored_links: HashMap<i64, AlbumLink> = {
+                let mut stmt =
+                    tx.prepare("SELECT id, album_id, album_position, album_disc FROM track")?;
+                stmt.query_map([], |row| {
+                    Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?)))
+                })?
+                .collect::<rusqlite::Result<_>>()?
+            };
             let mut upsert = tx.prepare_cached(UPSERT_ALBUM)?;
             let mut link = tx.prepare_cached(
                 "UPDATE track SET album_id = ?1, album_position = ?3, album_disc = ?4 WHERE id = ?2",
             )?;
             for album in albums {
-                let id: i64 = upsert.query_row(
-                    params![
-                        album.key,
-                        album.group_key,
-                        album.title,
-                        album.sort_title,
-                        album.edition,
-                        album.artist_credit,
-                        album.artist_sort,
-                        album.year,
-                        album.release_type.as_str(),
-                        album.soundtrack,
-                        album.compilation,
-                        album.mb_album_id,
-                        album.mb_release_group_id,
-                        album.track_ids.len() as i64,
-                        album.duration_ms as i64,
-                        album.cover_key,
-                        album.added,
-                    ],
-                    |row| row.get(0),
-                )?;
+                let values = album_values(album)?;
+                let id = match stored_albums.get(&album.key) {
+                    Some((id, stored)) if *stored == values => *id,
+                    _ => {
+                        written.0 += 1;
+                        let mut params: Vec<Value> = vec![Value::Text(album.key.clone())];
+                        params.extend(values);
+                        upsert.query_row(rusqlite::params_from_iter(params), |row| row.get(0))?
+                    }
+                };
                 album_ids.insert(&album.key, id);
                 for (position, track_id) in album.track_ids.iter().enumerate() {
-                    let disc = album.track_discs.get(position).copied();
-                    link.execute(params![id, track_id, position as i64, disc])?;
+                    let disc = album.track_discs.get(position).copied().map(i64::from);
+                    let wanted = (Some(id), Some(position as i64), disc);
+                    if stored_links.get(track_id) != Some(&wanted) {
+                        written.1 += 1;
+                        link.execute(params![id, track_id, position as i64, disc])?;
+                    }
                 }
             }
 
-            tx.execute("DELETE FROM album_artist", [])?;
-            tx.execute("DELETE FROM track_artist", [])?;
+            let stored_artists: HashMap<String, StoredArtist> = {
+                let mut stmt = tx.prepare("SELECT key, id, name, sort_name, mbid FROM artist")?;
+                stmt.query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        (row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?),
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?
+            };
             let mut upsert_artist = tx.prepare_cached(UPSERT_ARTIST)?;
-            let mut album_artist = tx.prepare_cached(
-                "INSERT OR IGNORE INTO album_artist (album_id, artist_id, role, position)
-                 VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            let mut track_artist = tx.prepare_cached(
-                "INSERT OR IGNORE INTO track_artist (track_id, artist_id) VALUES (?1, ?2)",
-            )?;
+            // The wanted links: album → (artist, role, position), song → artists.
+            let mut album_links: HashMap<i64, Vec<(i64, String, i64)>> = HashMap::new();
+            let mut track_links: HashMap<i64, Vec<i64>> = HashMap::new();
             for artist in artists {
-                let id: i64 = upsert_artist.query_row(
-                    params![artist.key, artist.name, artist.sort_name, artist.mbid],
-                    |row| row.get(0),
-                )?;
+                let id = match stored_artists.get(&artist.key) {
+                    Some((id, name, sort, mbid))
+                        if name.as_deref() == Some(artist.name.as_str())
+                            && sort.as_deref() == Some(artist.sort_name.as_str())
+                            && *mbid == artist.mbid =>
+                    {
+                        *id
+                    }
+                    _ => {
+                        written.2 += 1;
+                        upsert_artist.query_row(
+                            params![artist.key, artist.name, artist.sort_name, artist.mbid],
+                            |row| row.get(0),
+                        )?
+                    }
+                };
                 artist_ids.insert(id);
                 for (album_key, role, position) in &artist.albums {
                     if let Some(album_id) = album_ids.get(album_key.as_str()) {
-                        album_artist.execute(params![
-                            album_id,
+                        album_links.entry(*album_id).or_default().push((
                             id,
-                            role.as_str(),
-                            *position as i64
-                        ])?;
+                            role.as_str().to_owned(),
+                            *position as i64,
+                        ));
                     }
                 }
                 for track_id in &artist.appears_on {
-                    track_artist.execute(params![track_id, id])?;
+                    track_links.entry(*track_id).or_default().push(id);
                 }
             }
+            sync_links(
+                &tx,
+                "SELECT album_id, artist_id, role, position FROM album_artist",
+                |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?))),
+                album_links,
+                "DELETE FROM album_artist WHERE album_id = ?1",
+                |tx, album_id, (artist_id, role, position): &(i64, String, i64)| {
+                    tx.prepare_cached(
+                        "INSERT OR IGNORE INTO album_artist (album_id, artist_id, role, position)
+                         VALUES (?1, ?2, ?3, ?4)",
+                    )?
+                    .execute(params![album_id, artist_id, role, position])
+                    .map(drop)
+                },
+            )?;
+            sync_links(
+                &tx,
+                "SELECT track_id, artist_id FROM track_artist",
+                |row| Ok((row.get(0)?, row.get(1)?)),
+                track_links,
+                "DELETE FROM track_artist WHERE track_id = ?1",
+                |tx, track_id, artist_id: &i64| {
+                    tx.prepare_cached(
+                        "INSERT OR IGNORE INTO track_artist (track_id, artist_id) VALUES (?1, ?2)",
+                    )?
+                    .execute(params![track_id, artist_id])
+                    .map(drop)
+                },
+            )?;
         }
         let kept: HashSet<i64> = album_ids.into_values().collect();
         delete_except(&tx, "album", &kept)?;
         carry_artist_data(&tx, &artist_ids)?;
         delete_except(&tx, "artist", &artist_ids)?;
         tx.commit()?;
-        Ok(())
+        tracing::debug!(
+            "Library written: {} albums, {} song links, {} artists changed",
+            written.0,
+            written.1,
+            written.2
+        );
+        Ok(written)
     }
 
     /// For each cover key, a track that has that cover.
@@ -1246,61 +1319,112 @@ impl Database {
 
     /// Rebuilds the search index after a scan. Artist and album-artist
     /// names include their lyrembed alias spellings.
-    pub fn rebuild_search(&mut self, aliases: &Aliases) -> Result<()> {
+    pub fn rebuild_search(&mut self, aliases: &Aliases) -> Result<usize> {
+        // The rows as they should be, compared with what's there: only
+        // changed ones are written (the index is rewritten after every scan
+        // that changed something).
         let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM search", [])?;
+        let mut wanted: HashMap<(&'static str, i64), String> = HashMap::new();
         {
-            let mut insert =
-                tx.prepare_cached("INSERT INTO search (kind, ref_id, text) VALUES (?1, ?2, ?3)")?;
-            let artists: Vec<(i64, String)> = {
-                let mut stmt = tx.prepare("SELECT id, name FROM artist")?;
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect::<rusqlite::Result<_>>()?
-            };
-            for (id, name) in artists {
-                insert.execute(params!["artist", id, aliases.spellings(&name).join(" · ")])?;
+            let mut stmt = tx.prepare("SELECT id, name FROM artist")?;
+            for row in stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })? {
+                let (id, name) = row?;
+                wanted.insert(("artist", id), aliases.spellings(&name).join(" · "));
             }
-            let albums: Vec<(i64, String, Option<String>, String)> = {
-                let mut stmt = tx.prepare("SELECT id, title, edition, artist_credit FROM album")?;
-                stmt.query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })?
-                .collect::<rusqlite::Result<_>>()?
-            };
-            for (id, title, edition, credit) in albums {
+            let mut stmt = tx.prepare("SELECT id, title, edition, artist_credit FROM album")?;
+            let albums = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in albums {
+                let (id, title, edition, credit) = row?;
                 let text = format!(
                     "{title} · {} · {}",
                     edition.unwrap_or_default(),
                     aliases.spellings(&credit).join(" · ")
                 );
-                insert.execute(params!["album", id, text])?;
+                wanted.insert(("album", id), text);
             }
-            let tracks: Vec<(i64, String)> = {
-                let mut stmt = tx.prepare(
-                    "SELECT t.id, COALESCE(t.title, '') || ' · ' || COALESCE(t.artist, '') || ' · '
-                       || COALESCE(a.title, '') || ' · ' || COALESCE(t.composer, '')
-                     FROM track t LEFT JOIN album a ON a.id = t.album_id",
-                )?;
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect::<rusqlite::Result<_>>()?
-            };
-            for (id, text) in tracks {
-                insert.execute(params!["track", id, text])?;
-            }
-            let playlists: Vec<(i64, String)> = {
-                let mut stmt = tx.prepare("SELECT id, name FROM playlist")?;
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect::<rusqlite::Result<_>>()?
-            };
-            let mut insert_playlist = tx.prepare_cached(
-                "INSERT INTO search (rowid, kind, ref_id, text) VALUES (?1, 'playlist', ?2, ?3)",
+            let mut stmt = tx.prepare(
+                "SELECT t.id, COALESCE(t.title, '') || ' · ' || COALESCE(t.artist, '') || ' · '
+                   || COALESCE(a.title, '') || ' · ' || COALESCE(t.composer, '')
+                 FROM track t LEFT JOIN album a ON a.id = t.album_id",
             )?;
-            for (id, name) in playlists {
-                insert_playlist.execute(params![playlist_search_row(id), id, name])?;
+            for row in stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })? {
+                let (id, text) = row?;
+                wanted.insert(("track", id), text);
             }
         }
+        let mut changed = 0;
+        {
+            // Artists, albums and songs; playlists keep rows of their own
+            // (playlist_search_row), kept up to date as they change.
+            let mut stored: Vec<(i64, String, i64, String)> = Vec::new();
+            {
+                let mut stmt = tx.prepare(
+                    "SELECT rowid, kind, ref_id, text FROM search WHERE kind != 'playlist'",
+                )?;
+                for row in stmt.query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })? {
+                    stored.push(row?);
+                }
+            }
+            let mut delete = tx.prepare_cached("DELETE FROM search WHERE rowid = ?1")?;
+            for (rowid, kind, ref_id, text) in &stored {
+                let key = match kind.as_str() {
+                    "artist" => ("artist", *ref_id),
+                    "album" => ("album", *ref_id),
+                    _ => ("track", *ref_id),
+                };
+                if wanted.get(&key) == Some(text) {
+                    wanted.remove(&key);
+                } else {
+                    delete.execute([rowid])?;
+                    changed += 1;
+                }
+            }
+            // New rows get IDs below the playlists' (an automatic ID would
+            // follow the highest, a playlist's, and could take a future
+            // playlist's place).
+            let first: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(rowid), 0) + 1 FROM search WHERE rowid < ?1",
+                [playlist_search_row(0)],
+                |row| row.get(0),
+            )?;
+            let mut insert = tx.prepare_cached(
+                "INSERT INTO search (rowid, kind, ref_id, text) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut rows: Vec<_> = wanted.into_iter().collect();
+            // Artists, then albums, then songs, each by ID, as before.
+            let order = |kind: &str| match kind {
+                "artist" => 0,
+                "album" => 1,
+                _ => 2,
+            };
+            rows.sort_by_key(|((kind, id), _)| (order(kind), *id));
+            for (rowid, ((kind, id), text)) in (first..).zip(rows) {
+                insert.execute(params![rowid, kind, id, text])?;
+                changed += 1;
+            }
+            // Playlists without a row (the first build).
+            tx.execute(
+                "INSERT INTO search (rowid, kind, ref_id, text)
+                   SELECT ?1 + p.id, 'playlist', p.id, p.name FROM playlist p
+                   WHERE NOT EXISTS (SELECT 1 FROM search s WHERE s.rowid = ?1 + p.id)",
+                [playlist_search_row(0)],
+            )?;
+        }
         tx.commit()?;
-        Ok(())
+        Ok(changed)
     }
 
     fn index_playlist(&mut self, id: i64, name: &str) -> Result<()> {
@@ -2039,6 +2163,91 @@ fn artist(row: &Row) -> rusqlite::Result<Artist> {
 }
 
 /// Deletes rows of `table` whose ID isn't in `keep`.
+/// A song's album, its place in it and its disc, as stored.
+type AlbumLink = (Option<i64>, Option<i64>, Option<i64>);
+/// An artist row as `replace_library` compares it: ID, name, sort name,
+/// MusicBrainz ID.
+type StoredArtist = (i64, Option<String>, Option<String>, Option<String>);
+
+/// The album columns `replace_library` compares, in UPSERT_ALBUM's order
+/// after the key.
+const ALBUM_STORED: &str = "group_key, title, sort_title, edition, artist_credit, artist_sort,
+    year, release_type, soundtrack, compilation, mb_album_id, mb_release_group_id, track_count,
+    duration_ms, cover_key, added";
+const ALBUM_STORED_COUNT: usize = 16;
+
+/// An album's values as they're stored (for comparing, and UPSERT_ALBUM).
+fn album_values(album: &AlbumInfo) -> Result<Vec<Value>> {
+    let values: [&dyn rusqlite::ToSql; ALBUM_STORED_COUNT] = [
+        &album.group_key,
+        &album.title,
+        &album.sort_title,
+        &album.edition,
+        &album.artist_credit,
+        &album.artist_sort,
+        &album.year,
+        &album.release_type.as_str(),
+        &album.soundtrack,
+        &album.compilation,
+        &album.mb_album_id,
+        &album.mb_release_group_id,
+        &(album.track_ids.len() as i64),
+        &(album.duration_ms as i64),
+        &album.cover_key,
+        &album.added,
+    ];
+    values
+        .iter()
+        .map(|value| {
+            Ok(match value.to_sql()? {
+                rusqlite::types::ToSqlOutput::Borrowed(borrowed) => borrowed.into(),
+                rusqlite::types::ToSqlOutput::Owned(owned) => owned,
+                _ => Value::Null,
+            })
+        })
+        .collect()
+}
+
+/// Brings a link table to `wanted` (links by owner: an album's artists, a
+/// song's artists), rewriting only the owners whose links differ.
+fn sync_links<T: PartialEq + Ord + Clone>(
+    tx: &rusqlite::Transaction,
+    select: &str,
+    read: impl FnMut(&Row) -> rusqlite::Result<(i64, T)>,
+    mut wanted: HashMap<i64, Vec<T>>,
+    delete: &str,
+    insert: impl Fn(&rusqlite::Transaction, i64, &T) -> rusqlite::Result<()>,
+) -> Result<()> {
+    let mut stored: HashMap<i64, Vec<T>> = HashMap::new();
+    {
+        let mut stmt = tx.prepare(select)?;
+        for row in stmt.query_map([], read)? {
+            let (owner, link) = row?;
+            stored.entry(owner).or_default().push(link);
+        }
+    }
+    for links in stored.values_mut().chain(wanted.values_mut()) {
+        links.sort();
+        links.dedup();
+    }
+    let mut remove = tx.prepare_cached(delete)?;
+    for owner in stored.keys() {
+        if !wanted.contains_key(owner) {
+            remove.execute([owner])?;
+        }
+    }
+    for (owner, links) in &wanted {
+        if stored.get(owner) == Some(links) {
+            continue;
+        }
+        remove.execute([owner])?;
+        for link in links {
+            insert(tx, *owner, link)?;
+        }
+    }
+    Ok(())
+}
+
 fn delete_except(tx: &rusqlite::Transaction, table: &str, keep: &HashSet<i64>) -> Result<()> {
     let stale: Vec<i64> = {
         let mut stmt = tx.prepare(&format!("SELECT id FROM {table}"))?;
@@ -2438,6 +2647,59 @@ mod tests {
             .map(|i| i.match_state)
             .collect();
         assert_eq!(states, ["local", "local", "unavailable"]);
+    }
+
+    #[test]
+    fn an_unchanged_library_is_not_written_again() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/Adele/25/01.flac", "25", "Hello", 1),
+                file("/m/Adele/25/02.flac", "25", "Send My Love", 2),
+                file("/m/Adele/21/01.flac", "21", "Rolling", 1),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let aliases = Aliases::default();
+        assert!(db.rebuild_search(&aliases).unwrap() > 0);
+        let albums_before = db.albums().unwrap();
+        let regroup = |db: &mut Database| {
+            let tracks = db.all_tracks().unwrap();
+            let albums = group_albums(&tracks);
+            let artists =
+                crate::library::artists::build_artists(&albums, &tracks, &Default::default());
+            db.replace_library(&albums, &artists).unwrap()
+        };
+        // Nothing changed: nothing written, same IDs.
+        assert_eq!(regroup(&mut db), (0, 0, 0));
+        assert_eq!(db.rebuild_search(&aliases).unwrap(), 0);
+        assert_eq!(db.albums().unwrap(), albums_before);
+        // One song renamed: its album (track list unchanged) stays, its
+        // search row is replaced.
+        db.upsert_tracks(&[file("/m/Adele/25/01.flac", "25", "Hello Again", 1)], 2)
+            .unwrap();
+        assert_eq!(regroup(&mut db), (0, 0, 0));
+        assert_eq!(
+            db.rebuild_search(&aliases).unwrap(),
+            2,
+            "one deleted, one added"
+        );
+        assert_eq!(db.search("again", 10).unwrap().tracks.len(), 1);
+        assert!(db.search("hello again", 10).unwrap().albums.is_empty());
+        // A new album: written, the others left alone.
+        db.upsert_tracks(&[file("/m/Adele/30/01.flac", "30", "Easy on Me", 1)], 3)
+            .unwrap();
+        let (albums, links, _) = regroup(&mut db);
+        assert_eq!((albums, links), (1, 1));
+        assert_eq!(db.albums().unwrap().len(), 3);
+        db.rebuild_search(&aliases).unwrap();
+        assert_eq!(db.search("easy", 10).unwrap().tracks.len(), 1);
+        // Playlists keep their rows, also when built for the first time.
+        let mix = db.create_playlist("Mix", 4).unwrap();
+        db.rebuild_search(&aliases).unwrap();
+        assert_eq!(db.search("mix", 10).unwrap().playlists, [mix]);
     }
 
     #[test]

@@ -55,6 +55,35 @@ enum ScanMessage {
     Done(Result<ScanSummary, String>, Aliases),
 }
 
+/// What the grids show, read from the database (on any thread).
+struct LoadedLibrary {
+    albums: Vec<gatefold_core::db::Album>,
+    genres: HashMap<i64, Vec<String>>,
+    barcodes: HashMap<i64, String>,
+    artists: Vec<gatefold_core::db::Artist>,
+    index: gatefold_core::matching::MatchIndex,
+}
+
+/// Reads the library and matches the Spotify playlist entries to it again
+/// (§9.5), in one place for the main thread and a worker.
+fn load_library(db: &mut Database, aliases: &Aliases) -> gatefold_core::db::Result<LoadedLibrary> {
+    let index = gatefold_core::matching::MatchIndex::new(db.match_tracks()?, aliases);
+    if !db.linked_playlists()?.is_empty() {
+        match db.rematch_spotify_items(&index) {
+            Ok(0) => {}
+            Ok(changed) => tracing::info!("{changed} Spotify playlist entries matched again"),
+            Err(err) => tracing::warn!("Cannot match Spotify entries: {err}"),
+        }
+    }
+    Ok(LoadedLibrary {
+        albums: db.albums()?,
+        genres: db.album_genres()?,
+        barcodes: db.album_barcodes()?,
+        artists: db.artists()?,
+        index,
+    })
+}
+
 /// How often the library folders are checked without a watcher event.
 const PERIODIC_SCAN_S: u32 = 30 * 60;
 
@@ -80,6 +109,8 @@ mod imp {
         pub metadata: OnceCell<Metadata>,
         /// ISRCs are being looked up on MusicBrainz.
         pub isrc_lookup: Cell<bool>,
+        /// Counts reloads; an older background reload is dropped.
+        pub reload_generation: Cell<u64>,
         /// Related artists are being asked for on ListenBrainz.
         pub related_lookup: Cell<bool>,
         /// ListenBrainz asked to wait until then.
@@ -298,15 +329,58 @@ impl Library {
     }
 
     /// Reads the albums from the database into the list model.
+    /// Reads the library and shows it (on start, where nothing else runs).
     fn reload(&self) {
-        let albums = match self.db().map(|db| db.albums()) {
-            Some(Ok(albums)) => albums,
-            Some(Err(err)) => {
-                tracing::warn!("Cannot load albums: {err}");
-                return;
-            }
+        let aliases = self.aliases().clone();
+        let loaded = match self.db() {
+            Some(mut db) => load_library(&mut db, &aliases),
             None => return,
         };
+        match loaded {
+            Ok(loaded) => self.show_library(loaded),
+            Err(err) => tracing::warn!("Cannot load the library: {err}"),
+        }
+    }
+
+    /// After a scan: the library is read on a worker thread with its own
+    /// connection (the window doesn't wait for the queries, nor for
+    /// matching Spotify entries again), then shown. A newer reload wins.
+    fn reload_in_background(&self) {
+        let imp = self.imp();
+        let generation = imp.reload_generation.get() + 1;
+        imp.reload_generation.set(generation);
+        let aliases = self.aliases().clone();
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = library)]
+            self,
+            async move {
+                let loaded = gio::spawn_blocking(move || {
+                    let mut db =
+                        Database::open(&config::database_path()).map_err(|e| e.to_string())?;
+                    load_library(&mut db, &aliases).map_err(|e| e.to_string())
+                })
+                .await
+                .unwrap_or_else(|_| Err("the library job failed".into()));
+                if library.imp().reload_generation.get() != generation {
+                    return;
+                }
+                match loaded {
+                    Ok(loaded) => library.show_library(loaded),
+                    Err(err) => tracing::warn!("Cannot load the library: {err}"),
+                }
+            }
+        ));
+    }
+
+    /// Puts what `load_library` read into the grids (main thread).
+    fn show_library(&self, loaded: LoadedLibrary) {
+        let LoadedLibrary {
+            albums,
+            genres,
+            barcodes,
+            artists,
+            index,
+        } = loaded;
         // Group editions, keeping the first-seen order.
         let mut order: Vec<String> = Vec::new();
         let mut groups: HashMap<String, Vec<_>> = HashMap::new();
@@ -328,24 +402,18 @@ impl Library {
                 AlbumObject::new(versions)
             })
             .collect();
-
-        let genres = self
-            .db()
-            .and_then(|db| db.album_genres().ok())
-            .unwrap_or_default();
         self.imp().album_genres.replace(genres);
-        let barcodes = self
-            .db()
-            .and_then(|db| db.album_barcodes().ok())
-            .unwrap_or_default();
         self.imp().album_barcodes.replace(barcodes);
 
         crate::covers::clear();
-        // Songs or aliases changed: matched afresh.
-        self.imp().match_index.replace(None);
+        // Songs or aliases changed: matched afresh (done in load_library).
+        self.imp()
+            .match_index
+            .replace(Some(std::rc::Rc::new(index)));
         self.imp().album_index.replace(None);
-        self.reload_artists();
-        self.rematch_spotify();
+        let artists: Vec<ArtistObject> = artists.into_iter().map(ArtistObject::new).collect();
+        let store = self.artists();
+        store.splice(0, store.n_items(), &artists);
         self.reload_playlists();
         let store = self.albums();
         store.splice(0, store.n_items(), &objects);
@@ -1349,7 +1417,7 @@ impl Library {
                 while let Ok(message) = rx.recv().await {
                     match message {
                         ScanMessage::Progress(ScanProgress::AlbumsReady) => {
-                            library.reload();
+                            library.reload_in_background();
                             reloaded = true;
                         }
                         ScanMessage::Progress(progress) => library.show_progress(progress),
@@ -1409,7 +1477,7 @@ impl Library {
             }
         }
         if changed {
-            self.reload();
+            self.reload_in_background();
         }
         imp.scanning.set(false);
         self.notify_scanning();
