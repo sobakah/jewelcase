@@ -42,8 +42,9 @@ pub enum PlaybackError {
     MissingElement(#[from] gst::glib::BoolError),
 }
 
-/// The URI and queue item uid of the track to play next.
-type NextTrack = Option<(String, u64)>;
+/// The next song's URI, queue entry and gain for songs without
+/// ReplayGain tags (`fallback-gain`, see `set_fallback_gain`).
+type NextTrack = Option<(String, u64, Option<f64>)>;
 
 /// What decides whether the next track may start gaplessly.
 #[derive(Debug, Default)]
@@ -66,6 +67,8 @@ pub struct Player {
     rgvolume: gst::Element,
     next: Arc<Mutex<NextTrack>>,
     gapless: Arc<Mutex<GaplessState>>,
+    /// The gapless next song's gain, until its stream starts.
+    pending_gain: Arc<Mutex<Option<f64>>>,
     pending_seek_ms: Mutex<Option<u64>>,
     replaygain: Mutex<bool>,
 }
@@ -91,6 +94,8 @@ impl Player {
             .and_then(|bin| bin.by_name("rgvolume"))
             .ok_or_else(|| gst::glib::bool_error!("rgvolume"))?;
         prefer_replaygain_tags(&rgvolume);
+        let pending_gain: Arc<Mutex<Option<f64>>> = Arc::default();
+        set_gain_at_stream_start(&rgvolume, pending_gain.clone());
         // Room above the peak for positive gains (the pre-amp, quiet
         // songs); rglimiter keeps the result from clipping.
         rgvolume.set_property("headroom", 6.0f64);
@@ -118,6 +123,7 @@ impl Player {
         let gapless: Arc<Mutex<GaplessState>> = Arc::default();
         let next_slot = next.clone();
         let gapless_state = gapless.clone();
+        let next_gain = pending_gain.clone();
         playbin.connect("about-to-finish", false, move |values| {
             let playbin = values[0].get::<gst::Element>().ok()?;
             let mut state = gapless_state.lock().ok()?;
@@ -126,8 +132,12 @@ impl Player {
                 return None;
             }
             let next = next_slot.lock().ok()?.take();
-            if let Some((uri, uid)) = next {
+            if let Some((uri, uid, gain)) = next {
                 state.current_is_mp4 = is_mp4(&uri);
+                // Set when its stream starts (see set_gain_at_stream_start).
+                if let Ok(mut pending) = next_gain.lock() {
+                    *pending = gain;
+                }
                 playbin.set_property("uri", &uri);
                 let _ = tx.send_blocking(PlayerEvent::NextQueued(uid));
             }
@@ -140,6 +150,7 @@ impl Player {
             rgvolume,
             next,
             gapless,
+            pending_gain,
             pending_seek_ms: Mutex::new(None),
             replaygain: Mutex::new(true),
         };
@@ -159,6 +170,9 @@ impl Player {
     /// Starts `uri` from `start_ms`, playing or paused.
     pub fn load(&self, uri: &str, start_ms: u64, play: bool) {
         self.set_next(None);
+        if let Ok(mut pending) = self.pending_gain.lock() {
+            *pending = None;
+        }
         let _ = self.playbin.set_state(gst::State::Ready);
         let replaygain = self.replaygain.lock().map_or(true, |r| *r);
         let filter = replaygain.then_some(&self.filter);
@@ -229,8 +243,9 @@ impl Player {
             .map(|t| t.mseconds())
     }
 
-    /// The track to start gaplessly when the current one ends.
-    pub fn set_next(&self, next: Option<(String, u64)>) {
+    /// The track to start gaplessly when the current one ends, with its
+    /// fallback gain (set exactly when it starts).
+    pub fn set_next(&self, next: Option<(String, u64, Option<f64>)>) {
         if let Ok(mut slot) = self.next.lock() {
             *slot = next;
         }
@@ -281,6 +296,28 @@ pub fn file_uri(path: &std::path::Path) -> Option<String> {
     gst::glib::filename_to_uri(path, None)
         .ok()
         .map(|u| u.to_string())
+}
+
+/// A gapless next song's fallback gain is set when its stream starts in
+/// rgvolume (streaming thread), before its first sample: set from the main
+/// loop it came a moment late, and a song without tags after a tagged one
+/// started unlevelled and then jumped.
+fn set_gain_at_stream_start(rgvolume: &gst::Element, pending: Arc<Mutex<Option<f64>>>) {
+    let Some(pad) = rgvolume.static_pad("sink") else {
+        return;
+    };
+    pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+        let Some(gst::PadProbeData::Event(event)) = &info.data else {
+            return gst::PadProbeReturn::Ok;
+        };
+        if event.type_() == gst::EventType::StreamStart
+            && let Some(gain) = pending.lock().ok().and_then(|mut p| p.take())
+            && let Some(rgvolume) = pad.parent_element()
+        {
+            rgvolume.set_property("fallback-gain", gain.clamp(-60.0, 60.0));
+        }
+        gst::PadProbeReturn::Ok
+    });
 }
 
 /// rgvolume prefers R128 gain tags over ReplayGain ones. When a file has
@@ -367,5 +404,26 @@ mod tests {
         // Only R128 (Opus): still used, as ReplayGain (+5 dB).
         let r128 = target_gain(&[("r128-track-gain", -16.79)]).unwrap();
         assert!((r128 - -11.79).abs() < 0.01, "{r128}");
+    }
+
+    #[test]
+    fn a_gapless_songs_gain_is_set_when_its_stream_starts() {
+        if gst::init().is_err() {
+            return;
+        }
+        let Ok(rgvolume) = gst::ElementFactory::make("rgvolume").build() else {
+            return;
+        };
+        let pending: Arc<Mutex<Option<f64>>> = Arc::default();
+        set_gain_at_stream_start(&rgvolume, pending.clone());
+        rgvolume.set_property("fallback-gain", -4.0f64);
+        *pending.lock().unwrap() = Some(2.5);
+        assert_eq!(rgvolume.property::<f64>("fallback-gain"), -4.0);
+        rgvolume.set_state(gst::State::Paused).unwrap();
+        let pad = rgvolume.static_pad("sink").unwrap();
+        pad.send_event(gst::event::StreamStart::new("next"));
+        assert_eq!(rgvolume.property::<f64>("fallback-gain"), 2.5);
+        assert_eq!(*pending.lock().unwrap(), None, "used once");
+        let _ = rgvolume.set_state(gst::State::Null);
     }
 }

@@ -1585,8 +1585,14 @@ impl Player {
             engine.set_next(None);
             return;
         }
-        let next = next
-            .and_then(|(track, uid)| Some((playback::file_uri(&track.track().record.path)?, uid)));
+        let next = next.and_then(|(track, uid)| {
+            let gain = self.fallback_gain(track.id());
+            Some((
+                playback::file_uri(&track.track().record.path)?,
+                uid,
+                Some(gain),
+            ))
+        });
         engine.set_next(next);
     }
 
@@ -1727,6 +1733,12 @@ impl Player {
     /// calls for (the analysis, §7), so it's as loud as tagged songs and
     /// Spotify; unmeasured ones play as they are.
     fn apply_measured_gain(&self, engine: &playback::Player, track_id: i64) {
+        engine.set_fallback_gain(self.fallback_gain(track_id));
+    }
+
+    /// The gain for a song without ReplayGain tags: its measured one, or
+    /// minus the pre-amp to play it as it is.
+    fn fallback_gain(&self, track_id: i64) -> f64 {
         let preamp = self.settings().double("replaygain-preamp");
         let measured = (track_id > 0)
             .then(|| self.library().db())
@@ -1735,7 +1747,7 @@ impl Player {
         if let Some(gain) = measured {
             tracing::debug!("Measured gain for track {track_id}: {gain:.1} dB");
         }
-        engine.set_fallback_gain(measured.unwrap_or(-preamp));
+        measured.unwrap_or(-preamp)
     }
 
     fn set_current_track(&self, track: Option<TrackObject>) {

@@ -26,7 +26,7 @@ fn main() {
     if std::env::var_os("NO_SEEK").is_none() {
         player.seek(duration.saturating_sub(2000));
     }
-    player.set_next(Some((b, 1)));
+    player.set_next(Some((b, 1, None)));
     let steps: usize = std::env::var("STEPS")
         .ok()
         .and_then(|s| s.parse().ok())
