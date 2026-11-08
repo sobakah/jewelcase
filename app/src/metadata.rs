@@ -69,6 +69,12 @@ pub enum Job {
         release: String,
         reply: async_channel::Sender<Result<usize, String>>,
     },
+    /// Related artists from ListenBrainz, for smart shuffle (§7); replies
+    /// how many, or how long to wait.
+    RelatedArtists {
+        mbid: String,
+        reply: async_channel::Sender<Result<usize, RelatedError>>,
+    },
     /// An image file the user picked as the portrait.
     SetCustom {
         artist_id: i64,
@@ -83,11 +89,21 @@ fn sort_job(
     background: &mut std::collections::VecDeque<Job>,
 ) {
     match &job {
-        Job::Lookup { urgent: false, .. } | Job::ReleaseIsrcs { .. } => {
+        Job::Lookup { urgent: false, .. }
+        | Job::ReleaseIsrcs { .. }
+        | Job::RelatedArtists { .. } => {
             background.push_back(job);
         }
         _ => urgent.push_back(job),
     }
+}
+
+/// Why related artists couldn't be asked for.
+#[derive(Debug)]
+pub enum RelatedError {
+    /// ListenBrainz asks to wait (this long, if it said).
+    Busy(std::time::Duration),
+    Other(String),
 }
 
 /// Sent to the main thread when an artist's data changed.
@@ -234,6 +250,18 @@ impl Worker {
                         .map(|()| 0)
                         .map_err(|e| e.to_string()),
                     Err(err) => Err(err.to_string()),
+                };
+                let _ = reply.send_blocking(result);
+            }
+            Job::RelatedArtists { mbid, reply } => {
+                let result = match self.client.similar_artists(&mbid) {
+                    Ok(related) => self
+                        .db
+                        .set_related_artists(&mbid, &related, now())
+                        .map(|()| related.len())
+                        .map_err(|e| RelatedError::Other(e.to_string())),
+                    Err(gatefold_metadata::Error::Busy(wait)) => Err(RelatedError::Busy(wait)),
+                    Err(err) => Err(RelatedError::Other(err.to_string())),
                 };
                 let _ = reply.send_blocking(result);
             }

@@ -80,6 +80,10 @@ mod imp {
         pub metadata: OnceCell<Metadata>,
         /// ISRCs are being looked up on MusicBrainz.
         pub isrc_lookup: Cell<bool>,
+        /// Related artists are being asked for on ListenBrainz.
+        pub related_lookup: Cell<bool>,
+        /// ListenBrainz asked to wait until then.
+        pub related_paused: Cell<Option<std::time::Instant>>,
         pub lookups: RefCell<HashSet<i64>>,
         /// Each album's genres, most common first (filter, album panel).
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
@@ -652,6 +656,72 @@ impl Library {
                     library.imp().match_index.replace(None);
                     library.rematch_spotify();
                     library.reload_playlists();
+                }
+            }
+        ));
+    }
+
+    /// Related artists from ListenBrainz for the library's artists (by
+    /// MusicBrainz ID), for smart shuffle's "same artist" (§7). With
+    /// online lookups and that criterion on; one artist at a time (one
+    /// request a second at most), each again after 90 days; after
+    /// ListenBrainz asks to wait, an hour at least. Smart shuffle uses
+    /// them once they're in.
+    pub fn lookup_related_artists(&self) {
+        const AGAIN: i64 = 90 * 24 * 3600;
+        const BUSY_PAUSE: std::time::Duration = std::time::Duration::from_secs(3600);
+        let imp = self.imp();
+        if !self.online_enabled()
+            || !self.settings().boolean("mix-artist")
+            || imp.related_lookup.get()
+            || imp
+                .related_paused
+                .get()
+                .is_some_and(|until| std::time::Instant::now() < until)
+        {
+            return;
+        }
+        let artists = self
+            .db()
+            .and_then(|db| db.artists_without_related(metadata::now() - AGAIN).ok())
+            .unwrap_or_default();
+        if artists.is_empty() {
+            return;
+        }
+        imp.related_lookup.set(true);
+        tracing::info!(
+            "Asking ListenBrainz for artists related to {}",
+            artists.len()
+        );
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = library)]
+            self,
+            async move {
+                let mut found = 0;
+                for mbid in artists {
+                    let (reply, answer) = async_channel::bounded(1);
+                    library.send_job(Job::RelatedArtists { mbid, reply });
+                    match answer.recv().await {
+                        Ok(Ok(count)) => found += count,
+                        Ok(Err(metadata::RelatedError::Busy(wait))) => {
+                            tracing::info!("ListenBrainz asks to wait; not asking for a while");
+                            library
+                                .imp()
+                                .related_paused
+                                .set(Some(std::time::Instant::now() + wait.max(BUSY_PAUSE)));
+                            break;
+                        }
+                        Ok(Err(metadata::RelatedError::Other(err))) => {
+                            tracing::info!("Cannot ask ListenBrainz: {err}");
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                library.imp().related_lookup.set(false);
+                tracing::info!("ListenBrainz gave {found} related artists");
+                if found > 0 {
+                    GatefoldApplication::get().player().similarity_changed();
                 }
             }
         ));

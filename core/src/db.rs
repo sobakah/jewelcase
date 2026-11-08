@@ -46,6 +46,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/021_ctime.sql")),
     M::up(include_str!("db/022_playlist_search_rowids.sql")),
     M::up(include_str!("db/023_lrclib.sql")),
+    M::up(include_str!("db/024_similar_artists.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -1613,6 +1614,77 @@ impl Database {
         )?
         .collect::<rusqlite::Result<_>>()
         .map_err(Into::into)
+    }
+
+    /// Library artists' MusicBrainz IDs whose related artists weren't asked
+    /// for since `since`.
+    pub fn artists_without_related(&self, since: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT coalesce(a.mbid, a.lookup_mbid) FROM artist a
+             WHERE coalesce(a.mbid, a.lookup_mbid) IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM similar_artist_checked c
+                               WHERE c.artist_mbid = coalesce(a.mbid, a.lookup_mbid)
+                                 AND c.checked >= ?1)
+             ORDER BY 1",
+        )?;
+        let rows = stmt.query_map([since], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// An artist's related artists: (MusicBrainz ID, score).
+    pub fn set_related_artists(
+        &mut self,
+        mbid: &str,
+        related: &[(String, i64)],
+        now: i64,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM similar_artist WHERE artist_mbid = ?1", [mbid])?;
+        for (other, score) in related {
+            tx.execute(
+                "INSERT OR REPLACE INTO similar_artist (artist_mbid, similar_mbid, score)
+                 VALUES (?1, ?2, ?3)",
+                params![mbid, other, score],
+            )?;
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO similar_artist_checked (artist_mbid, checked) VALUES (?1, ?2)",
+            params![mbid, now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Related artists among the library's, by lowercase name, with how
+    /// close they are (score over the artist's best score).
+    pub fn related_artists(&self) -> Result<crate::similar::RelatedArtists> {
+        let mut stmt = self.conn.prepare(
+            "SELECT lower(a.name), lower(b.name), s.score,
+                    (SELECT max(score) FROM similar_artist m WHERE m.artist_mbid = s.artist_mbid)
+             FROM similar_artist s
+             JOIN artist a ON coalesce(a.mbid, a.lookup_mbid) = s.artist_mbid
+             JOIN artist b ON coalesce(b.mbid, b.lookup_mbid) = s.similar_mbid
+             WHERE a.id != b.id",
+        )?;
+        let mut related = crate::similar::RelatedArtists::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (artist, other, score, best) = row?;
+            let closeness = if best > 0 {
+                score as f64 / best as f64
+            } else {
+                0.0
+            };
+            related.entry(artist).or_default().insert(other, closeness);
+        }
+        Ok(related)
     }
 
     /// Songs played since `since` (unix seconds), to keep them out of mixes.

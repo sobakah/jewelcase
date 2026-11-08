@@ -15,6 +15,8 @@ use serde_json::Value;
 const DEEZER_COMPARED: usize = 3;
 /// MusicBrainz allows one request per second.
 const MUSICBRAINZ_INTERVAL: Duration = Duration::from_millis(1100);
+/// ListenBrainz asks for at most one request a second.
+const LISTENBRAINZ_INTERVAL: Duration = Duration::from_millis(1100);
 /// Downloads larger than this are refused.
 const MAX_IMAGE_BYTES: u64 = 15 * 1024 * 1024;
 const MAX_JSON_BYTES: u64 = 4 * 1024 * 1024;
@@ -116,6 +118,7 @@ pub struct ArtistInfo {
 pub struct Client {
     agent: ureq::Agent,
     last_musicbrainz: Mutex<Option<Instant>>,
+    last_listenbrainz: Mutex<Option<Instant>>,
 }
 
 impl Client {
@@ -131,6 +134,7 @@ impl Client {
         Self {
             agent,
             last_musicbrainz: Mutex::new(None),
+            last_listenbrainz: Mutex::new(None),
         }
     }
 
@@ -366,6 +370,59 @@ impl Client {
         Ok(parse_release_isrcs(&json))
     }
 
+    /// Related artists from ListenBrainz' similar-artists dataset (labs
+    /// API, no account): (MusicBrainz ID, score), the closest first. At
+    /// most one request a second, as ListenBrainz asks; a 429 or 5xx is
+    /// `Error::Busy` (with `X-RateLimit-Reset-In` if given).
+    pub fn similar_artists(&self, mbid: &str) -> Result<Vec<(String, i64)>> {
+        const ALGORITHM: &str = "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30";
+        let mut last = self
+            .last_listenbrainz
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(previous) = *last {
+            std::thread::sleep(LISTENBRAINZ_INTERVAL.saturating_sub(previous.elapsed()));
+        }
+        let result = self
+            .agent
+            .get("https://labs.api.listenbrainz.org/similar-artists/json")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Accept", "application/json")
+            .query("artist_mbids", mbid)
+            .query("algorithm", ALGORITHM)
+            .call();
+        *last = Some(Instant::now());
+        let mut response = result?;
+        match response.status().as_u16() {
+            200 => {}
+            // Unknown to ListenBrainz.
+            400 | 404 => return Ok(Vec::new()),
+            429 | 500..=599 => {
+                let wait = ["x-ratelimit-reset-in", "retry-after"]
+                    .iter()
+                    .find_map(|name| {
+                        response
+                            .headers()
+                            .get(*name)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.trim().parse::<u64>().ok())
+                    })
+                    .unwrap_or(0);
+                return Err(Error::Busy(Duration::from_secs(wait)));
+            }
+            _ => return Err(Error::Format("ListenBrainz")),
+        }
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_JSON_BYTES)
+            .read_to_string()?;
+        let json: Value = serde_json::from_str(&text).map_err(|_| Error::Format("ListenBrainz"))?;
+        Ok(parse_similar_artists(&json, mbid))
+    }
+
     /// Lyrics from LRCLIB (`/api/get`: title, artist, album, length in
     /// seconds). `Ok(None)`: LRCLIB doesn't have the song. A 429 or 5xx
     /// is `Error::Busy` with how long to wait (`Retry-After`, if given).
@@ -509,6 +566,27 @@ pub fn artist_from_release(release: &Value, name: &str) -> Option<String> {
 }
 
 /// The single item of a Wikidata search, or None (none, or ambiguous).
+/// The similar artists ListenBrainz lists for `mbid` (its own entry left
+/// out), closest first.
+pub fn parse_similar_artists(json: &Value, mbid: &str) -> Vec<(String, i64)> {
+    let mut list: Vec<(String, i64)> = json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            entry["reference_mbid"]
+                .as_str()
+                .is_none_or(|reference| reference == mbid)
+        })
+        .filter_map(|entry| {
+            let id = entry["artist_mbid"].as_str()?;
+            (id != mbid).then(|| (id.to_owned(), entry["score"].as_i64().unwrap_or(0)))
+        })
+        .collect();
+    list.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+    list
+}
+
 /// Lyrics from an online source (LRCLIB).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OnlineLyrics {
@@ -1063,6 +1141,19 @@ mod tests {
                 (1, 1, "KRA382000123".to_owned()),
                 (2, 1, "GBAYE0000001".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    fn similar_artists_closest_first() {
+        let json = serde_json::json!([
+            {"artist_mbid": "b", "name": "B", "score": 5, "reference_mbid": "q"},
+            {"artist_mbid": "a", "name": "A", "score": 9, "reference_mbid": "q"},
+            {"artist_mbid": "q", "name": "Q", "score": 99, "reference_mbid": "q"},
+        ]);
+        assert_eq!(
+            parse_similar_artists(&json, "q"),
+            [("a".to_owned(), 9), ("b".to_owned(), 5)]
         );
     }
 }

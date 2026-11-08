@@ -2,7 +2,7 @@
 //! scores library songs against a seed by the chosen criteria and picks one
 //! of the best at random, so suggestions don't repeat.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rand::Rng;
 
@@ -37,18 +37,28 @@ impl Criteria {
     }
 }
 
+/// Related artists (ListenBrainz' similar artists, §7) by artist name
+/// (lowercase): the related artist and how close (0..1, 1 the closest).
+pub type RelatedArtists = HashMap<String, HashMap<String, f64>>;
+
+/// A related artist counts at most this much of "same artist".
+const RELATED_WEIGHT: f64 = 0.6;
+
 /// How many of the best candidates a suggestion is drawn from.
 pub const TOP_K: usize = 8;
 
 /// A song like `seed` from `pool`, not in `exclude`; `None` if nothing is
-/// left. Without any criteria chosen, genre and sound are used.
+/// left. Without any criteria chosen, genre and sound are used. "Same
+/// artist" also counts `related` artists, less.
 pub fn suggest(
     seed: &SongFeatures,
     pool: &[SongFeatures],
     exclude: &HashSet<i64>,
     criteria: &Criteria,
+    related: &RelatedArtists,
     rng: &mut impl Rng,
 ) -> Option<i64> {
+    let seed_related = seed.artist.as_ref().and_then(|a| related.get(a));
     let criteria = if criteria.any() {
         *criteria
     } else {
@@ -90,8 +100,14 @@ pub fn suggest(
             if criteria.bpm {
                 score += bpm_score(seed.bpm, candidate.bpm, criteria.bpm_tolerance);
             }
-            if criteria.artist && seed.artist.is_some() && seed.artist == candidate.artist {
-                score += 1.0;
+            if criteria.artist && seed.artist.is_some() {
+                if seed.artist == candidate.artist {
+                    score += 1.0;
+                } else if let (Some(related), Some(artist)) = (seed_related, &candidate.artist)
+                    && let Some(closeness) = related.get(artist)
+                {
+                    score += RELATED_WEIGHT * closeness.clamp(0.0, 1.0);
+                }
             }
             if let Some(distance) = distance {
                 score += f64::from(1.0 - distance / max_distance);
@@ -207,6 +223,7 @@ mod tests {
                 &pool,
                 &none,
                 &criteria(true, false, false, false),
+                &RelatedArtists::default(),
                 &mut rng,
             );
             assert_eq!(pick, Some(2));
@@ -219,6 +236,7 @@ mod tests {
                 &pool,
                 &none,
                 &criteria(false, true, false, true),
+                &RelatedArtists::default(),
                 &mut rng,
             ) == Some(3)
             {
@@ -244,6 +262,7 @@ mod tests {
                 &pool,
                 &exclude,
                 &criteria(true, false, false, false),
+                &RelatedArtists::default(),
                 &mut rng,
             );
             // No genre match left: any remaining song keeps playing.
@@ -256,9 +275,48 @@ mod tests {
                 &pool,
                 &all,
                 &criteria(true, false, false, false),
+                &RelatedArtists::default(),
                 &mut rng
             ),
             None
+        );
+    }
+
+    #[test]
+    fn related_artists_count_less_than_the_same_artist() {
+        let artist = |id: i64, name: &str| SongFeatures {
+            artist: Some(name.to_owned()),
+            ..song(id, &[], None, None)
+        };
+        let seed = artist(1, "queen");
+        let pool = vec![
+            seed.clone(),
+            artist(2, "david bowie"),
+            artist(3, "abba"),
+            artist(4, "queen"),
+        ];
+        let related: RelatedArtists =
+            HashMap::from([("queen".into(), HashMap::from([("david bowie".into(), 1.0)]))]);
+        let mut rng = StdRng::seed_from_u64(3);
+        let only_artist = criteria(false, false, true, false);
+        let mut picks = HashSet::new();
+        for _ in 0..40 {
+            picks.insert(suggest(
+                &seed,
+                &pool,
+                &HashSet::new(),
+                &only_artist,
+                &related,
+                &mut rng,
+            ));
+        }
+        // Queen and Bowie, never ABBA (no relation).
+        assert_eq!(picks, HashSet::from([Some(2), Some(4)]));
+        // With Queen's song gone, Bowie only.
+        let exclude = HashSet::from([4]);
+        assert_eq!(
+            suggest(&seed, &pool, &exclude, &only_artist, &related, &mut rng),
+            Some(2)
         );
     }
 }

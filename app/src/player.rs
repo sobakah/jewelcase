@@ -131,6 +131,8 @@ mod imp {
         pub tracks: RefCell<HashMap<i64, TrackObject>>,
         /// The library's similarity data, loaded when first needed.
         pub similarity: RefCell<Option<std::rc::Rc<Vec<SongFeatures>>>>,
+        /// Related artists for "same artist" (ListenBrainz, §7).
+        pub related: RefCell<Option<std::rc::Rc<similar::RelatedArtists>>>,
         pub state: Cell<State>,
         /// Queue item handed to GStreamer for gapless playback.
         pub pending_next: Cell<Option<u64>>,
@@ -1430,6 +1432,7 @@ impl Player {
     /// Forgets the similarity data (new analysis results, a rescan).
     pub fn reload_similarity(&self) {
         self.imp().similarity.replace(None);
+        self.imp().related.replace(None);
         self.imp().edges.borrow_mut().clear();
     }
 
@@ -1447,6 +1450,27 @@ impl Player {
             self.notify_current_track();
         }
         self.queue_changed();
+    }
+
+    /// New related artists came in: used from the next suggestion on.
+    pub fn similarity_changed(&self) {
+        self.imp().related.replace(None);
+    }
+
+    fn related_artists(&self) -> std::rc::Rc<similar::RelatedArtists> {
+        if let Some(related) = self.imp().related.borrow().as_ref() {
+            return related.clone();
+        }
+        // Asked for in the background, when there are artists to ask about.
+        self.library().lookup_related_artists();
+        let related = std::rc::Rc::new(
+            self.library()
+                .db()
+                .and_then(|db| db.related_artists().ok())
+                .unwrap_or_default(),
+        );
+        self.imp().related.replace(Some(related.clone()));
+        related
     }
 
     fn similarity(&self) -> std::rc::Rc<Vec<SongFeatures>> {
@@ -1490,7 +1514,12 @@ impl Player {
             sound: settings.boolean("mix-sound"),
             bpm_tolerance: f64::from(settings.int("mix-bpm-tolerance")) / 100.0,
         };
-        similar::suggest(seed, &pool, exclude, &criteria, &mut rand::rng())
+        let related = if criteria.artist {
+            self.related_artists()
+        } else {
+            std::rc::Rc::default()
+        };
+        similar::suggest(seed, &pool, exclude, &criteria, &related, &mut rand::rng())
     }
 
     /// A song like `seed_id` that isn't queued or recently played.
