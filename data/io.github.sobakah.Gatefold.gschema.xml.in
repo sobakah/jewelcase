@@ -187,6 +187,11 @@
       <default>false</default>
       <summary>Whether cdimport’s library folder was offered as a music folder</summary>
     </key>
+    <key name="artist-panel-width" type="i">
+      <default>0</default>
+      <summary>Width of artist pages</summary>
+      <description>Set by dragging the page’s edge; 0: three quarters of the window.</description>
+    </key>
     <key name="panel-width" type="i">
       <default>0</default>
       <summary>Width of the album and playlist panels</summary>

@@ -41,6 +41,7 @@
 - In shuffle, a song without ReplayGain tags after a tagged one no longer starts too loud or quiet for a moment.
 - Playlists update only the rows that changed, and the cover cache no longer keeps old playlist mosaics and portrait choices forever.
 - Large libraries: a scan that finds a new album writes only what changed, and the window no longer waits while the library is read again afterwards.
+- Artist pages can be made wider or narrower by dragging their left edge, like album and playlist panels; the width is kept separately.
 - The panel width can be changed with the keyboard (focus the panel's edge, then Left or Right), and the time next to the seek bar switches with Enter or Space.
 
 ## 0.1.1 (pre-release)

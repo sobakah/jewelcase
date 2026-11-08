@@ -1063,10 +1063,9 @@ impl GatefoldWindow {
         reveal_sidebar(&imp.artist_split);
     }
 
-    /// Follows the window width: a collapsed split view ignores the width
-    /// fraction, so keep the artist panel at three quarters of the window,
-    /// with the grid showing beside it (all of it on narrow windows); and
-    /// the player picks its layout and width from it.
+    /// Follows the window width: the player picks its layout and width
+    /// from it. (The artist page's width: panel_resizer, three quarters of
+    /// the window until its edge is dragged.)
     fn setup_artist_overlay(&self) {
         self.connect_realize(|window| {
             let Some(surface) = window.surface() else {
@@ -1076,11 +1075,10 @@ impl GatefoldWindow {
                 #[weak]
                 window,
                 move |surface: &gtk::gdk::Surface| {
-                    let width = surface.width();
-                    let panel = if width < 600 { width } else { width * 3 / 4 };
-                    let imp = window.imp();
-                    imp.artist_split.set_max_sidebar_width(f64::from(panel));
-                    imp.player_view.set_available_width(width);
+                    window
+                        .imp()
+                        .player_view
+                        .set_available_width(surface.width());
                 }
             );
             update(&surface);
@@ -1188,6 +1186,7 @@ impl GatefoldWindow {
         let imp = self.imp();
         panel_resizer::attach(&imp.split_view, self.settings());
         panel_resizer::attach(&imp.playlist_split, self.settings());
+        panel_resizer::attach_artist_overlay(&imp.artist_split, self.settings());
     }
 
     fn artist_page(&self) -> Option<ArtistPage> {
