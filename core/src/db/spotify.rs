@@ -1387,6 +1387,17 @@ mod tests {
         let mut found = db.playlists_containing(stream, None).unwrap();
         found.sort_unstable();
         assert_eq!(found, [mine, theirs]);
+        // The entries themselves, to remove them.
+        let entries = db.song_entries(one, None).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+            [mine, theirs]
+        );
+        for (playlist, entry) in entries {
+            db.remove_playlist_item(playlist, entry, 2).unwrap();
+        }
+        assert!(db.playlists_containing(one, None).unwrap().is_empty());
         // A device's song, known by its URI only.
         assert_eq!(
             db.playlists_containing(0, Some("spotify:track:two")).unwrap(),

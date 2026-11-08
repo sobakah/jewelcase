@@ -1901,6 +1901,18 @@ impl Database {
     /// a streamed one as `-stream_track.id`; `uri`: its Spotify URI, when
     /// known otherwise): as itself, or as the same song on Spotify.
     pub fn playlists_containing(&self, track_id: i64, uri: Option<&str>) -> Result<Vec<i64>> {
+        let mut playlists: Vec<i64> = self
+            .song_entries(track_id, uri)?
+            .into_iter()
+            .map(|(playlist, _)| playlist)
+            .collect();
+        playlists.dedup();
+        Ok(playlists)
+    }
+
+    /// The playlist entries of this song (see `playlists_containing`), as
+    /// (playlist, entry) pairs ordered by playlist.
+    pub fn song_entries(&self, track_id: i64, uri: Option<&str>) -> Result<Vec<(i64, i64)>> {
         let mut stmt = self.conn.prepare_cached(
             "WITH uri(uri) AS (
                  SELECT uri FROM stream_track WHERE id = -?1
@@ -1912,11 +1924,12 @@ impl Database {
                  UNION SELECT track_id FROM spotify_track
                    WHERE confidence = 'sure' AND uri IN (SELECT uri FROM uri)
              )
-             SELECT DISTINCT playlist_id FROM playlist_item
+             SELECT playlist_id, id FROM playlist_item
              WHERE spotify_uri IN (SELECT uri FROM uri)
-                OR local_track_id IN (SELECT id FROM local)",
+                OR local_track_id IN (SELECT id FROM local)
+             ORDER BY playlist_id, position",
         )?;
-        stmt.query_map(params![track_id, uri], |row| row.get(0))?
+        stmt.query_map(params![track_id, uri], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()
             .map_err(Into::into)
     }

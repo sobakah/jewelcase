@@ -238,9 +238,9 @@ Default (sleek):
 
 The artist and album under the title open their pages: the library's for library songs; for Spotify songs (streamed, or on a Spotify device) the song is looked up on Spotify, and the artist's page is the library's when the artist is there.
 
-The header has "Add to Playlist…" for the song that plays; its tooltip names the playlists that already have it. Song Info lists them too. A song shown from a Spotify device is first kept as a song to stream (`stream_track`), as its stand-in ID is only a hash.
+A + button left of the title (the volume sits right) is "Add to Playlist…" for the song that plays, as is the Now Playing row's right-click menu in the queue; its tooltip names the playlists that already have it. Song Info lists them too. A song shown from a Spotify device is first kept as a song to stream (`stream_track`), as its stand-in ID is only a hash.
 
-**Which playlists have a song:** the playlists with an entry for it (`local_track_id`), or for its Spotify URI. A library song's URI counts only for sure matches, and a streamed song also finds the library song that surely matches it. "Add to Playlist…" marks those playlists ("Has this song", or "Has 3 of these songs" for several).
+**Which playlists have a song:** the playlists with an entry for it (`local_track_id`), or for its Spotify URI. A library song's URI counts only for sure matches, and a streamed song also finds the library song that surely matches it. "Add to Playlist…" lists those playlists first with a check mark ("Has this song"); choosing one again removes the song's entries there (one Spotify removal for all). For several songs, a playlist with only some of them ("Has 3 of these songs") gets the missing ones.
 
 Expanded: the **Lyrics** and **Queue** toggles open side panes. Whether they're open when Gatefold starts is a preference each (as last left, shown, hidden). On wide windows the cover moves left and the pane sits next to it (`AdwMultiLayoutView` switching between "cover only", "cover + lyrics", "cover + queue" and "cover + lyrics + queue" layouts depending on width). On narrow windows the pane replaces the cover and a small cover stays in the header.
 

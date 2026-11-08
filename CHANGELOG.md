@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Recently Played (above the queue) now has the Spotify songs that played in Gatefold too, kept only on this computer. Each song has a menu (⋮ or right-click) to play it next, add it back to the queue or add it to a playlist.
-- Songs in the queue have "Add to Playlist…" in their right-click menu.
-- The player has "Add to Playlist…" for the song that plays. Its tooltip, Song Info and the song details in album and playlist panels name the playlists that already have the song, local or Spotify ones (also as its Spotify version). "Add to Playlist…" puts a check mark on them.
+- Songs in the queue, the one playing too, have "Add to Playlist…" in their right-click menu.
+- The player has a + button next to the song that plays, for "Add to Playlist…". Its tooltip, Song Info and the song details in album and playlist panels name the playlists that already have the song, local or Spotify ones (also as its Spotify version).
+- "Add to Playlist…" lists the playlists that have the song first, with a check mark; choosing one of them again removes the song from it. For several songs, a playlist that has some of them gets only the missing ones.
 
 ## 0.2.0 (pre-release)
 

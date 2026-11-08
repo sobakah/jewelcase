@@ -126,55 +126,65 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
         .build();
     new_row.add_prefix(&gtk::Image::from_icon_name("list-add-symbolic"));
     list.append(&new_row);
-    let playlists: Vec<PlaylistObject> = {
+    // The songs' entries in each playlist (as themselves, or as their
+    // Spotify versions), and which songs those are.
+    let mut entries: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut has: HashMap<i64, Vec<i64>> = HashMap::new();
+    if let Some(db) = library.db() {
+        for track in &tracks {
+            for (playlist, entry) in db.song_entries(*track, None).unwrap_or_default() {
+                entries.entry(playlist).or_default().push(entry);
+                let songs = has.entry(playlist).or_default();
+                if !songs.contains(track) {
+                    songs.push(*track);
+                }
+            }
+        }
+    }
+    let has_all = |playlist: i64| has.get(&playlist).is_some_and(|s| s.len() >= tracks.len());
+    // The playlists that have them come first: choosing one removes them.
+    let mut playlists: Vec<PlaylistObject> = {
         let store = library.playlists();
         (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
             .collect()
     };
-    // Which playlists have the songs already (as themselves, or as their
-    // Spotify versions), and how many of them.
-    let mut has: HashMap<i64, usize> = HashMap::new();
-    if let Some(db) = library.db() {
-        for track in &tracks {
-            for playlist in db.playlists_containing(*track, None).unwrap_or_default() {
-                *has.entry(playlist).or_default() += 1;
-            }
-        }
-    }
+    playlists.sort_by_key(|p| !has_all(p.id()));
     for playlist in &playlists {
-        let row = {
-            let row = adw::ActionRow::builder()
-                .use_markup(false)
-                .activatable(true)
-                .build();
-            row.set_title(&playlist.playlist().name);
-            let count = crate::format::song_count(playlist.playlist().item_count);
-            let subtitle = match has.get(&playlist.id()).copied().unwrap_or(0) {
-                0 => count,
-                n => {
-                    let note = if tracks.len() == 1 {
-                        gettext("Has this song")
-                    } else if n >= tracks.len() {
-                        gettext("Has all of these songs")
-                    } else {
-                        // Translators: {} is a number of songs, e.g. "Has 3 of these songs".
-                        ngettext("Has {} of these songs", "Has {} of these songs", n as u32)
-                            .replace("{}", &n.to_string())
-                    };
-                    row.add_suffix(
-                        &gtk::Image::builder()
-                            .icon_name("object-select-symbolic")
-                            .tooltip_text(&note)
-                            .css_classes(["dim-label"])
-                            .build(),
-                    );
-                    format!("{note} · {count}")
-                }
+        let row = adw::ActionRow::builder()
+            .use_markup(false)
+            .activatable(true)
+            .build();
+        row.set_title(&playlist.playlist().name);
+        let count = crate::format::song_count(playlist.playlist().item_count);
+        let n = has.get(&playlist.id()).map_or(0, Vec::len);
+        let subtitle = if n == 0 {
+            count
+        } else if has_all(playlist.id()) {
+            let (note, tooltip) = if tracks.len() == 1 {
+                (gettext("Has this song"), gettext("Remove the Song From This Playlist"))
+            } else {
+                (
+                    gettext("Has all of these songs"),
+                    gettext("Remove the Songs From This Playlist"),
+                )
             };
-            row.set_subtitle(&subtitle);
-            row
+            row.add_suffix(
+                &gtk::Image::builder()
+                    .icon_name("object-select-symbolic")
+                    .css_classes(["accent"])
+                    .build(),
+            );
+            row.set_tooltip_text(Some(&tooltip));
+            format!("{note} · {count}")
+        } else {
+            // Translators: {} is a number of songs, e.g. "Has 3 of these songs".
+            let note = ngettext("Has {} of these songs", "Has {} of these songs", n as u32)
+                .replace("{}", &n.to_string());
+            row.set_tooltip_text(Some(&gettext("Add the Songs It Doesn't Have Yet")));
+            format!("{note} · {count}")
         };
+        row.set_subtitle(&subtitle);
         list.append(&row);
     }
 
@@ -220,7 +230,18 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                 }
                 index => {
                     if let Some(playlist) = playlists.get(index as usize - 1) {
-                        library.add_to_playlist(playlist.id(), &tracks, true);
+                        let id = playlist.id();
+                        let had = has.get(&id).cloned().unwrap_or_default();
+                        if had.len() >= tracks.len() {
+                            // All there: chosen again, they're removed.
+                            let items = entries.get(&id).cloned().unwrap_or_default();
+                            library.remove_playlist_items(id, &items);
+                        } else {
+                            // Only those it doesn't have yet.
+                            let missing: Vec<i64> =
+                                tracks.iter().copied().filter(|t| !had.contains(t)).collect();
+                            library.add_to_playlist(id, &missing, true);
+                        }
                     }
                     dialog.close();
                 }

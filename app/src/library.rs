@@ -1223,6 +1223,58 @@ impl Library {
         self.reload_playlists();
     }
 
+    /// Removes these entries ("Add to Playlist…" for songs the playlist
+    /// has already) at once: Spotify gets one removal per song.
+    pub fn remove_playlist_items(&self, id: i64, items: &[i64]) {
+        if items.is_empty() || self.refuse_read_only(id) || self.refuse_while_sending(id) {
+            return;
+        }
+        let uris: Vec<String> = match self.spotify_link(id) {
+            Some(_) => {
+                let mut uris: Vec<String> = self
+                    .db()
+                    .map(|db| {
+                        items
+                            .iter()
+                            .filter_map(|item| db.item_uri(*item).ok().flatten())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                uris.sort_unstable();
+                uris.dedup();
+                uris
+            }
+            None => Vec::new(),
+        };
+        self.playlist_op_quiet(|db, now| {
+            for item in items {
+                db.remove_playlist_item(id, *item, now)?;
+            }
+            Ok(())
+        });
+        if !uris.is_empty() {
+            // Spotify removes every occurrence; entries left go back in.
+            let current = self
+                .db()
+                .and_then(|db| db.spotify_uris(id).ok())
+                .unwrap_or_default();
+            let restore = current
+                .into_iter()
+                .enumerate()
+                .filter(|(_, u)| uris.contains(u))
+                .map(|(position, u)| (u, position as u32))
+                .collect();
+            self.queue_spotify_op(id, crate::spotify::Op::Remove { uris, restore });
+        }
+        self.reload_playlists();
+        let name = self
+            .playlist(id)
+            .map(|p| p.playlist().name.clone())
+            .unwrap_or_default();
+        // Translators: {} is a playlist name.
+        self.emit_by_name::<()>("message", &[&gettext("Removed from “{}”").replace("{}", &name)]);
+    }
+
     pub fn move_playlist_item(&self, id: i64, from: u32, to: u32) {
         if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             self.reload_playlists();

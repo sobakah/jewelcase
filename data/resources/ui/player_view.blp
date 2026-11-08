@@ -96,19 +96,6 @@ template $GatefoldPlayerView: Adw.Bin {
             ]
           }
 
-          // The song into a playlist (it says which have it already).
-          [end]
-          Gtk.Button playlist_button {
-            icon-name: "view-list-bullet-symbolic";
-            tooltip-text: _("Add to Playlist…");
-            sensitive: false;
-
-            styles [
-              "flat",
-              "circular",
-            ]
-          }
-
           styles [
             "flat",
           ]
@@ -264,6 +251,20 @@ template $GatefoldPlayerView: Adw.Bin {
                     "player-subtitle",
                   ]
                 }
+              };
+
+              // The song into a playlist (the tooltip says which have
+              // it already); the volume balances it on the other side.
+              start-widget: Gtk.Button playlist_button {
+                icon-name: "list-add-symbolic";
+                tooltip-text: _("Add to Playlist…");
+                valign: center;
+                sensitive: false;
+
+                styles [
+                  "flat",
+                  "circular",
+                ]
               };
 
               end-widget: Gtk.MenuButton volume_button {

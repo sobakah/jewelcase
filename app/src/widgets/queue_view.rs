@@ -454,17 +454,28 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::builder().child(&line).build();
     row.add_css_class("history-row");
     row.set_tooltip_text(Some(&gettext("Play Now")));
-    song_menu(&row, track, None, Some(&more));
+    song_menu(&row, track, SongRow::Played, Some(&more));
     row
 }
 
+/// Which song a row shows, for its menu.
+#[derive(Clone, Copy, PartialEq)]
+enum SongRow {
+    /// Recently Played.
+    Played,
+    /// Now Playing.
+    Playing,
+    /// Upcoming, at this offset.
+    Queued(usize),
+}
+
 /// The song's menu, on right-click and on `button`: Play Next and Add to
-/// Queue for a played song, Remove from Queue for a queued one (`queued`:
-/// its offset), Add to Playlist… for both.
+/// Queue for a played song, Remove from Queue for a queued one, Add to
+/// Playlist… for all.
 fn song_menu(
     row: &gtk::ListBoxRow,
     track: &TrackObject,
-    queued: Option<usize>,
+    kind: SongRow,
     button: Option<&gtk::MenuButton>,
 ) {
     let menu = gtk::gio::Menu::new();
@@ -475,7 +486,7 @@ fn song_menu(
         actions.add_action(&action);
     };
     let player = GatefoldApplication::get().player();
-    if let Some(offset) = queued {
+    if let SongRow::Queued(offset) = kind {
         add(
             "remove",
             Box::new(glib::clone!(
@@ -484,7 +495,7 @@ fn song_menu(
                 move || player.remove_upcoming(offset)
             )),
         );
-    } else {
+    } else if kind == SongRow::Played {
         let next = track.clone();
         add(
             "play-next",
@@ -519,7 +530,7 @@ fn song_menu(
         Some(&gettext("Add to _Playlist…")),
         Some("song.add-to-playlist"),
     );
-    if queued.is_some() {
+    if let SongRow::Queued(_) = kind {
         menu.append(Some(&gettext("_Remove from Queue")), Some("song.remove"));
     }
     row.insert_action_group("song", Some(&actions));
@@ -715,6 +726,8 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     if offset == 0 {
         row.add_css_class("now-playing");
         row.set_activatable(false);
+        // Right-click: Add to Playlist….
+        song_menu(&row, track, SongRow::Playing, None);
         return row.upcast();
     }
 
@@ -732,7 +745,7 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     line.append(&remove);
 
     // Right-click: Add to Playlist…, Remove from Queue.
-    song_menu(&row, track, Some(offset), None);
+    song_menu(&row, track, SongRow::Queued(offset), None);
 
     // Drag and drop to reorder (§6.2), within the row's section.
     super::reorder::attach(
