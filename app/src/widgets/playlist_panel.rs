@@ -283,6 +283,8 @@ impl PlaylistPanel {
         let changed = self.playlist_id() != Some(playlist.id());
         if changed {
             self.finish_arranging();
+            // Another playlist: its rows from scratch (in batches).
+            imp.rebuild.set(true);
         }
         imp.playlist.replace(Some(playlist.clone()));
         if changed {
@@ -510,6 +512,13 @@ impl PlaylistPanel {
         self.action_set_enabled("playlist.unlink", linked && !mirror);
         self.action_set_enabled("playlist.delete", !mirror);
         let same_playlist = imp.playlist.borrow().as_ref().map(|p| p.id()) == Some(id);
+        // What every row shows (remove buttons, "only in Gatefold").
+        let kind = |p: &gatefold_core::db::Playlist| (p.editable, p.spotify_id.is_some());
+        let kind_changed = imp
+            .playlist
+            .borrow()
+            .as_ref()
+            .is_some_and(|old| kind(old.playlist()) != kind(info));
         imp.playlist.replace(Some(playlist.clone()));
 
         let sort = library
@@ -526,11 +535,23 @@ impl PlaylistPanel {
         imp.empty.set_visible(entries.is_empty() && !hidden);
         imp.items.set_visible(!entries.is_empty());
         // Unchanged (another playlist changed, a sync): keep the rows.
+        let rebuild = imp.rebuild.take() || kind_changed;
         let same = !sort_changed
-            && !imp.rebuild.take()
+            && !rebuild
             && *imp.entries.borrow() == entries
             && imp.items.first_child().is_some();
         if same {
+            return;
+        }
+        // The same playlist changed (a song added, removed or moved): only
+        // those rows are made, the others stay (and so does the scroll
+        // position). Not while the rows are still being filled in.
+        let filled = imp
+            .items
+            .row_at_index(imp.entries.borrow().len() as i32 - 1)
+            .is_some();
+        if same_playlist && !sort_changed && !rebuild && filled && !entries.is_empty() {
+            self.update_rows(&playlist, entries);
             return;
         }
         // The same playlist changed (a song removed or moved): it stays
@@ -559,6 +580,35 @@ impl PlaylistPanel {
                 adjustment.set_value(value.min(adjustment.upper() - adjustment.page_size()));
             });
         }
+    }
+
+    /// Rows for `entries`, keeping the rows of entries that didn't change
+    /// (wherever they are now).
+    fn update_rows(&self, playlist: &PlaylistObject, entries: Vec<PlaylistItem>) {
+        let imp = self.imp();
+        let old = imp.entries.replace(entries.clone());
+        let mut kept: std::collections::HashMap<i64, (PlaylistItem, gtk::ListBoxRow)> =
+            std::collections::HashMap::new();
+        for (index, entry) in old.into_iter().enumerate() {
+            if let Some(row) = imp.items.row_at_index(index as i32) {
+                kept.insert(entry.id, (entry, row));
+            }
+        }
+        // Stop a fill still running (it can't be, see refresh; to be sure).
+        imp.fill_generation.set(imp.fill_generation.get() + 1);
+        imp.items.remove_all();
+        let mut made = 0;
+        for entry in &entries {
+            let row = match kept.remove(&entry.id) {
+                Some((old, row)) if same_but_place(&old, entry) => row,
+                _ => {
+                    made += 1;
+                    self.row(playlist, entry)
+                }
+            };
+            imp.items.append(&row);
+        }
+        tracing::debug!("Playlist rows: {made} made, {} kept", entries.len() - made);
     }
 
     /// Appends rows from `from`, a batch now and the rest in later idle
@@ -779,7 +829,9 @@ impl PlaylistPanel {
 
         // Drag and drop to reorder, animated.
         if reorderable {
-            super::reorder::attach(&row, entry.position, move |from, to| {
+            let place = row.downgrade();
+            let index = move || place.upgrade().map_or(0, |row| row.index().max(0) as u32);
+            super::reorder::attach(&row, index, move |from, to| {
                 GatefoldApplication::get()
                     .library()
                     .move_playlist_item(playlist_id, from, to);
@@ -1363,6 +1415,14 @@ fn only_on_spotify_hint() -> String {
     } else {
         gettext("This song is only on Spotify; choose a device under Play On… to play it there")
     }
+}
+
+/// The same entry, maybe at another place.
+fn same_but_place(old: &PlaylistItem, new: &PlaylistItem) -> bool {
+    PlaylistItem {
+        position: new.position,
+        ..old.clone()
+    } == *new
 }
 
 /// "Spotify playlist by Max · 2 changes waiting".

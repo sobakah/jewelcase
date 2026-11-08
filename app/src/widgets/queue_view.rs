@@ -657,7 +657,7 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     // Drag and drop to reorder (§6.2), within the row's section.
     super::reorder::attach(
         &row,
-        offset as u32,
+        move || offset as u32,
         glib::clone!(
             #[weak]
             player,

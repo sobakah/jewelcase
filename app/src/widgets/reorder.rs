@@ -5,17 +5,27 @@
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
-/// Makes `row` (at `index`) draggable and a drop target. `on_move(from, to)`
-/// gets the final index of the moved row, as for "remove, then insert".
-/// Alt+Up and Alt+Down move it too, for the keyboard; the focus follows.
-pub fn attach(row: &gtk::ListBoxRow, index: u32, on_move: impl Fn(u32, u32) + 'static) {
+/// Makes `row` draggable and a drop target; `index()` is its place (asked
+/// each time: rows may be kept when others come and go). `on_move(from,
+/// to)` gets the final index of the moved row, as for "remove, then
+/// insert". Alt+Up and Alt+Down move it too, for the keyboard; the focus
+/// follows.
+pub fn attach(
+    row: &gtk::ListBoxRow,
+    index: impl Fn() -> u32 + 'static,
+    on_move: impl Fn(u32, u32) + 'static,
+) {
     let on_move = std::rc::Rc::new(on_move);
-    keyboard(row, index, on_move.clone());
+    let index: std::rc::Rc<dyn Fn() -> u32> = std::rc::Rc::new(index);
+    keyboard(row, index.clone(), on_move.clone());
     let on_move = move |from, to| on_move(from, to);
     let drag = gtk::DragSource::builder()
         .actions(gdk::DragAction::MOVE)
-        .content(&gdk::ContentProvider::for_value(&index.to_value()))
         .build();
+    let drag_index = index.clone();
+    drag.connect_prepare(move |_, _, _| {
+        Some(gdk::ContentProvider::for_value(&drag_index().to_value()))
+    });
     drag.connect_drag_begin(glib::clone!(
         #[weak]
         row,
@@ -71,6 +81,7 @@ pub fn attach(row: &gtk::ListBoxRow, index: u32, on_move: impl Fn(u32, u32) + 's
             let Ok(from) = value.get::<u32>() else {
                 return false;
             };
+            let index = index();
             let mut to = if place_after { index + 1 } else { index };
             if from < to {
                 to -= 1;
@@ -135,7 +146,11 @@ pub fn guard_sheet(list: &gtk::ListBox) {
 
 /// Alt+Up/Down: the row one place up or down, then focused again (the
 /// list is rebuilt).
-fn keyboard(row: &gtk::ListBoxRow, index: u32, on_move: std::rc::Rc<dyn Fn(u32, u32)>) {
+fn keyboard(
+    row: &gtk::ListBoxRow,
+    index: std::rc::Rc<dyn Fn() -> u32>,
+    on_move: std::rc::Rc<dyn Fn(u32, u32)>,
+) {
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed(glib::clone!(
         #[weak]
@@ -156,6 +171,7 @@ fn keyboard(row: &gtk::ListBoxRow, index: u32, on_move: std::rc::Rc<dyn Fn(u32, 
                     }
                     count.max(1) - 1
                 });
+            let index = index();
             let to = match key {
                 gdk::Key::Up if index > 0 => index - 1,
                 gdk::Key::Down if (index as i32) < last => index + 1,

@@ -44,6 +44,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/019_portrait_sources.sql")),
     M::up(include_str!("db/020_musicbrainz_isrcs.sql")),
     M::up(include_str!("db/021_ctime.sql")),
+    M::up(include_str!("db/022_playlist_search_rowids.sql")),
 ];
 
 /// Separates the values of multi-value tags in one column.
@@ -847,8 +848,8 @@ impl Database {
         self.conn
             .execute("DELETE FROM playlist WHERE id = ?1", [id])?;
         self.conn.execute(
-            "DELETE FROM search WHERE kind = 'playlist' AND ref_id = ?1",
-            [id],
+            "DELETE FROM search WHERE rowid = ?1",
+            [playlist_search_row(id)],
         )?;
         Ok(())
     }
@@ -1220,8 +1221,11 @@ impl Database {
                 stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                     .collect::<rusqlite::Result<_>>()?
             };
+            let mut insert_playlist = tx.prepare_cached(
+                "INSERT INTO search (rowid, kind, ref_id, text) VALUES (?1, 'playlist', ?2, ?3)",
+            )?;
             for (id, name) in playlists {
-                insert.execute(params!["playlist", id, name])?;
+                insert_playlist.execute(params![playlist_search_row(id), id, name])?;
             }
         }
         tx.commit()?;
@@ -1229,13 +1233,12 @@ impl Database {
     }
 
     fn index_playlist(&mut self, id: i64, name: &str) -> Result<()> {
+        let row = playlist_search_row(id);
+        self.conn
+            .execute("DELETE FROM search WHERE rowid = ?1", [row])?;
         self.conn.execute(
-            "DELETE FROM search WHERE kind = 'playlist' AND ref_id = ?1",
-            [id],
-        )?;
-        self.conn.execute(
-            "INSERT INTO search (kind, ref_id, text) VALUES ('playlist', ?1, ?2)",
-            params![id, name],
+            "INSERT INTO search (rowid, kind, ref_id, text) VALUES (?1, 'playlist', ?2, ?3)",
+            params![row, id, name],
         )?;
         Ok(())
     }
@@ -1671,6 +1674,12 @@ type GenreCount = (u32, HashMap<String, u32>);
 
 /// Play history entries kept in the database.
 const HISTORY_KEEP: i64 = 200;
+
+/// A playlist's row in the search index: derived from its ID, after the
+/// rows of artists, albums and songs (numbered from 1 by each rebuild).
+fn playlist_search_row(id: i64) -> i64 {
+    (1 << 40) + id
+}
 
 const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, artist, album,
     album_artist, album_artists, album_artist_sort, disc, number, year, genres, composer,
@@ -2314,6 +2323,13 @@ mod tests {
         assert_eq!(db.search("beyonce mix", 10).unwrap().playlists.len(), 1);
         assert!(db.search("beyonce hello", 10).unwrap().is_empty());
         assert!(db.search("", 10).unwrap().is_empty());
+        // Renamed: found by the new name only, once; deleted: gone.
+        let mix = db.search("mix", 10).unwrap().playlists[0];
+        db.rename_playlist(mix, "Road Trip", 2).unwrap();
+        assert!(db.search("mix", 10).unwrap().playlists.is_empty());
+        assert_eq!(db.search("road", 10).unwrap().playlists, [mix]);
+        db.delete_playlist(mix).unwrap();
+        assert!(db.search("road", 10).unwrap().playlists.is_empty());
     }
 
     #[test]
