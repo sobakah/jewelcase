@@ -43,6 +43,8 @@ const SMALL_PAGE: &str = "10";
 const PAGE_PAUSE: Duration = Duration::from_millis(100);
 /// Rate limits up to this long are waited out; longer ones are errors.
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
+/// How often the number of requests is logged (see `RequestCount`).
+const COUNT_PERIOD: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -215,6 +217,45 @@ pub struct Client {
     blocked: Mutex<std::collections::HashMap<String, SystemTime>>,
     /// Told about each new block, to keep it across restarts.
     on_block: Box<OnBlock>,
+    requests: Mutex<RequestCount>,
+}
+
+/// The requests sent, by kind, for the log: once an hour, and with a long
+/// rate limit, so it shows what used up Spotify's allowance.
+#[derive(Debug)]
+struct RequestCount {
+    since: std::time::Instant,
+    kinds: std::collections::BTreeMap<String, u32>,
+}
+
+impl Default for RequestCount {
+    fn default() -> Self {
+        Self {
+            since: std::time::Instant::now(),
+            kinds: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl RequestCount {
+    /// "artists 34, search 5".
+    fn summary(&self) -> String {
+        self.kinds
+            .iter()
+            .map(|(kind, n)| format!("{kind} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn add(&mut self, kind: &str) {
+        if self.since.elapsed() >= COUNT_PERIOD {
+            if !self.kinds.is_empty() {
+                tracing::info!("Spotify requests in the last hour: {}", self.summary());
+            }
+            *self = Self::default();
+        }
+        *self.kinds.entry(kind.to_owned()).or_default() += 1;
+    }
 }
 
 /// Told a kind of request (see `request_kind`) and until when it's blocked.
@@ -233,6 +274,7 @@ impl Client {
             on_refresh: Box::new(on_refresh),
             blocked: Mutex::default(),
             on_block: Box::new(|_, _| {}),
+            requests: Mutex::default(),
         }
     }
 
@@ -294,6 +336,9 @@ impl Client {
         loop {
             let token = self.access_token(false)?;
             let auth = format!("Bearer {token}");
+            if let Ok(mut requests) = self.requests.lock() {
+                requests.add(&kind);
+            }
             let response = match (method, body) {
                 (Method::Get, _) => {
                     let mut request = self.agent.get(&url).header("Authorization", &auth);
@@ -358,7 +403,15 @@ impl Client {
                     continue;
                 }
                 if wait > MAX_RETRY_WAIT {
-                    tracing::warn!("Spotify asks to wait {wait:?} before asking for {kind} again");
+                    let sent = self
+                        .requests
+                        .lock()
+                        .map(|r| r.summary())
+                        .unwrap_or_default();
+                    tracing::warn!(
+                        "Spotify asks to wait {wait:?} before asking for {kind} again \
+                         (requests sent within the hour: {sent})"
+                    );
                     let until = SystemTime::now() + wait;
                     if let Ok(mut blocked) = self.blocked.lock() {
                         blocked.insert(kind.clone(), until);
@@ -780,7 +833,9 @@ impl Client {
             &format!("/artists/{id}/albums"),
             &[
                 ("include_groups", "album,single".into()),
-                ("limit", "50".into()),
+                // Spotify refuses more for apps in Development Mode
+                // (2026); asking for 50 first cost a request each time.
+                ("limit", SMALL_PAGE.into()),
             ],
         )?;
         Ok(items.iter().filter_map(Album::parse).collect())

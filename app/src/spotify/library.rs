@@ -18,8 +18,10 @@ use super::Spotify;
 use crate::application::GatefoldApplication;
 use crate::objects::TrackObject;
 
-/// Discographies are read again after this long.
-const DISCOGRAPHY_AGE_S: i64 = 24 * 3600;
+/// Discographies are read again after this long: a week, as Spotify
+/// counts requests to artists over a day, and a prolific artist takes
+/// several (10 releases each).
+const DISCOGRAPHY_AGE_S: i64 = 7 * 24 * 3600;
 
 /// Something that can be in the user's Spotify library: a saved album,
 /// a followed artist.
@@ -165,7 +167,7 @@ impl Spotify {
     }
 
     /// An artist's albums, EPs and singles on Spotify: read again after a
-    /// day; when Spotify can't be asked, what was read before, else why
+    /// week; when Spotify can't be asked, what was read before, else why
     /// not (for the user).
     pub async fn discography(&self, artist_id: &str) -> Result<Vec<SpotifyAlbum>, String> {
         let library = GatefoldApplication::get().library();
@@ -222,15 +224,19 @@ impl Spotify {
 
     /// The Spotify ID of a library artist: from the online lookup
     /// (Wikidata), else a search by name (remembered for the session).
-    pub async fn artist_id_for(&self, name: &str, known: Option<&str>) -> Option<String> {
+    pub async fn artist_id_for(
+        &self,
+        name: &str,
+        known: Option<&str>,
+    ) -> Result<Option<String>, String> {
         if let Some(id) = known {
-            return Some(id.to_owned());
+            return Ok(Some(id.to_owned()));
         }
         if let Some(found) = self.imp().library.borrow().artist_ids.get(name) {
-            return found.clone();
+            return Ok(found.clone());
         }
         if !self.is_connected() {
-            return None;
+            return Ok(None);
         }
         let query = name.to_owned();
         let found = match self.call(move |client| client.search_artists(&query)).await {
@@ -245,7 +251,7 @@ impl Spotify {
             // Asked again next time.
             Err(err) => {
                 tracing::info!("Cannot search Spotify for the artist {name}: {err}");
-                return None;
+                return Err(super::answer_error(&err));
             }
         };
         self.imp()
@@ -253,7 +259,7 @@ impl Spotify {
             .borrow_mut()
             .artist_ids
             .insert(name.to_owned(), found.clone());
-        found
+        Ok(found)
     }
 
     /// An album's songs, ready to play: library songs where the library has

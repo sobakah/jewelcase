@@ -606,25 +606,12 @@ impl ArtistPage {
                     return;
                 }
                 page.clear_sections();
-                let note = match &albums {
-                    Err(why) => Some(format!(
-                        "{}\n{why}",
-                        gettext("Spotify can’t show this artist’s releases right now")
-                    )),
+                match &albums {
+                    Err(why) => page.add_spotify_problem(why),
                     Ok(albums) if albums.is_empty() => {
-                        Some(gettext("No albums, EPs or singles on Spotify"))
+                        page.add_note(&gettext("No albums, EPs or singles on Spotify"));
                     }
-                    Ok(_) => None,
-                };
-                if let Some(note) = note {
-                    page.imp().sections.append(
-                        &gtk::Label::builder()
-                            .label(note)
-                            .xalign(0.0)
-                            .wrap(true)
-                            .css_classes(["dim-label"])
-                            .build(),
-                    );
+                    Ok(_) => {}
                 }
                 page.add_spotify_sections(albums.as_deref().unwrap_or_default(), false);
             }
@@ -704,18 +691,35 @@ impl ArtistPage {
             #[weak(rename_to = page)]
             self,
             async move {
-                let Some(id) = spotify.artist_id_for(&name, known.as_deref()).await else {
-                    return;
+                // Spotify can't be asked now (too many requests, offline):
+                // said under "On Spotify", or the page would just lack
+                // the part without a word.
+                let id = match spotify.artist_id_for(&name, known.as_deref()).await {
+                    Ok(Some(id)) => id,
+                    Ok(None) => return,
+                    Err(why) => {
+                        if page.imp().generation.get() == generation {
+                            page.add_spotify_heading();
+                            page.add_spotify_problem(&why);
+                        }
+                        return;
+                    }
                 };
                 if page.imp().generation.get() == generation {
                     page.set_follow(&id, &name);
                 }
-                let Ok(albums) = spotify.discography(&id).await else {
-                    return;
-                };
+                let albums = spotify.discography(&id).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
+                let albums = match albums {
+                    Ok(albums) => albums,
+                    Err(why) => {
+                        page.add_spotify_heading();
+                        page.add_spotify_problem(&why);
+                        return;
+                    }
+                };
                 let library = GatefoldApplication::get().library();
                 let missing: Vec<_> = albums
                     .into_iter()
@@ -732,20 +736,43 @@ impl ArtistPage {
         if albums.is_empty() {
             return;
         }
-        let imp = self.imp();
         if heading {
-            imp.sections.append(
-                &gtk::Label::builder()
-                    .label(gettext("On Spotify"))
-                    .xalign(0.0)
-                    .margin_top(12)
-                    .css_classes(["title-2"])
-                    .build(),
-            );
+            self.add_spotify_heading();
         }
         let (singles, full): (Vec<_>, Vec<_>) = albums.iter().cloned().partition(|a| a.is_single());
         self.add_spotify_section(&gettext("Albums"), full);
         self.add_spotify_section(&gettext("EPs & Singles"), singles);
+    }
+
+    /// "On Spotify", above a library artist's releases there.
+    fn add_spotify_heading(&self) {
+        self.imp().sections.append(
+            &gtk::Label::builder()
+                .label(gettext("On Spotify"))
+                .xalign(0.0)
+                .margin_top(12)
+                .css_classes(["title-2"])
+                .build(),
+        );
+    }
+
+    /// Why Spotify's part is missing (e.g. how long Spotify asks to wait).
+    fn add_spotify_problem(&self, why: &str) {
+        self.add_note(&format!(
+            "{}\n{why}",
+            gettext("Spotify can’t show this artist’s releases right now")
+        ));
+    }
+
+    fn add_note(&self, note: &str) {
+        self.imp().sections.append(
+            &gtk::Label::builder()
+                .label(note)
+                .xalign(0.0)
+                .wrap(true)
+                .css_classes(["dim-label"])
+                .build(),
+        );
     }
 
     fn add_spotify_section(&self, title: &str, albums: Vec<gatefold_core::db::SpotifyAlbum>) {

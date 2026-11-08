@@ -58,8 +58,9 @@ fn init_logging() {
         "gatefold=debug,gatefold_core=debug,gatefold_stream=debug,librespot_core=info,\
          librespot_playback=info,librespot_audio=info,librespot_metadata=info"
     } else {
-        // Soloist's decisions too: they explain a song cut short.
-        "warn,gatefold::spotify::soloist=info"
+        // Soloist's decisions too: they explain a song cut short. And
+        // the hourly count of Spotify requests: it explains a block.
+        "warn,gatefold::spotify::soloist=info,gatefold_spotify=info"
     };
     tracing_subscriber::fmt()
         .with_env_filter(
