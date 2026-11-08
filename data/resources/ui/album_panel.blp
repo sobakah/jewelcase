@@ -116,6 +116,17 @@ template $GatefoldAlbumPanel: Adw.Bin {
                   ]
                 }
 
+                // A Spotify album: saved in the Spotify library or not.
+                Gtk.Button save_button {
+                  action-name: "panel.toggle-saved";
+                  valign: center;
+                  visible: false;
+
+                  styles [
+                    "circular",
+                  ]
+                }
+
                 Gtk.MenuButton {
                   icon-name: "view-more-symbolic";
                   tooltip-text: _("More");

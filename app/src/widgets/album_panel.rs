@@ -29,6 +29,8 @@ mod imp {
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
+        pub save_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub edition: TemplateChild<gtk::Label>,
         #[template_child]
         pub artists: TemplateChild<adw::WrapBox>,
@@ -68,6 +70,9 @@ mod imp {
             });
             klass.install_action("panel.play", None, |panel, _, _| panel.play(None, false));
             klass.install_action("panel.shuffle", None, |panel, _, _| panel.play(None, true));
+            klass.install_action("panel.toggle-saved", None, |panel, _, _| {
+                panel.toggle_saved()
+            });
             klass.install_action("panel.play-next", None, |panel, _, _| {
                 let tracks = panel.imp().track_objects.borrow().clone();
                 GatefoldApplication::get().player().play_next(tracks);
@@ -143,6 +148,22 @@ mod imp {
                 }
             ));
             self.title.add_controller(click);
+            let spotify = GatefoldApplication::get().spotify();
+            let id = spotify.connect_local(
+                "library-changed",
+                false,
+                glib::clone!(
+                    #[weak]
+                    obj,
+                    #[upgrade_or]
+                    None,
+                    move |_| {
+                        obj.update_save_button();
+                        None
+                    }
+                ),
+            );
+            crate::widgets::disconnect_with(&*obj, &spotify, id);
         }
     }
 
@@ -175,10 +196,54 @@ impl AlbumPanel {
         };
         imp.album.replace(Some(album.clone()));
         imp.spotify.replace(None);
+        self.update_save_button();
         self.set_spotify_mode(false);
         self.set_songs_actions(true);
         self.setup_versions(album, version);
         self.show_version(version);
+    }
+
+    /// Saved on Spotify or not, for a Spotify album (hidden otherwise).
+    fn update_save_button(&self) {
+        let imp = self.imp();
+        let spotify = GatefoldApplication::get().spotify();
+        let album = imp.spotify.borrow().clone();
+        let Some(album) = album.filter(|_| spotify.is_connected()) else {
+            imp.save_button.set_visible(false);
+            return;
+        };
+        let saved = spotify.is_album_saved(&album.spotify_id);
+        imp.save_button.set_visible(true);
+        imp.save_button.set_sensitive(true);
+        imp.save_button.set_icon_name(if saved {
+            "object-select-symbolic"
+        } else {
+            "list-add-symbolic"
+        });
+        imp.save_button.set_tooltip_text(Some(&if saved {
+            gettext("Remove from Your Spotify Albums")
+        } else {
+            gettext("Save on Spotify")
+        }));
+    }
+
+    fn toggle_saved(&self) {
+        let imp = self.imp();
+        let Some(album) = imp.spotify.borrow().clone() else {
+            return;
+        };
+        let spotify = GatefoldApplication::get().spotify();
+        let saved = spotify.is_album_saved(&album.spotify_id);
+        // Until Spotify answers (library-changed updates it then).
+        imp.save_button.set_sensitive(false);
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            async move {
+                spotify.set_album_saved(album, !saved, true).await;
+                panel.update_save_button();
+            }
+        ));
     }
 
     fn copy_title(&self) {
@@ -223,6 +288,7 @@ impl AlbumPanel {
         let imp = self.imp();
         imp.album.replace(None);
         imp.spotify.replace(Some(album.clone()));
+        self.update_save_button();
         self.set_spotify_mode(true);
         self.set_songs_actions(false);
         imp.versions_box.set_visible(false);

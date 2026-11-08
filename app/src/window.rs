@@ -1671,6 +1671,27 @@ impl GatefoldWindow {
                     }
                 }
             }
+            // `GATEFOLD_SCREENSHOT_PAGE_ACTIONS="panel.toggle-saved"`: 4 s
+            // later, actions of the album panel or the artist page (also
+            // one opened by the actions above).
+            let page_actions =
+                std::env::var("GATEFOLD_SCREENSHOT_PAGE_ACTIONS").unwrap_or_default();
+            if !page_actions.is_empty() {
+                let window = window.clone();
+                glib::timeout_add_seconds_local_once(4, move || {
+                    let imp = window.imp();
+                    let page = imp.artist_holder.child();
+                    for action in page_actions.split_whitespace() {
+                        let done = page
+                            .iter()
+                            .chain(std::iter::once(&imp.album_panel.get().upcast()))
+                            .any(|target| WidgetExt::activate_action(target, action, None).is_ok());
+                        if !done {
+                            tracing::warn!("Screenshot page action {action}: not found");
+                        }
+                    }
+                });
+            }
             // `GATEFOLD_SCREENSHOT_SEARCH=text`: search for it.
             if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_SEARCH") {
                 window.imp().search_bar.set_search_mode(true);
@@ -2008,6 +2029,22 @@ fn imp_toast(window: &GatefoldWindow, message: &str) {
     // Song titles like "A & B" are text, not markup.
     toast.set_use_markup(false);
     toast.set_timeout(if message.chars().count() <= 40 { 2 } else { 4 });
+    window.imp().toast_overlay.add_toast(toast);
+}
+
+/// A toast with Undo in the active window (`undo` runs on the button).
+pub fn undo_toast(message: &str, undo: impl Fn() + 'static) {
+    let Some(window) = GatefoldApplication::get()
+        .active_window()
+        .and_downcast::<GatefoldWindow>()
+    else {
+        return;
+    };
+    let toast = adw::Toast::new(message);
+    toast.set_use_markup(false);
+    toast.set_button_label(Some(&gettext("_Undo")));
+    toast.set_timeout(5);
+    toast.connect_button_clicked(move |_| undo());
     window.imp().toast_overlay.add_toast(toast);
 }
 

@@ -160,6 +160,82 @@ impl Database {
             .optional()?)
     }
 
+    /// One album saved (first among the saved, as Spotify lists the
+    /// latest first) or not any more (it stays known while it's shown).
+    pub fn set_album_saved(&mut self, album: &SpotifyAlbum, saved: bool) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        upsert_album(&tx, album)?;
+        if saved {
+            tx.execute(
+                "UPDATE spotify_album SET saved_position =
+                   (SELECT COALESCE(MIN(saved_position), 0) - 1 FROM spotify_album)
+                 WHERE spotify_id = ?1 AND saved_position IS NULL",
+                [&album.spotify_id],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE spotify_album SET saved_position = NULL WHERE spotify_id = ?1",
+                [&album.spotify_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn is_album_saved(&self, spotify_id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT saved_position IS NOT NULL FROM spotify_album WHERE spotify_id = ?1",
+                [spotify_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
+    }
+
+    /// One artist followed (first) or not any more.
+    pub fn set_artist_followed(
+        &mut self,
+        spotify_id: &str,
+        name: &str,
+        followed: bool,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO spotify_artist (spotify_id, name) VALUES (?1, ?2)
+             ON CONFLICT(spotify_id) DO NOTHING",
+            [spotify_id, name],
+        )?;
+        if followed {
+            tx.execute(
+                "UPDATE spotify_artist SET followed_position =
+                   (SELECT COALESCE(MIN(followed_position), 0) - 1 FROM spotify_artist)
+                 WHERE spotify_id = ?1 AND followed_position IS NULL",
+                [spotify_id],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE spotify_artist SET followed_position = NULL WHERE spotify_id = ?1",
+                [spotify_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn is_artist_followed(&self, spotify_id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT followed_position IS NOT NULL FROM spotify_artist WHERE spotify_id = ?1",
+                [spotify_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
+    }
+
     /// The followed artists as Spotify lists them now.
     pub fn replace_followed_artists(&mut self, artists: &[SpotifyArtist]) -> Result<()> {
         let tx = self.conn.transaction()?;
@@ -320,6 +396,45 @@ mod tests {
             albums.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
             ["5-STAR", "ODDINARY"]
         );
+    }
+
+    #[test]
+    fn one_album_saved_and_one_artist_followed() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.replace_saved_albums(&[album("a", "ROCK-STAR")]).unwrap();
+        db.set_album_saved(&album("b", "5-STAR"), true).unwrap();
+        let saved: Vec<String> = db
+            .saved_albums()
+            .unwrap()
+            .into_iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(saved, ["5-STAR", "ROCK-STAR"]);
+        assert!(db.is_album_saved("b").unwrap());
+        db.set_album_saved(&album("b", "5-STAR"), false).unwrap();
+        assert!(!db.is_album_saved("b").unwrap());
+        // Still known (its panel is open).
+        assert!(db.spotify_album("b").unwrap().is_some());
+        assert!(!db.is_album_saved("unknown").unwrap());
+
+        let artist = SpotifyArtist {
+            spotify_id: "a".into(),
+            name: "A".into(),
+            image_url: None,
+            genres: Vec::new(),
+        };
+        db.replace_followed_artists(&[artist]).unwrap();
+        db.set_artist_followed("z", "Zico", true).unwrap();
+        let followed: Vec<String> = db
+            .followed_artists()
+            .unwrap()
+            .into_iter()
+            .map(|a| a.spotify_id)
+            .collect();
+        assert_eq!(followed, ["z", "a"]);
+        db.set_artist_followed("a", "", false).unwrap();
+        assert!(!db.is_artist_followed("a").unwrap());
+        assert!(db.is_artist_followed("z").unwrap());
     }
 
     #[test]

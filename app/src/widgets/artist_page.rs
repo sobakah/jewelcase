@@ -50,6 +50,10 @@ mod imp {
         #[template_child]
         pub links: TemplateChild<adw::WrapBox>,
         #[template_child]
+        pub link_row: TemplateChild<adw::WrapBox>,
+        #[template_child]
+        pub follow_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub bio_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub bio: TemplateChild<gtk::Label>,
@@ -63,6 +67,8 @@ mod imp {
         pub actions: TemplateChild<adw::WrapBox>,
         /// A page for an artist only on Spotify (§9.8).
         pub spotify_id: RefCell<Option<String>>,
+        /// The artist on Spotify, for following: (Spotify ID, name).
+        pub follow: RefCell<Option<(String, String)>>,
         /// Counts fills of the sections; an older "On Spotify" answer is
         /// dropped.
         pub generation: Cell<u64>,
@@ -92,6 +98,9 @@ mod imp {
             });
             klass.install_action("artist.play", None, |page, _, _| page.play_all(false));
             klass.install_action("artist.shuffle", None, |page, _, _| page.play_all(true));
+            klass.install_action("artist.toggle-follow", None, |page, _, _| {
+                page.toggle_follow()
+            });
             klass.install_action_async("artist.choose-image", None, |page, _, _| async move {
                 page.choose_image().await;
             });
@@ -197,6 +206,21 @@ mod imp {
                 }
             ));
             crate::widgets::disconnect_with(&*obj, &spotify, status);
+            let followed = spotify.connect_local(
+                "library-changed",
+                false,
+                glib::clone!(
+                    #[weak]
+                    obj,
+                    #[upgrade_or]
+                    None,
+                    move |_| {
+                        obj.update_follow_button();
+                        None
+                    }
+                ),
+            );
+            crate::widgets::disconnect_with(&*obj, &spotify, followed);
             self.album_panel.connect_local(
                 "close",
                 false,
@@ -438,6 +462,67 @@ impl ArtistPage {
             button.connect_clicked(move |_| crate::spotify::open_in_browser(&uri));
             imp.links.append(&button);
         }
+        self.update_link_row();
+    }
+
+    /// The links' row shows while it has something.
+    fn update_link_row(&self) {
+        let imp = self.imp();
+        // Their own visibility (is_visible() also asks the row itself).
+        imp.link_row
+            .set_visible(imp.links.get_visible() || imp.follow_button.get_visible());
+    }
+
+    /// Gatefold knows the artist on Spotify: they can be followed.
+    fn set_follow(&self, spotify_id: &str, name: &str) {
+        self.imp()
+            .follow
+            .replace(Some((spotify_id.to_owned(), name.to_owned())));
+        self.update_follow_button();
+    }
+
+    fn update_follow_button(&self) {
+        let imp = self.imp();
+        let spotify = GatefoldApplication::get().spotify();
+        let follow = imp.follow.borrow().clone();
+        match follow.filter(|_| spotify.is_connected()) {
+            Some((id, _)) => {
+                let followed = spotify.is_artist_followed(&id);
+                imp.follow_button.set_label(&if followed {
+                    gettext("Following")
+                } else {
+                    gettext("Follow")
+                });
+                imp.follow_button.set_tooltip_text(Some(&if followed {
+                    gettext("Unfollow on Spotify")
+                } else {
+                    gettext("Follow on Spotify")
+                }));
+                imp.follow_button.set_sensitive(true);
+                imp.follow_button.set_visible(true);
+            }
+            None => imp.follow_button.set_visible(false),
+        }
+        self.update_link_row();
+    }
+
+    fn toggle_follow(&self) {
+        let imp = self.imp();
+        let Some((id, name)) = imp.follow.borrow().clone() else {
+            return;
+        };
+        let spotify = GatefoldApplication::get().spotify();
+        let followed = spotify.is_artist_followed(&id);
+        // Until Spotify answers.
+        imp.follow_button.set_sensitive(false);
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            async move {
+                spotify.set_artist_followed(id, name, !followed, true).await;
+                page.update_follow_button();
+            }
+        ));
     }
 
     fn fill_sections(&self) {
@@ -559,6 +644,7 @@ impl ArtistPage {
         button.connect_clicked(move |_| crate::spotify::open_on_spotify("artist", &id));
         imp.links.append(&button);
         imp.links.set_visible(true);
+        self.set_follow(&artist.spotify_id, &artist.name);
         if let Some(url) = artist.image_url.clone() {
             let portrait = imp.portrait.get();
             let key = artist.cover_key();
@@ -601,6 +687,9 @@ impl ArtistPage {
                 let Some(id) = spotify.artist_id_for(&name, known.as_deref()).await else {
                     return;
                 };
+                if page.imp().generation.get() == generation {
+                    page.set_follow(&id, &name);
+                }
                 let Ok(albums) = spotify.discography(&id).await else {
                     return;
                 };

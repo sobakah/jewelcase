@@ -179,11 +179,28 @@ template $GatefoldArtistPage: Adw.Bin {
                       }
                     }
 
-                    Adw.WrapBox links {
+                    Adw.WrapBox link_row {
                       child-spacing: 6;
                       line-spacing: 6;
                       margin-top: 6;
                       visible: false;
+
+                      // Following on Spotify (when Gatefold knows the artist there).
+                      Gtk.Button follow_button {
+                        action-name: "artist.toggle-follow";
+                        visible: false;
+
+                        styles [
+                          "pill",
+                          "small",
+                        ]
+                      }
+
+                      Adw.WrapBox links {
+                        child-spacing: 6;
+                        line-spacing: 6;
+                        visible: false;
+                      }
                     }
                   }
                 }

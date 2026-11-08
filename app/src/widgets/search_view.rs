@@ -649,7 +649,7 @@ impl SearchView {
             &sections.playlists,
         ]
         .iter()
-        .all(|s| !s.container.is_visible());
+        .all(|s| !s.container.get_visible());
         if nothing {
             let imp = self.imp();
             imp.empty.set_description(Some(&gettext(

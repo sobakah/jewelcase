@@ -668,10 +668,29 @@ impl Client {
     /// since February 2026): unfollows someone else's playlist, deletes
     /// one's own (Spotify keeps it restorable for a while).
     pub fn remove_playlist_from_library(&self, id: &str) -> Result<()> {
+        self.remove_from_library(&format!("spotify:playlist:{id}"))
+    }
+
+    /// Saves an item to the user's library (`PUT /me/library`, since
+    /// February 2026): saves an album (`user-library-modify`), follows an
+    /// artist (`user-follow-modify`).
+    pub fn save_to_library(&self, uri: &str) -> Result<()> {
+        self.call(
+            Method::Put,
+            "/me/library",
+            &[("uris", uri.to_owned())],
+            None,
+        )
+        .map(drop)
+    }
+
+    /// Takes an item out of the user's library (`DELETE /me/library`):
+    /// removes a saved album, unfollows an artist.
+    pub fn remove_from_library(&self, uri: &str) -> Result<()> {
         self.call(
             Method::Delete,
             "/me/library",
-            &[("uris", format!("spotify:playlist:{id}"))],
+            &[("uris", uri.to_owned())],
             None,
         )
         .map(drop)
