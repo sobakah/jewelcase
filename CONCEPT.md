@@ -470,13 +470,16 @@ Each write returns a new `snapshot_id`. OAuth scopes: `playlist-read-private`, `
 - **Linked playlists**: Spotify mirrors and published local playlists work the same way. Entries with a Spotify URI are synced; library songs without a Spotify version stay as "only in Gatefold" entries in any linked playlist (rather than being refused), and keep their place after the Spotify entry they followed when the playlist is re-read.
 - **Removing**: Spotify removes every occurrence of a URI, so a remove puts the other occurrences back.
 - **Reading**: the 2026 `/items` endpoints (`item` instead of `track` per row, `items` instead of `tracks` in playlist objects); both shapes are accepted.
-- **Matching**: implemented as described (ISRC, then title + artist + duration with version notes; likely matches are offered as "Play … from your library? Yes / No", both directions). The MusicBrainz ISRC lookup (step 2) isn't implemented yet.
+- **Matching**: implemented as described (ISRC, then title + artist + duration with version notes; likely matches are offered as "Play … from your library? Yes / No", both directions).
+- **MusicBrainz ISRCs** (step 2, November 2026): by release rather than recording (the reference library has release IDs, no recording IDs): one request per album (`release/{id}?inc=recordings+isrcs`), matched by disc and track number, kept in `mb_isrc` (migration 020), never written to the files. With online lookups on, after a Spotify sync; each album once, again after half a year. Used for matching and for the `isrc:` search; entries are matched again afterwards. The test library: 242 of 273 songs without ISRC got one, in 30 requests.
 - **Remote mode**: "Play On…" moves playback to a device, taking the current song along when Spotify has it (the following songs go into the device's queue). The player shows the device's song, as the library song when it matches (cover, lyrics). Starting an album, playlist or song in remote mode plays it on the device the same way; Play Next and Add to Queue go into the device's queue (the API can only add at its end, not remove or reorder). The queue view shows the device's queue, read-only. "Play Here" returns.
 - **Search** for a library song: ISRC, then title and artist as fields, as plain words, with the album artist, and the title alone, stopping at a sure match.
-- **Editing, for now**: linked playlists take added and removed songs only; reordering and renaming them come later (the outbox already supports both).
+- **Editing**: linked playlists take added and removed songs from anywhere. Reordering and renaming are deliberately harder to reach than for local playlists, so a Spotify playlist isn't changed by accident: "Change Order on Spotify" in the menu makes the songs draggable until Done (the moves wait until then and go out together), and "Rename on Spotify…" asks for the name (clicking the name doesn't rename linked playlists). "Change Cover…" on an own playlist uploads the cover too (a JPEG of at most 640 px and 190 KB; mirrors have no "Use Automatic Cover", Spotify can't go back to its mosaic).
+- **Sending changes** (November 2026): edits wait 4 s after the last one. While a playlist's changes are on their way, it can't be edited ("sending changes to Spotify…") until Spotify's answer and the compare re-read are in. Adds and moves also name the song they follow: when the playlist changed elsewhere since the last read (its snapshot differs), Spotify's entries are read and the changes placed by that song. An addition whose answer got lost (timeout, reset, 5xx) is marked and checked before it's sent again. Playlists with changes waiting aren't re-read (that would undo them in the mirror). "Create on Spotify" runs as a sync job, once per playlist; a playlist created in the session isn't unlinked while Spotify's list doesn't show it yet.
+- **Covers**: Spotify playlists show Spotify's image (its own, or its mosaic of the whole playlist), also when some of their songs are in the library.
 - **Others' playlists**: Spotify answers 403 for their entries in Development Mode, even when the list shows a song count. Gatefold asks once per snapshot and then shows them as hidden; reading them needs librespot (phase 8).
 - **Searches**: a failed search (offline, too many requests) is never taken as "not on Spotify"; it's retried later. Spotify's waits up to 30 s are waited out.
-- **Not yet**: deleting or unfollowing Spotify playlists (the follow endpoints moved to `/me/library`), uploading a changed cover to Spotify.
+- **Not yet**: deleting or unfollowing Spotify playlists (`DELETE /me/library` with the playlist's URI since February 2026).
 
 ### 9.8 Saved albums, followed artists and discographies
 Spotify's albums and artists are shown **apart from the library**, never mixed into its grids, sorting or search:
@@ -662,54 +665,18 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
 - **Lyrics for Spotify-only songs** from LRCLIB (free public lyrics database, by title, artist and length): shown only, never embedded. In remote mode the Lyrics pane is off for such songs until then (§9.7).
-- **Reordering and renaming Spotify playlists** from Gatefold. The outbox supports both, but they're switched off until the rest of the app is stable (§9.7).
-- **MusicBrainz ISRC lookup** for files without an ISRC, to match Spotify entries more reliably (§9.5, step 2).
-- **Unfollowing or deleting Spotify playlists** (`/me/library`) and **uploading a changed cover** to Spotify.
+- **Unfollowing or deleting Spotify playlists** (`DELETE /me/library`; deleting your own playlist is unfollowing it, Spotify keeps it restorable for 90 days at spotify.com/account/recover-playlists).
 - **ListenBrainz similar artists** for smart shuffle's "same artist" criterion (§7).
 
 ### Known issues (code review, November 2026)
-A review of the whole program (six areas, read in full) found about 85 problems; most are fixed. These are left, each with where it is and how it could be fixed.
+A review of the whole program (six areas, read in full) found about 85 problems; all but these are fixed (the last ones on 2026-11-08).
 
 **Security**
-- **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist's documentation only shows that option; soloistd passes it the same way. Small risk on a single-user machine. *Fix:* an environment variable or key file, once Soloist accepts one. Where: `soloist/src/lib.rs`, `Soloist::start`.
-
-**Spotify sync**
-- **Adding at a position after the playlist changed elsewhere** lands at the wrong place: `POST /items` takes no snapshot, so the position applies to whatever Spotify has now, and the compare re-read then keeps that order. *Fix:* re-read before a positional add when the snapshot changed, or turn it into an add at the end. Where: `app/src/spotify/sync.rs`, `Op::Add`, `flush`.
-- **Editing a playlist while its changes are being sent** shows "changed elsewhere — merged" and briefly undoes the new edit: `flush` loads the outbox once, and its compare re-read sees the newer edit as a difference. The next flush puts it right. *Fix:* after the compare, skip replacing the mirror while new changes wait in the outbox. Where: `flush`, `read_items`.
-- **An addition whose answer got lost** (timeout, reset) is sent again and duplicated; the compare re-read keeps the duplicate. *Fix:* after a network error on an add, re-read and check whether it arrived before retrying. Where: `flush`; `Error::is_temporary` (spotify crate).
-- **"Create on Spotify" isn't serialized with the sync**: two quick clicks create two Spotify playlists, and a sync whose playlist list predates the new one can unlink it. *Fix:* run `publish` as a sync job. Where: `sync.rs`, `publish`.
-- **While the Web API can't be reached, streaming is restarted every minute**: retrying the account start also restarts Soloist (pausing an attached one). *Fix:* retry only the account part. Where: `app/src/spotify/mod.rs`, `retry_start_later`.
-- **The login callback can be aborted** by any web page that requests `127.0.0.1:8974/callback?error=…` while a login waits (it can't steal one: PKCE and the state check hold). *Fix:* check the state before the error. Where: `spotify/src/auth.rs`.
-
-**Streaming (Soloist)**
-- **Receiver mode isn't left when Soloist stops being the active device** (the phone moved playback elsewhere): Gatefold keeps showing the old song and its controls steer an inactive Soloist. *Fix:* end the receiver on `device_changed` with `is_active: false`. Where: `app/src/spotify/soloist.rs`, `Event::Device`.
-- **soloistd's address is used once its config names one**, even while the service is stopped: about 90 s of "connecting", then failure. *Fix:* fall back to Gatefold's own Soloist when the service isn't running. Where: `soloist/src/lib.rs`, `find_running`.
-- **Connecting isn't cancelled across its awaits**: turning streaming off while the keyring asks for the key still starts Soloist afterwards, and two connects can overlap (two Soloists on one data folder). *Fix:* check the generation after each await, one connect at a time. Where: `soloist_connect`.
-- **Command errors aren't matched to their command**: an error from `set_shuffle`/`set_repeat` sent before `play` marks the song unavailable; neither that nor the 10 s start timeout pauses Soloist, which may start the song later. *Fix:* keep the command's ID with its error; pause on giving up. Where: `soloist_load`, `Event::CommandError`.
-- **A Soloist Gatefold started that dies is reported twice** (Disconnected, then Exited): two messages, and "expired" can show as "error". *Fix:* handle the first of the two only. Where: `soloist_event`.
-- **Entering remote mode doesn't pause a streamed song**; it relies on Spotify Connect moving playback away. Where: `app/src/player.rs`, `enter_remote`.
-
-**Playback**
-- **In shuffle, the measured gain of a gapless next song arrives a moment late**: it's set when the new song has started (main loop), so a song without ReplayGain tags after a tagged one starts unlevelled, then jumps. *Fix:* set it at the stream boundary (a pad probe in the engine). Where: `core/src/playback.rs`; `player.rs`, `StreamStarted`.
-
-**Library**
-- **Renaming or moving a folder loses play history**, queue entries, Spotify search results and the "added" date: the scan deletes and re-adds the songs with new IDs. *Fix:* match removed and new files by audio fingerprint (`content_key`) before deleting, and update the path. Where: `core/src/library/scanner.rs`, `db.upsert_tracks`/`delete_tracks`.
-- **Tag edits that keep the file's date and size** (Picard's "preserve timestamps") aren't noticed. *Fix:* compare ctime too, or a periodic content check. Where: `scanner.rs`.
-- **No periodic check for changes** (CONCEPT §3.1 promised an mtime check); changes made on a network share by another machine wait for a restart or Rescan. Mounts are watched since November 2026.
-- **The cache keeps playlist mosaics and portrait candidates** ("Choose from Online Sources…") forever; album covers and Spotify images are cleaned weekly.
+- **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Fix:* a key file (0600, in Gatefold's own data folder, or systemd's `LoadCredential=` for soloistd) once Soloist takes one; an environment variable would be the second choice (`/proc/<pid>/environ` is readable only by the same user and root, but it's inherited by child processes and ends up in crash reports). Where: `soloist/src/lib.rs`, `Soloist::start`.
 
 **Performance (large libraries)**
 - **A scan that found changes still rewrites everything**: all album and artist rows, the whole search index, and on the main thread the reload reads all genres, runs per-artist subqueries and rematches every Spotify entry in one write transaction. *Fix:* update only changed albums; move reload queries off the main thread. Where: `db.replace_library`, `rebuild_search`; `app/src/library.rs`, `reload`, `rematch_spotify`.
-- **The main thread can wait up to 5 s for the database** (`busy_timeout`) while the scanner holds a long transaction (song changes write the history). Where: `core/src/db.rs`, `Database::open`.
-- **Search index updates for a playlist scan the whole index** (deleting by its unindexed `kind`/`ref_id` columns). *Fix:* derive the row ID from kind and ID. Where: `db.rs`, `index_playlist`, `delete_playlist`.
-- **Any change to a playlist's entries rebuilds all its rows** (the scroll position is kept since November 2026). Where: `app/src/widgets/playlist_panel.rs`, `refresh`.
-
-**Accessibility**
-- **The panel resize handle can't be reached with the keyboard**, and switching between total and remaining time in the mini player is a click on a label only. Where: `panel_resizer.rs`, `mini_player.rs`.
-
-**Build and packaging**
-- **The RPM's `%check` builds the whole workspace**, librespot included, even without streaming, under meson's 900 s test timeout. *Fix:* leave out the `stream` crate when the feature is off; a longer timeout. Where: `app/meson.build`.
-- **Both builds install a program called `gatefold`** with the same name in the menu, so a development build installed into `~/.local` hides the installed app. Where: `meson.build`, the desktop file.
+- **The main thread can wait up to 5 s for the database** (`busy_timeout`) while the scanner holds a long transaction (song changes write the history). Shorter scanner transactions come with the fix above. Where: `core/src/db.rs`, `Database::open`.
 
 ---
 

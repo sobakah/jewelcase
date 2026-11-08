@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Spotify playlists
+
+- Your own Spotify playlists can be reordered and renamed from Gatefold, on purpose a step away from the local ones: "Change Order on Spotify" in the playlist's menu makes the songs draggable until you press Done, and "Rename on Spotify…" asks for the new name.
+- A new cover for one of your synced playlists goes to Spotify too.
+- Spotify playlists show Spotify's cover, also when some of their songs are in your library (e.g. one album's cover showed instead).
+- Changes wait 4 seconds after your last edit, then go out together. While they're on their way, the playlist can't be changed ("sending changes to Spotify…").
+- Songs added or moved while someone changed the playlist elsewhere (on the phone) land after the right song, not at a shifted position. A song whose confirmation got lost (a timeout) is no longer added twice.
+- "Create on Spotify" clicked twice creates one playlist.
+- With online lookups on, songs without an ISRC get the ones MusicBrainz knows (one request per album, once), so more Spotify playlist songs are found in your library.
+
+### Soloist and Spotify Connect
+
+- When the Spotify app moves playback away from Soloist, Gatefold stops showing Soloist's song.
+- Shuffle or repeat failing no longer marks a song as unavailable; giving up on a song pauses Soloist, so it doesn't start late.
+- A stopped soloistd service is no longer waited for; Gatefold starts its own Soloist. Turning streaming off while Gatefold connects really stops it.
+- Moving playback to a device pauses a streamed song too. While Spotify can't be reached, streaming is no longer restarted every minute.
+
+### Library and playback
+
+- Renaming or moving a music folder keeps the songs' play history, queue and playlist entries, Spotify matches and "added" dates.
+- Tag edits that keep the file's date (Picard's "preserve timestamps") are noticed. The library is also checked every 30 minutes, for changes on a network share.
+- In shuffle, a song without ReplayGain tags after a tagged one no longer starts too loud or quiet for a moment.
+- Playlists update only the rows that changed, and the cover cache no longer keeps old playlist mosaics and portrait choices forever.
+- The panel width can be changed with the keyboard (focus the panel's edge, then Left or Right), and the time next to the seek bar switches with Enter or Space.
+
 ## 0.1.1 (pre-release)
 
 Mostly playlists, Spotify fixes and a new look for the side panels. Gatefold's database is updated on the first start; after that, 0.1.0 can't open it any more.
