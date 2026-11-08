@@ -275,8 +275,10 @@ impl Database {
     pub fn match_tracks(&self) -> Result<Vec<LocalTrack>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.title, t.artist, t.album_artist, COALESCE(a.title, t.album),
-                    t.duration_ms, t.isrc, t.format
+                    t.duration_ms, COALESCE(t.isrc, m.isrc), t.format
              FROM track t LEFT JOIN album a ON a.id = t.album_id
+               LEFT JOIN mb_isrc m ON m.release = t.mb_album_id
+                 AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number
              WHERE t.title IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -875,6 +877,62 @@ impl Database {
             )
             .optional()?;
         info.map(|info| self.stream_track_id(&info)).transpose()
+    }
+
+    // ISRCs from MusicBrainz (§9.5, step 2) -------------------------------------
+
+    /// Albums (MusicBrainz release IDs) with songs that have no ISRC, not
+    /// asked for since `since`.
+    pub fn releases_without_isrcs(&self, since: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT t.mb_album_id FROM track t
+             WHERE t.isrc IS NULL AND t.mb_album_id IS NOT NULL AND t.number IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM mb_isrc_release r
+                               WHERE r.release = t.mb_album_id AND r.checked >= ?1)
+             ORDER BY t.mb_album_id",
+        )?;
+        let rows = stmt.query_map([since], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A release's ISRCs: (disc, track number, ISRC).
+    pub fn set_release_isrcs(
+        &mut self,
+        release: &str,
+        isrcs: &[(u32, u32, String)],
+        now: i64,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM mb_isrc WHERE release = ?1", [release])?;
+        for (disc, number, isrc) in isrcs {
+            tx.execute(
+                "INSERT OR REPLACE INTO mb_isrc (release, disc, number, isrc)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![release, disc, number, isrc],
+            )?;
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO mb_isrc_release (release, checked) VALUES (?1, ?2)",
+            params![release, now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A song's ISRC: its own, else MusicBrainz'.
+    pub fn track_isrc(&self, track_id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT COALESCE(t.isrc, m.isrc) FROM track t
+                 LEFT JOIN mb_isrc m ON m.release = t.mb_album_id
+                   AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number
+                 WHERE t.id = ?1",
+                [track_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
     }
 
     // Outbox (§9.6) ------------------------------------------------------------

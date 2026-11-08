@@ -63,6 +63,12 @@ pub enum Job {
         spotify: SpotifyClient,
         reply: async_channel::Sender<Result<Vec<(String, PortraitCandidate)>, String>>,
     },
+    /// ISRCs of an album's songs from MusicBrainz, for matching Spotify
+    /// entries (§9.5, step 2); replies how many were found.
+    ReleaseIsrcs {
+        release: String,
+        reply: async_channel::Sender<Result<usize, String>>,
+    },
     /// An image file the user picked as the portrait.
     SetCustom {
         artist_id: i64,
@@ -77,7 +83,9 @@ fn sort_job(
     background: &mut std::collections::VecDeque<Job>,
 ) {
     match &job {
-        Job::Lookup { urgent: false, .. } => background.push_back(job),
+        Job::Lookup { urgent: false, .. } | Job::ReleaseIsrcs { .. } => {
+            background.push_back(job);
+        }
         _ => urgent.push_back(job),
     }
 }
@@ -185,6 +193,23 @@ impl Worker {
                 reply,
             } => {
                 let _ = reply.send_blocking(self.candidates(artist_id, &providers, &spotify));
+            }
+            Job::ReleaseIsrcs { release, reply } => {
+                let result = match self.client.release_isrcs(&release) {
+                    Ok(isrcs) => self
+                        .db
+                        .set_release_isrcs(&release, &isrcs, now())
+                        .map(|()| isrcs.len())
+                        .map_err(|e| e.to_string()),
+                    // Gone from MusicBrainz (merged): not asked again soon.
+                    Err(err) if err.is_not_found() => self
+                        .db
+                        .set_release_isrcs(&release, &[], now())
+                        .map(|()| 0)
+                        .map_err(|e| e.to_string()),
+                    Err(err) => Err(err.to_string()),
+                };
+                let _ = reply.send_blocking(result);
             }
             Job::SetCustom {
                 artist_id,

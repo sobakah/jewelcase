@@ -75,6 +75,8 @@ mod imp {
         pub artists: OnceCell<gio::ListStore>,
         pub playlists: OnceCell<gio::ListStore>,
         pub metadata: OnceCell<Metadata>,
+        /// ISRCs are being looked up on MusicBrainz.
+        pub isrc_lookup: Cell<bool>,
         pub lookups: RefCell<HashSet<i64>>,
         /// Each album's genres, most common first (filter, album panel).
         pub album_genres: RefCell<HashMap<i64, Vec<String>>>,
@@ -581,6 +583,59 @@ impl Library {
         if let Some(metadata) = self.imp().metadata.get() {
             metadata.0.send(job);
         }
+    }
+
+    /// ISRCs from MusicBrainz for albums whose songs have none, so Spotify
+    /// entries match them surely (§9.5, step 2). With online lookups on;
+    /// one request per album, asked again after half a year. Spotify
+    /// entries are matched again afterwards.
+    pub fn lookup_isrcs(&self) {
+        const AGAIN: i64 = 180 * 24 * 3600;
+        if !self.online_enabled() || self.imp().isrc_lookup.get() {
+            return;
+        }
+        let releases = self
+            .db()
+            .and_then(|db| db.releases_without_isrcs(metadata::now() - AGAIN).ok())
+            .unwrap_or_default();
+        if releases.is_empty() {
+            return;
+        }
+        self.imp().isrc_lookup.set(true);
+        tracing::info!(
+            "Looking up ISRCs of {} albums on MusicBrainz",
+            releases.len()
+        );
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = library)]
+            self,
+            async move {
+                let mut found = 0;
+                // One at a time: the worker's other jobs (an open artist
+                // page) go in between.
+                for release in releases {
+                    let (reply, answer) = async_channel::bounded(1);
+                    library.send_job(Job::ReleaseIsrcs { release, reply });
+                    match answer.recv().await {
+                        Ok(Ok(count)) => found += count,
+                        Ok(Err(err)) => {
+                            // Offline or MusicBrainz busy: the rest waits
+                            // for the next sync.
+                            tracing::info!("Cannot look up ISRCs: {err}");
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                library.imp().isrc_lookup.set(false);
+                tracing::info!("MusicBrainz gave {found} ISRCs");
+                if found > 0 {
+                    library.imp().match_index.replace(None);
+                    library.rematch_spotify();
+                    library.reload_playlists();
+                }
+            }
+        ));
     }
 
     /// Looks the artist up (lazily, when shown) unless that was done recently.

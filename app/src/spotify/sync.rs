@@ -771,6 +771,8 @@ impl Spotify {
             self.resolve_entries(id, false).await;
         }
         self.sync_library().await;
+        // For the next matches (in the background).
+        library.lookup_isrcs();
     }
 
     /// One playlist: its changes, then a re-read if Spotify's changed.
@@ -1193,7 +1195,13 @@ impl Spotify {
         let Some(track) = library.tracks(&[track_id]).remove(&track_id) else {
             return Ok(not_found());
         };
-        let local = local_track(&track);
+        let mut local = local_track(&track);
+        // MusicBrainz' when the file has none (§9.5, step 2).
+        if local.isrc.is_none() {
+            local.isrc = library
+                .db()
+                .and_then(|db| db.track_isrc(track_id).ok().flatten());
+        }
         let isrc = local.isrc.clone();
         let queries = search_queries(&local);
         let title = local.title.clone();

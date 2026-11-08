@@ -27,6 +27,13 @@ pub enum Error {
     Format(&'static str),
 }
 
+impl Error {
+    /// The service doesn't know what was asked for (404).
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Http(ureq::Error::StatusCode(404)))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Which providers may be asked (Preferences, §8).
@@ -346,6 +353,16 @@ impl Client {
             .map(str::to_owned))
     }
 
+    /// The ISRCs of a release's songs (one request): (disc, track
+    /// number, ISRC), the first ISRC of each recording.
+    pub fn release_isrcs(&self, release_mbid: &str) -> Result<Vec<(u32, u32, String)>> {
+        let json = self.musicbrainz(
+            &format!("release/{release_mbid}"),
+            &[("inc", "recordings+isrcs")],
+        )?;
+        Ok(parse_release_isrcs(&json))
+    }
+
     /// Downloads an image (a portrait candidate).
     pub fn download(&self, url: &str) -> Result<Vec<u8>> {
         let mut response = self.agent.get(url).call()?;
@@ -441,6 +458,30 @@ pub fn artist_from_release(release: &Value, name: &str) -> Option<String> {
 }
 
 /// The single item of a Wikidata search, or None (none, or ambiguous).
+pub fn parse_release_isrcs(release: &Value) -> Vec<(u32, u32, String)> {
+    let number = |value: &Value| value.as_u64().and_then(|n| u32::try_from(n).ok());
+    let mut isrcs = Vec::new();
+    for medium in release["media"].as_array().into_iter().flatten() {
+        let Some(disc) = number(&medium["position"]) else {
+            continue;
+        };
+        for track in medium["tracks"].as_array().into_iter().flatten() {
+            let Some(position) = number(&track["position"]) else {
+                continue;
+            };
+            if let Some(isrc) = track["recording"]["isrcs"]
+                .as_array()
+                .and_then(|list| list.iter().find_map(Value::as_str))
+                .map(|isrc| isrc.trim().to_uppercase())
+                .filter(|isrc| isrc.len() == 12)
+            {
+                isrcs.push((disc, position, isrc));
+            }
+        }
+    }
+    isrcs
+}
+
 pub fn parse_wikidata_search(json: &Value) -> Option<String> {
     let hits = json.pointer("/query/search")?.as_array()?;
     match hits.as_slice() {
@@ -933,5 +974,27 @@ mod tests {
         assert!(pick_deezer(&[(0, small), (0, &alike)]).is_none());
         // The only one of that name.
         assert_eq!(pick_deezer(&[(0, small)]).unwrap().id, 3);
+    }
+
+    #[test]
+    fn release_isrcs_by_disc_and_number() {
+        let release = serde_json::json!({
+            "media": [
+                {"position": 1, "tracks": [
+                    {"position": 1, "number": "A1", "recording": {"isrcs": ["kra382000123", "USX1"]}},
+                    {"position": 2, "recording": {"isrcs": []}},
+                ]},
+                {"position": 2, "tracks": [
+                    {"position": 1, "recording": {"isrcs": ["GBAYE0000001"]}},
+                ]},
+            ]
+        });
+        assert_eq!(
+            parse_release_isrcs(&release),
+            [
+                (1, 1, "KRA382000123".to_owned()),
+                (2, 1, "GBAYE0000001".to_owned())
+            ]
+        );
     }
 }
