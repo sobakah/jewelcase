@@ -379,7 +379,7 @@ impl Spotify {
             .await;
         if let Err(err) = result {
             tracing::warn!("Cannot change a saved Spotify album: {err}");
-            self.message(&library_error(&err));
+            self.library_error(&err);
             return;
         }
         if let Some(mut db) = GatefoldApplication::get().library().db()
@@ -429,7 +429,7 @@ impl Spotify {
             .await;
         if let Err(err) = result {
             tracing::warn!("Cannot follow or unfollow a Spotify artist: {err}");
-            self.message(&library_error(&err));
+            self.library_error(&err);
             return;
         }
         if let Some(mut db) = GatefoldApplication::get().library().db()
@@ -486,13 +486,23 @@ impl Spotify {
     }
 }
 
-/// Why saving or following didn't work, for the user.
-fn library_error(err: &Error) -> String {
-    match err {
-        // A login from before Gatefold asked for it.
-        Error::Status { status: 403, .. } => gettext(
-            "Spotify didn't allow it; connect again in Preferences → Spotify (Gatefold needs one more permission), then try again",
-        ),
-        err => super::sync::answer_error(err),
+impl Spotify {
+    /// Why saving or following didn't work, for the user; a login from
+    /// before Gatefold asked for the permission can connect again.
+    fn library_error(&self, err: &Error) {
+        if matches!(err, Error::Status { status: 403, .. }) {
+            let spotify = self.clone();
+            crate::window::button_toast(
+                &gettext("Spotify needs you to connect again to allow this"),
+                &gettext("_Connect Again"),
+                10,
+                move || {
+                    let spotify = spotify.clone();
+                    glib::spawn_future_local(async move { spotify.connect().await });
+                },
+            );
+        } else {
+            self.message(&super::sync::answer_error(err));
+        }
     }
 }

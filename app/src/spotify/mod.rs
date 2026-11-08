@@ -239,6 +239,9 @@ impl Spotify {
                 return;
             }
         };
+        // Connecting again (new permissions): the current login stays in
+        // use if this one doesn't work out.
+        let was_connected = self.is_connected() && self.client().is_some();
         self.set_status(Status::Connecting);
         let pkce = Pkce::new();
         let url = auth::authorize_url(&client_id, &pkce);
@@ -277,12 +280,17 @@ impl Spotify {
             .unwrap_or(Err(Error::Cancelled)),
             Err(err) => Err(err),
         };
+        let back = if was_connected {
+            Status::Connected
+        } else {
+            Status::Disconnected
+        };
         match tokens {
             Ok(tokens) => self.use_tokens(tokens, true).await,
-            Err(Error::Cancelled) => self.set_status(Status::Disconnected),
+            Err(Error::Cancelled) => self.set_status(back),
             Err(err) => {
                 tracing::warn!("Spotify login failed: {err}");
-                self.set_status(Status::Disconnected);
+                self.set_status(back);
                 self.message(&gettext("Couldn't connect to Spotify"));
             }
         }
@@ -354,7 +362,18 @@ impl Spotify {
             }
         };
         let name = user.display_name.clone().unwrap_or_else(|| user.id.clone());
-        self.imp().user_id.replace(Some(user.id));
+        let previous = self.imp().user_id.replace(Some(user.id.clone()));
+        if previous.is_some_and(|previous| previous != user.id) {
+            // Connected again with another account: the other one's
+            // playlists go, as when disconnecting.
+            let library = GatefoldApplication::get().library();
+            if let Some(mut db) = library.db()
+                && let Err(err) = db.forget_spotify()
+            {
+                tracing::warn!("Cannot remove the Spotify playlists: {err}");
+            }
+            library.reload_playlists();
+        }
         self.imp().account_name.replace(Some(name.clone()));
         self.notify_account_name();
         self.imp().client.replace(Some(client));

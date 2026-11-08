@@ -32,6 +32,23 @@ pub fn page() -> adw::PreferencesPage {
         .valign(gtk::Align::Center)
         .css_classes(["pill"])
         .build();
+    // A new login while connected: new permissions, playlists stay.
+    let again = gtk::Button::builder()
+        .label(gettext("Connect Again"))
+        .tooltip_text(gettext(
+            "Log in to Spotify again, for permissions Gatefold has started to use; your playlists stay",
+        ))
+        .valign(gtk::Align::Center)
+        .css_classes(["pill"])
+        .build();
+    again.connect_clicked(glib::clone!(
+        #[weak]
+        spotify,
+        move |_| {
+            glib::spawn_future_local(async move { spotify.connect().await });
+        }
+    ));
+    status.add_suffix(&again);
     status.add_suffix(&button);
     let spinner = adw::Spinner::builder().valign(gtk::Align::Center).build();
     status.add_suffix(&spinner);
@@ -154,6 +171,8 @@ pub fn page() -> adw::PreferencesPage {
         #[weak]
         button,
         #[weak]
+        again,
+        #[weak]
         spinner,
         #[weak]
         client_id,
@@ -176,6 +195,7 @@ pub fn page() -> adw::PreferencesPage {
             } else {
                 String::new()
             });
+            again.set_visible(connected);
             button.set_label(&if connected {
                 gettext("Disconnect")
             } else if connecting {

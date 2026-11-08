@@ -2034,6 +2034,11 @@ fn imp_toast(window: &GatefoldWindow, message: &str) {
 
 /// A toast with Undo in the active window (`undo` runs on the button).
 pub fn undo_toast(message: &str, undo: impl Fn() + 'static) {
+    button_toast(message, &gettext("_Undo"), 5, undo);
+}
+
+/// A toast with a button in the active window.
+pub fn button_toast(message: &str, label: &str, timeout: u32, clicked: impl Fn() + 'static) {
     let Some(window) = GatefoldApplication::get()
         .active_window()
         .and_downcast::<GatefoldWindow>()
@@ -2042,9 +2047,9 @@ pub fn undo_toast(message: &str, undo: impl Fn() + 'static) {
     };
     let toast = adw::Toast::new(message);
     toast.set_use_markup(false);
-    toast.set_button_label(Some(&gettext("_Undo")));
-    toast.set_timeout(5);
-    toast.connect_button_clicked(move |_| undo());
+    toast.set_button_label(Some(label));
+    toast.set_timeout(timeout);
+    toast.connect_button_clicked(move |_| clicked());
     window.imp().toast_overlay.add_toast(toast);
 }
 
