@@ -40,6 +40,8 @@ pub enum PlayerEvent {
     NextQueued(u64),
     /// A state change or seek finished; the position is valid now.
     AsyncDone,
+    /// The stream's length is known now, or estimated anew.
+    DurationChanged,
     EndOfStream,
     Error(String),
 }
@@ -185,6 +187,7 @@ impl Player {
             let event = match message.view() {
                 MessageView::StreamStart(_) => Some(PlayerEvent::StreamStarted),
                 MessageView::AsyncDone(_) => Some(PlayerEvent::AsyncDone),
+                MessageView::DurationChanged(_) => Some(PlayerEvent::DurationChanged),
                 MessageView::Eos(_) => Some(PlayerEvent::EndOfStream),
                 MessageView::Error(err) => Some(PlayerEvent::Error(err.error().to_string())),
                 _ => None,

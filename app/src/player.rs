@@ -1746,7 +1746,24 @@ impl Player {
                     self.stop();
                 }
             }
-            PlayerEvent::AsyncDone => {}
+            PlayerEvent::AsyncDone | PlayerEvent::DurationChanged => self.learn_duration(),
+        }
+    }
+
+    /// A local song the library has no length for (its file doesn't
+    /// say): the length GStreamer finds while it plays, so the progress
+    /// bar and seeking work.
+    fn learn_duration(&self) {
+        let imp = self.imp();
+        if imp.duration.get() != 0 || self.plays_from_spotify() {
+            return;
+        }
+        let Some(ms) = self.engine().and_then(playback::Player::duration_ms) else {
+            return;
+        };
+        if ms > 0 {
+            imp.duration.set(ms);
+            self.notify_duration();
         }
     }
 
@@ -1862,6 +1879,7 @@ impl Player {
                     glib::ControlFlow::Break,
                     move || {
                         if let Some(ms) = player.engine_position() {
+                            player.learn_duration();
                             player.set_position(ms);
                             player.maybe_crossfade(ms);
                         }

@@ -2,6 +2,7 @@
 
 pub mod artists;
 pub mod covers;
+pub mod flac;
 pub mod folders;
 pub mod grouping;
 pub mod scanner;

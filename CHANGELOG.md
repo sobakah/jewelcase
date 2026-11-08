@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Songs whose FLAC file doesn't say how long it is (some encoders leave that out) now get their length, so their progress bar, total time and seeking work. Such songs already in the library are read again once, on the next start. Until a song has a length, its bar stays empty instead of full.
+
 ## 0.2.2 (pre-release)
 
 Listening statistics, a visualizer, and update notices. Gatefold's database is updated on the first start; after that, 0.2.1 can't open it any more. From this version on, Gatefold tells you about new versions itself and can install them; while the repository is private, it asks GitHub through the `gh` command, which must be logged in (`gh auth status`).

@@ -701,7 +701,6 @@ impl PlayerView {
                 imp.subtitle.set_text(&gettext("Pick an album to start"));
             }
         }
-        imp.seek.set_sensitive(track.is_some());
         imp.playlist_button.set_sensitive(track.is_some());
         // Spotify songs not in the library have lyrics only from LRCLIB
         // (when it's on in Preferences).
@@ -742,7 +741,12 @@ impl PlayerView {
         let imp = self.imp();
         let duration = player.duration();
         imp.seek_adjustment.set_upper(duration.max(1) as f64);
-        imp.seek_adjustment.set_value(player.position() as f64);
+        // No length known (yet): an empty bar that can't be dragged.
+        let known = duration > 0;
+        imp.seek_adjustment
+            .set_value(if known { player.position() as f64 } else { 0.0 });
+        imp.seek
+            .set_sensitive(known && player.current_track().is_some());
         imp.position_label
             .set_label(&format::duration(player.position()));
         imp.duration_label.set_label(&format::end_time(

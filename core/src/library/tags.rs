@@ -74,6 +74,17 @@ pub fn read_tags(path: &Path) -> Result<(TrackTags, Option<Vec<u8>>), TagError> 
         ..TrackTags::default()
     };
 
+    // A FLAC header that doesn't say how long the stream is.
+    if tags.duration_ms == 0
+        && tagged.file_type() == FileType::Flac
+        && let Some(length) = super::flac::stream_length(path)
+    {
+        tags.duration_ms = length.duration_ms();
+        if tags.bitrate.is_none_or(|b| b == 0) {
+            tags.bitrate = length.bitrate();
+        }
+    }
+
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
     let cover = tag.and_then(front_cover);
     if let Some(tag) = tag {
