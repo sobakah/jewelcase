@@ -24,6 +24,11 @@ pub fn is_development() -> bool {
     PROFILE == "development"
 }
 
+/// Running as a Flatpak: host programs and their configs are out of reach.
+pub fn is_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
 /// Whether Gatefold looks for its own new releases (Meson option
 /// `update_check`; a Flatpak updates through its repository).
 pub fn update_check() -> bool {

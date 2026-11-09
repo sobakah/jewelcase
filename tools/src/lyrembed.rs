@@ -7,7 +7,9 @@ use crate::{Version, config_path, read_json};
 
 /// `lyrembed romanize --stdio` (§10.4) came with lyrembed 1.1.1; probing
 /// decides (`romanize --help`), not the version.
-pub const INSTALL_COMMAND: &str = "pipx install lyrembed";
+/// How to install it (pipx, from its repository, with romanization).
+pub const INSTALL_COMMAND: &str =
+    "pipx install \"lyrembed[all] @ git+https://github.com/sobakah/lyrembed.git\"";
 
 /// `lyrembed <album dir> --auto`: tag tracks with confident matches.
 pub fn auto_args(program: &Path, album_dir: &Path) -> Vec<OsString> {

@@ -1223,7 +1223,7 @@ impl GatefoldWindow {
                 move |values| {
                     let tools = values[0].get::<crate::tools::Tools>().ok()?;
                     window.update_tool_banners(&tools);
-                    window.offer_cdimport_folder(&tools);
+                    window.offer_cdport_folder(&tools);
                     None
                 }
             ),
@@ -1235,7 +1235,7 @@ impl GatefoldWindow {
         // cleanly and closes when it's done.
         self.connect_close_request(|window| {
             let tools = GatefoldApplication::get().tools();
-            if !tools.page_running() || window.imp().closing_after_tool.get() {
+            if !tools.page_needs_gatefold() || window.imp().closing_after_tool.get() {
                 return glib::Propagation::Proceed;
             }
             window.ask_stop_tool();
@@ -1279,7 +1279,7 @@ impl GatefoldWindow {
         );
         let when_done = close.clone();
         tools.connect_page_status_notify(move |tools| {
-            if !tools.page_running() {
+            if !tools.page_needs_gatefold() {
                 when_done();
             }
         });
@@ -1305,7 +1305,7 @@ impl GatefoldWindow {
         let status = tools.page_status();
         imp.tool_label.set_label(&status);
         imp.tool_revealer.set_reveal_child(!status.is_empty());
-        let can_import = tools.detected().cdimport.is_some() && status.is_empty();
+        let can_import = tools.detected().cdport.usable() && status.is_empty();
         imp.cd_banner.set_revealed(can_import && tools.cd_present());
         let unfinished = tools.unfinished_imports();
         imp.unfinished_banner.set_title(
@@ -1320,38 +1320,39 @@ impl GatefoldWindow {
             .set_revealed(can_import && !tools.cd_present() && unfinished > 0);
     }
 
-    /// Once: if cdimport saves albums outside the music folders, offer its
+    /// Once: if cdport saves albums outside the music folders, offer its
     /// folder as one (§10.2).
-    fn offer_cdimport_folder(&self, tools: &crate::tools::Tools) {
+    fn offer_cdport_folder(&self, tools: &crate::tools::Tools) {
         let settings = self.settings();
-        if tools.detected().cdimport.is_none() || settings.boolean("cdimport-folder-offered") {
+        let cdport = tools.detected().cdport;
+        if !cdport.usable() || settings.boolean("cdport-folder-offered") {
             return;
         }
-        let Some(dir) = gatefold_tools::cdimport::Config::read().library_dir else {
+        let Some(dir) = cdport.config.library_dir else {
             return;
         };
         let folders = crate::library_folders::load(settings);
         let covered = folders
             .iter()
             .any(|f| dir.starts_with(f) || f.starts_with(&dir));
-        let _ = settings.set_boolean("cdimport-folder-offered", true);
+        let _ = settings.set_boolean("cdport-folder-offered", true);
         if covered || !dir.is_dir() {
             return;
         }
         // Translators: {} is a folder path.
         let toast = adw::Toast::builder()
             .title(
-                gettextrs::gettext("cdimport saves albums to {}")
+                gettextrs::gettext("cdport saves albums to {}")
                     .replace("{}", &dir.display().to_string()),
             )
             .button_label(gettextrs::gettext("_Add as Music Folder"))
-            .action_name("app.add-cdimport-folder")
+            .action_name("app.add-cdport-folder")
             .timeout(0)
             .build();
         self.imp().toast_overlay.add_toast(toast);
     }
 
-    /// After a cdimport run: "New album: <title> — Show" (§10.2).
+    /// After a cdport run: "New album: <title> — Show" (§10.2).
     fn announce_imported_albums(&self) {
         let tools = GatefoldApplication::get().tools();
         let Some(since) = tools.import_started() else {
@@ -1402,6 +1403,28 @@ impl GatefoldWindow {
                 ),
             );
         }
+        // A tool that isn't set up: the instructions are in Preferences.
+        app.tools().connect_local(
+            "missing",
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                #[upgrade_or]
+                None,
+                move |values| {
+                    let name = values[1].get::<String>().ok()?;
+                    // Translators: {} is a program name (lyrembed, cdport).
+                    let toast = adw::Toast::builder()
+                        .title(gettextrs::gettext("{} isn't set up yet").replace("{}", &name))
+                        .button_label(gettextrs::gettext("_How to Set Up"))
+                        .action_name("app.show-integrations")
+                        .build();
+                    window.imp().toast_overlay.add_toast(toast);
+                    None
+                }
+            ),
+        );
     }
 
     fn show_album(&self, album: &AlbumObject) {

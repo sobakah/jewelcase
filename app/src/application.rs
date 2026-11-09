@@ -212,8 +212,22 @@ impl GatefoldApplication {
         let stop = gio::ActionEntry::builder("tool-stop")
             .activate(|app: &Self, _, _| app.tools().stop_page())
             .build();
-        let add_cdimport_folder = gio::ActionEntry::builder("add-cdimport-folder")
-            .activate(|app: &Self, _, _| app.add_cdimport_folder())
+        let add_cdport_folder = gio::ActionEntry::builder("add-cdport-folder")
+            .activate(|app: &Self, _, _| app.add_cdport_folder())
+            .build();
+        let detect_tools = gio::ActionEntry::builder("detect-tools")
+            .activate(|app: &Self, _, _| app.tools().detect())
+            .build();
+        let set_up_cdport = gio::ActionEntry::builder("set-up-cdport")
+            .activate(|app: &Self, _, _| app.tools().set_up_cdport_service())
+            .build();
+        // Preferences › Integrations: how to install and set up the tools.
+        let show_integrations = gio::ActionEntry::builder("show-integrations")
+            .activate(|app: &Self, _, _| {
+                let dialog = PreferencesDialog::new();
+                dialog.set_visible_page_name("integrations");
+                dialog.present(app.active_window().as_ref());
+            })
             .build();
         self.add_action_entries([
             quit,
@@ -227,7 +241,10 @@ impl GatefoldApplication {
             continue_import,
             show_page,
             stop,
-            add_cdimport_folder,
+            add_cdport_folder,
+            show_integrations,
+            detect_tools,
+            set_up_cdport,
         ]);
     }
 
@@ -250,10 +267,10 @@ impl GatefoldApplication {
         }
     }
 
-    /// Library folder agreement (§10.2): cdimport's library folder becomes a
+    /// Library folder agreement (§10.2): cdport's library folder becomes a
     /// music folder, if the user accepts the offer.
-    fn add_cdimport_folder(&self) {
-        let Some(dir) = gatefold_tools::cdimport::Config::read().library_dir else {
+    fn add_cdport_folder(&self) {
+        let Some(dir) = self.tools().detected().cdport.config.library_dir else {
             return;
         };
         let settings = gio::Settings::new(APP_ID);
@@ -266,7 +283,7 @@ impl GatefoldApplication {
                     tracing::warn!("Cannot save music folders: {err}");
                 }
             }
-            Err(err) => tracing::info!("cdimport's folder can't be added: {err}"),
+            Err(err) => tracing::info!("cdport's folder can't be added: {err}"),
         }
     }
 

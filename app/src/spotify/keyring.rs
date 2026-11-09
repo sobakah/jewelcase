@@ -151,11 +151,12 @@ pub async fn uses_file() -> bool {
     if let Some(answer) = NO_KEYRING.get() {
         return *answer;
     }
-    let available = gio::spawn_blocking(keyring_available)
-        .await
-        .unwrap_or(true);
+    let available = gio::spawn_blocking(keyring_available).await.unwrap_or(true);
     if !available {
-        tracing::warn!("No keyring service; Spotify logins are kept in {}", file_store::path().display());
+        tracing::warn!(
+            "No keyring service; Spotify logins are kept in {}",
+            file_store::path().display()
+        );
     }
     *NO_KEYRING.get_or_init(|| !available)
 }
@@ -200,7 +201,7 @@ fn keyring_available() -> bool {
     // In a Flatpak, oo7 keeps the logins in a file of its own, encrypted
     // with a key from the secret portal.
     let portal = || {
-        std::path::Path::new("/.flatpak-info").exists()
+        crate::config::is_flatpak()
             && call(
                 "org.freedesktop.portal.Desktop",
                 "/org/freedesktop/portal/desktop",

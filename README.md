@@ -16,10 +16,10 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 
 **Playlists and search.** Playlists get mosaic covers from their albums, can be reordered by drag and drop, and can be imported and exported as M3U8 or XSPF. One search (Ctrl+F) finds artists, albums, songs and playlists, in a card over the current view: your library first, then Spotify's results (when connected), with an icon for what's in your library. The last five searches show while the field is empty.
 
-**Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes:
+**Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes. Preferences → Integrations shows whether they're found and, if not, the steps to install and set them up:
 
 - **lyrembed** finds lyrics automatically, or opens its page to check and edit them.
-- **cdimport** imports CDs; a banner offers it when you insert one.
+- **cdport** (formerly cdimport) imports CDs; a banner offers it when you insert one. With its D-Bus service set up (`cdport --install-dbus-service`), imports keep running when Gatefold closes, and the Flatpak can use it.
 - [Ear Tag](https://flathub.org/apps/app.drey.EarTag) (or Kid3, Picard, or a command of your own) edits tags and covers.
 
 **Spotify (optional).** With Spotify Premium and a developer app of your own (see [Spotify](#spotify-optional) below):
@@ -67,7 +67,7 @@ Development aids:
   playback test that shouldn't show up on the desktop, e.g.
   `GSETTINGS_SCHEMA_DIR=_build/data GATEFOLD_SCREENSHOT=/tmp/shot.png build-aux/headless.sh _build/app/gatefold`.
 - `GATEFOLD_SILENT=1` plays into a fakesink instead of the speakers.
-- `GATEFOLD_NO_BROWSER=1` logs companion tool pages (lyrembed, cdimport)
+- `GATEFOLD_NO_BROWSER=1` logs companion tool pages (lyrembed, cdport)
   instead of opening them in the browser.
 - `GATEFOLD_SCREENSHOT=out.png` (development profile only) renders the
   window to a PNG and quits;
@@ -126,7 +126,7 @@ For development, debug builds talk to a stand-in server instead of Spotify when
 ```
 app/        GTK UI (crate `gatefold`)
 core/       library model, scanner, queue, playback; no GTK (crate `gatefold-core`)
-tools/      lyrembed, cdimport, tag editor: detection, commands, configs (crate `gatefold-tools`)
+tools/      lyrembed, cdport, tag editor: detection, commands, configs, D-Bus names (crate `gatefold-tools`)
 lyrics/     LRC parsing, embedded and sidecar lyrics, dual-line pairing (crate `gatefold-lyrics`)
 metadata/   MusicBrainz, Wikidata, Commons, Deezer lookups (crate `gatefold-metadata`)
 spotify/    Spotify login (OAuth PKCE) and Web API: player, playlists, search (crate `gatefold-spotify`)

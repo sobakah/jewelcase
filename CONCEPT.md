@@ -10,7 +10,7 @@
 | Album details | Side panel (a sliding panel like `AdwOverlaySplitView`); only artists get their own page |
 | Metadata source | **Local tags are the source of truth.** Online data only adds what tags can't hold (portraits, links, bios). |
 | Spotify | Links, remote control, streaming (librespot), **Spotify playlists with local substitution**, mixed playlists, **two-way editing** of owned Spotify playlists (§9.6) |
-| lyrembed / cdimport | Started as external programs; their pages open **in the default browser**; no GTK port planned |
+| lyrembed / cdport | Started as external programs; their pages open **in the default browser**; no GTK port planned |
 | Romanization | **Automatic**, using lyrembed's engine (§5.1) |
 | Audio analysis | Wanted (bliss + BPM detection, §7) |
 | Album editions | Not part of the title. Shown only as a subtitle in the album panel; same-tracklist editions merged (§3.4) |
@@ -58,7 +58,7 @@ Non-goals for v1: tag editing inside the player (delegated to Ear Tag), online l
 | Secrets | **oo7** (GNOME's Rust Secret Service client) | Stores Spotify tokens in the keyring; without a keyring service, in a file only the user can read (§11). |
 | Settings | **GSettings** | Standard GNOME settings storage, available through gio. |
 | Spotify streaming | **librespot** (optional Cargo feature) | The only maintained open-source Spotify client library. See §9. |
-| Companion tools | **gio::Subprocess** (async, GLib-integrated) | Runs lyrembed, cdimport and Ear Tag as separate processes. The tools' pages open in the default browser. See §10. |
+| Companion tools | **gio::Subprocess** (async, GLib-integrated) | Runs lyrembed, cdport and Ear Tag as separate processes. The tools' pages open in the default browser. See §10. |
 | Packaging | **RPM** for Fedora 45, built locally (`rpmbuild` / `mock`) | Personal use only for now. Native packaging keeps direct file access and lets the app start lyrembed, cdimport and Ear Tag without sandbox workarounds. See §12. |
 
 ### Crate / module layout (Cargo workspace)
@@ -70,7 +70,7 @@ gatefold/           # this repository (Cargo workspace root)
 ├── metadata/       # MusicBrainz, Wikidata, Deezer, Cover Art Archive providers
 ├── lyrics/         # LRC/embedded parsing, dual-line pairing
 ├── similarity/     # bliss analysis worker + "similar track" queries
-├── tools/          # lyrembed / cdimport: detection, version probing, process control
+├── tools/          # lyrembed / cdport: detection, version probing, process control
 └── spotify/        # feature-gated: Web API client, librespot integration
 ```
 
@@ -517,23 +517,26 @@ Spotify's albums and artists are shown **apart from the library**, never mixed i
 
 ---
 
-## 10. Companion Tools: lyrembed, cdimport & Ear Tag
+## 10. Companion Tools: lyrembed, cdport & Ear Tag
 
-lyrembed and cdimport are separate Python programs installed with pipx, each with a CLI and a local browser page (127.0.0.1 with a secret token). Ear Tag (Flatpak `app.drey.EarTag`) is the tag editor (§10.3). The player doesn't duplicate what they do. It **starts them**, **opens their pages in the default browser**, and **reads what they write to the files**. A GTK port of the tools isn't planned.
+lyrembed and cdport (called cdimport before 1.3.0) are separate Python programs installed with pipx, each with a CLI and a local browser page (127.0.0.1 with a secret token). Ear Tag (Flatpak `app.drey.EarTag`) is the tag editor (§10.3). The player doesn't duplicate what they do. It **starts them**, **opens their pages in the default browser**, and **reads what they write to the files**. A GTK port of the tools isn't planned.
 
-**Contract:** the **command line is the stable interface**: arguments, exit codes, `--version`, and the printed line "`<tool> is running at <url>`". Their page JSON APIs (`/api/library`, `/api/jobs`, …) are internal and are **not** called by the player. The player gets results by reading the files afterwards, which it does anyway through inotify. Where the CLI is missing something, §10.4 lists small additions to the tools themselves.
+**Contract:** the **command line is the stable interface** (cdport 1.3.0 and newer also has a D-Bus interface, below): arguments, exit codes, `--version`, and the printed line "`<tool> is running at <url>`". Their page JSON APIs (`/api/library`, `/api/jobs`, …) are internal and are **not** called by the player. The player gets results by reading the files afterwards, which it does anyway through inotify. Where the CLI is missing something, §10.4 lists small additions to the tools themselves.
 
 ### 10.0 Shared plumbing (`tools/` module)
 - **Detection**: look in `PATH`, then `~/.local/bin` explicitly. Apps started from the GNOME menu often don't have `~/.local/bin` in `PATH`, the same issue the lyrembed README notes for fish. Paths can be overridden in Preferences → *Integrations*.
-- **Feature probing**: `lyrembed --version` / `cdimport --version` → enable features by version, as cdimport does with lyrembed. The Integrations page shows *found / version / path* and the install command (`pipx install …`) when a tool is missing. The player never installs them itself.
-- **Process control**: `gio::Subprocess` with stdout/stderr pipes read asynchronously on the main loop. To stop a tool, the player sends SIGINT (it behaves as with Ctrl+C, so cdimport finishes cyanrip's log), never SIGKILL.
+- **Feature probing**: `lyrembed --version` / `cdport --version` → enable features by version, as cdport does with lyrembed. The Integrations page shows *found / version / path* and the install command (`pipx install …`) when a tool is missing. The player never installs them itself.
+- **Process control**: `gio::Subprocess` with stdout/stderr pipes read asynchronously on the main loop. To stop a tool, the player sends SIGINT (it behaves as with Ctrl+C, so cdport finishes cyanrip's log), never SIGKILL.
 - **Pages in the browser**:
   - Start the tool with `--no-browser` and read the `… is running at http://127.0.0.1:PORT/?token=…` line from stdout. Open it in the default browser with **`gtk::UriLauncher`**.
-  - The player keeps the URL while the tool runs. An `AdwBanner` in the library shows *"lyrembed is open in your browser · Show page · Stop"*, or *"Importing a CD with cdimport · Show page · Stop"*. **Show page** reopens the address if the tab was lost. **Stop** sends SIGINT.
-  - No `--return-url` is passed. The pages keep their normal **Quit** button, and the player reacts to the **process exit**. Closing the tab also ends the tools after a short while (lyrembed), or at the next question (cdimport, never during a rip).
-  - cdimport's hand-over to lyrembed's page and back (its lyrics step) happens entirely in the browser and needs nothing from the player.
+  - The player keeps the URL while the tool runs. An `AdwBanner` in the library shows *"lyrembed is open in your browser · Show page · Stop"*, or *"Importing a CD with cdport · Show page · Stop"*. **Show page** reopens the address if the tab was lost. **Stop** sends SIGINT.
+  - No `--return-url` is passed. The pages keep their normal **Quit** button, and the player reacts to the **process exit**. Closing the tab also ends the tools after a short while (lyrembed), or at the next question (cdport, never during a rip).
+  - cdport's hand-over to lyrembed's page and back (its lyrics step) happens entirely in the browser and needs nothing from the player.
 - **Audio conflict**: lyrembed's editor plays the track in the page. When a lyrembed page opens, the player **pauses** and remembers the position. It resumes only if the user presses play (no auto-resume over the tool's audio).
 - **Picking up results**: tools write into the music files, and inotify triggers a re-read of exactly those tracks. The lyrics pane reloads live without interrupting playback. Writes replace files atomically (new inode), and GStreamer keeps reading the old file descriptor, so this is safe on Linux.
+- **cdport over D-Bus** (November 2026): cdport 1.3.0 owns `io.github.sobakah.cdport` on the session bus once `cdport --install-dbus-service` has written its service file (the bus starts it on demand; it exits after a minute without calls or runs). Interface `io.github.sobakah.cdport1` on `/io/github/sobakah/cdport`: `GetInfo` (version, library and working folder, editor: replaces reading its config), `UnfinishedAlbums` (replaces looking for `.cdimport.json` files), `Import({Library, Folder}) → (run, url)` (the page's address to open), `Runs`, `Stop(run)` (as Ctrl+C) and the signal `Finished(run, exit code, album)`. It has no call that runs a command or works on any folder the caller names, so it's fine for a Flatpak (`--talk-name=io.github.sobakah.cdport`).
+  - Gatefold uses D-Bus whenever `GetInfo` answers, else starts the program (`cdport`, or `cdimport` for 1.2.x) as before. A run over D-Bus belongs to cdport: closing Gatefold doesn't stop it, and a Gatefold started again shows it in the status bar (`Runs`).
+  - **Guidance** (Preferences → Integrations): per tool its status and, when it isn't usable yet, the steps with copyable commands: install pipx (`sudo dnf install pipx`, `pipx ensurepath`), install the tool from its repository with pipx, `cdport --install-dbus-service` (a *Set Up* button runs it where Gatefold sees the program), switching from cdimport (`pipx uninstall cdimport` first: both install a `cdimport` command), repairing a service whose program is gone. A tool that's needed but missing shows a toast with *How to Set Up*. *Look Again* (and opening Preferences) detects anew. In a Flatpak, lyrembed says it isn't available yet.
 - **Native app**: the RPM build (§12) starts the tools directly. No `flatpak-spawn --host` or sandbox permissions are needed. Ear Tag, as a Flatpak, is started through `flatpak run` (§10.3).
 
 ### 10.1 lyrembed: lyrics search, checking and romanization
@@ -546,7 +549,7 @@ lyrembed and cdimport are separate Python programs installed with pipx, each wit
 | In the background | **Automatic romanization** for display (§5.1) | `lyrembed romanize --stdio` (new, §10.4) |
 | Library ⋮ (later) | **Fetch missing lyrics for the whole library**: a queue of `--auto` jobs, **one album folder per call** (lyrembed refuses folders over `max_file_count`, 250 by default, and goes at most 3 levels deep), one job at a time, stoppable | per album |
 
-- **Exit codes** are interpreted as follows: `0` done (which can also mean "nothing confident found", so the player re-reads the tracks to see which still have no lyrics, as cdimport does), `1` some files failed, `2` unusable path or config, `130` cancelled. Tracks still without lyrics after `--auto` get a *"Choose manually in lyrembed…"* action.
+- **Exit codes** are interpreted as follows: `0` done (which can also mean "nothing confident found", so the player re-reads the tracks to see which still have no lyrics, as cdport does), `1` some files failed, `2` unusable path or config, `130` cancelled. Tracks still without lyrics after `--auto` get a *"Choose manually in lyrembed…"* action.
 - **The romanization layout matters for dual-line display**: lyrembed's default `romanization_layout` is `"replace"`, which drops the original script. Preferences → Integrations shows a hint if lyrembed's config (`~/.config/lyrembed/config.json`) doesn't say `"below"`. The player only reads that file and never writes it.
 - **Artist aliases**: lyrembed has about 205 alias groups (K-pop, J-pop, C-pop, spellings with and without diacritics) plus the user's own. The player reads them through `lyrembed --list-aliases` (§10.4 proposes JSON output) and caches them. It uses them for:
   - search ("Hoshino Gen" finds 星野源),
@@ -554,20 +557,20 @@ lyrembed and cdimport are separate Python programs installed with pipx, each wit
   - showing the Latin name as a subtitle under a native-script artist name on the artist page.
 - **Romanization**: automatic, with lyrembed's engine. See §5.1.
 
-### 10.2 cdimport: getting CDs into the library
+### 10.2 cdport: getting CDs into the library
 
 | Where in the player | What happens | Command |
 |---|---|---|
-| Library main menu → **Import CD…** | Opens cdimport's page in the browser, plus a status banner in the player | `cdimport --web --no-browser -l <library folder>` |
+| Library main menu → **Import CD…** | Opens cdport's page in the browser, plus a status banner in the player | `cdport --web --no-browser -l <library folder>` |
 | Audio CD inserted (GIO `GVolumeMonitor`, content type `x-content/audio-cdda`) | `AdwBanner`: *"Audio CD detected — Import"* | as above |
-| Unfinished imports | Banner: *"1 unfinished CD import — Continue"*. The player finds `.cdimport.json` files in cdimport's `work_dir` (read from `~/.config/cdimport/config.json`) and only checks whether they exist, never their contents | `cdimport <album dir> --web --no-browser …` |
-| After the import | cdimport moves the album to `<library>/<albumartist>/<folder>`. inotify sees the new folder, and the player shows a toast *"New album: \<title\> — Play / Show"* | — |
+| Unfinished imports | Banner: *"1 unfinished CD import — Continue"*. The player finds `.cdport.json` files in cdport's `work_dir` (read from `~/.config/cdport/config.json`) and only checks whether they exist, never their contents | `cdport <album dir> --web --no-browser …` |
+| After the import | cdport moves the album to `<library>/<albumartist>/<folder>`. inotify sees the new folder, and the player shows a toast *"New album: \<title\> — Play / Show"* | — |
 
-- **Library folder agreement**: on first run, if cdimport is installed, the player reads its `library_dir` and offers to add it as a library folder. When starting cdimport, the player passes `-l` with its own primary folder, so imports always land where the player looks.
-- **Multi-disc merges**: cdimport can add disc 2 into disc 1's existing folder. The scanner treats new files in a known album folder as part of that album (same release MBID / album + album artist), not as a new album.
+- **Library folder agreement**: on first run, if cdport is installed, the player reads its `library_dir` and offers to add it as a library folder. When starting cdport, the player passes `-l` with its own primary folder, so imports always land where the player looks.
+- **Multi-disc merges**: cdport can add disc 2 into disc 1's existing folder. The scanner treats new files in a known album folder as part of that album (same release MBID / album + album artist), not as a new album.
 - **Debounce**: an album appears as a folder move (atomic on one filesystem), but cover and cue files can follow shortly after. The scanner waits ~2 s after the last event in a folder before reading it.
-- **Covers**: cdimport writes `cover.jpg` and an embedded front cover, which the cover pipeline (§4.3) uses without extra work.
-- cdimport already chains lyrembed for the lyrics step, so the player adds nothing there.
+- **Covers**: cdport writes `cover.jpg` and an embedded front cover, which the cover pipeline (§4.3) uses without extra work.
+- cdport already chains lyrembed for the lyrics step, so the player adds nothing there.
 
 ### 10.3 Ear Tag: tag and cover editing
 The player never writes tags itself (Q8). Every editing action opens the files in **Ear Tag**, GNOME's tag editor (installed here as Flatpak `app.drey.EarTag`). It's the same editor cdimport uses by default.
@@ -631,7 +634,7 @@ For now the app is built as an **RPM for Fedora 45**, attached to GitHub release
 | **BuildRequires** | `meson`, `cargo`, `rust`, `blueprint-compiler`, `gtk4-devel`, `libadwaita-devel`, `gstreamer1-devel`, `gstreamer1-plugins-base-devel`, `sqlite-devel` (or bundled SQLite via rusqlite), `desktop-file-utils`, `appstream` (`appstreamcli`), `gettext`. Plus the FFmpeg dev libraries from `ffmpeg-free-devel` if bliss uses its FFmpeg decoder, see below. |
 | **Requires** | `gtk4`, `libadwaita`, `glycin-loaders`, `gstreamer1-plugins-base` (`playbin3`), `gstreamer1-plugins-good` (FLAC, `rgvolume` ReplayGain), `gstreamer1-plugins-bad-free` (`bpmdetect`/SoundTouch), `gstreamer1-plugin-libav` (AAC/ALAC in the M4A files) |
 | **Recommends** | `gstreamer1-plugins-ugly-free` (WMA via `asfdemux`, not needed for `~/Musik` today), `flatpak` (for Ear Tag) |
-| **Not RPM dependencies** | lyrembed, cdimport (pipx), Ear Tag (Flatpak): detected at runtime (§10) |
+| **Not RPM dependencies** | lyrembed, cdport (pipx), Ear Tag (Flatpak): detected at runtime (§10) |
 
 - **Installed files**: `/usr/bin/gatefold`, the desktop file and AppStream metainfo (validated in `%check`), the GSettings schema, icons (scalable + symbolic), the GResource bundle, and translations.
 - **bliss decoding** (verify in an early spike): bliss-audio decodes through FFmpeg by default. On Fedora that means `ffmpeg-free`, which has to decode the library's FLAC, AAC/ALAC (M4A) and MP3 files. The alternative is feeding bliss samples decoded by GStreamer, so there's one decoding stack, and `bpmdetect` can run in the same pipeline pass. That's preferred if the bliss version supports external samples.
@@ -683,7 +686,7 @@ For now the app is built as an **RPM for Fedora 45**, attached to GitHub release
   - *Gatefold downloads Soloist itself*, only when the user agrees (first setup and each new build, like the update notice): the archive for the machine (`soloist_release_x86_64.tar.gz`, `…_arm64`, `…_arm32`) from `soloist-builds.spotifycdn.com`, checked by ETag (HEAD) against the one installed, unpacked into the app's data folder, validated with `soloist --version` and swapped in atomically; Soloist is restarted gracefully. A build that expired (exit code 10) asks right away. Still no Soloist code in Gatefold's package: the user's machine fetches it from Spotify.
   - *Differences to soloistd on the host:* the Spotify device exists only while Gatefold runs (Background portal to keep it while the window is closed); the sandboxed Soloist has its own data folder, so it's linked once in the Spotify app; it needs `--socket=pulseaudio` (or PipeWire) and the network.
   - *A soloistd on the host keeps working:* Gatefold attaches to its Soloist over 127.0.0.1 (the sandbox shares the network) and reads its config.json (`--filesystem=xdg-config/soloistd:ro`); controlling the service (`systemctl`, `soloistd update`) goes through `flatpak-spawn --host`, as now.
-- **The companion tools as Flatpaks**: from our own Flatpak they run either way (`flatpak-spawn --host` starts pipx programs and `flatpak run` alike), so nothing has to change in them. For Flathub, being a Flatpak isn't enough: a Flathub app can neither start host programs nor run other Flatpaks directly. Ear Tag works through the "Open With" portal (files handed over). lyrembed and cdimport would each need a D-Bus interface Gatefold may call (`--talk-name=<their name>`). They can stay Python programs installed with pipx on the host: each owns a name on the session bus (e.g. through `jeepney` or `dbus-fast`, both pure Python from PyPI) and installs a D-Bus service file in `~/.local/share/dbus-1/services/`, so the bus starts it when Gatefold calls (the sandbox can't start host programs, but the bus can). Paths are the same on both sides (Gatefold sees `xdg-music`), the romanizer's `--stdio` exchange becomes a method call, and a tool's page is opened by asking the tool for its URL (with the token) and handing that to the browser. Turning them into Flatpaks isn't needed; it would add work (their Flatpaks would need the music folder, cdimport the CD drive, `--device=all`, and cyanrip inside it). Such an interface mustn't be a way out of the sandbox (no "run this command" method), or Flathub's review would treat it like `flatpak-spawn --host`.
+- **The companion tools as Flatpaks**: from our own Flatpak they run either way (`flatpak-spawn --host` starts pipx programs and `flatpak run` alike), so nothing has to change in them. For Flathub, being a Flatpak isn't enough: a Flathub app can neither start host programs nor run other Flatpaks directly. Ear Tag works through the "Open With" portal (files handed over). lyrembed and cdport would each need a D-Bus interface Gatefold may call (`--talk-name=<their name>`); cdport has it since 1.3.0 (§10.0), lyrembed will follow. They can stay Python programs installed with pipx on the host: each owns a name on the session bus (e.g. through `jeepney` or `dbus-fast`, both pure Python from PyPI) and installs a D-Bus service file in `~/.local/share/dbus-1/services/`, so the bus starts it when Gatefold calls (the sandbox can't start host programs, but the bus can). Paths are the same on both sides (Gatefold sees `xdg-music`), the romanizer's `--stdio` exchange becomes a method call, and a tool's page is opened by asking the tool for its URL (with the token) and handing that to the browser. Turning them into Flatpaks isn't needed; it would add work (their Flatpaks would need the music folder, cdimport the CD drive, `--device=all`, and cyanrip inside it). Such an interface mustn't be a way out of the sandbox (no "run this command" method), or Flathub's review would treat it like `flatpak-spawn --host`.
 - **App icon** (2026-11-09): an LP in a gatefold sleeve, its front cover slightly opened (in perspective) and the record halfway out from between the panels; the cover nods to *The Dark Side of the Moon* (prism, light beam, spectrum). Before publishing widely (Flathub, a public repository), check that the nod is far enough from the original artwork and Pink Floyd's prism trademark, or switch to an abstract cover of our own.
 - **Flathub** is a separate decision: it rejects `flatpak-spawn --host` and needs a public repository. As far as known, it also doesn't accept apps that download and run program code after installation; its route for proprietary programs (extra-data) needs a fixed checksum, and Soloist's download changes with every build. A Flathub version would go without the companion tools (unless they get D-Bus interfaces, above) and soloistd's controls, and without downloading Soloist: Ear Tag through "Open With", Spotify through an already running Soloist over its WebSocket only (Soloist can't be shipped: Spotify forbids redistributing it).
 - **RPM** stays: COPR (same spec, needs a public repository in practice) would give dnf/GNOME Software updates for it too.

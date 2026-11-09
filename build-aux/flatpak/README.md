@@ -36,9 +36,12 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Gatefold.Devel`
   outside it would come through the folder chooser's portal (untested).
 - **Spotify logins** are kept through the secret portal; on desktops without
   one, in a file only the user can read (Preferences › Spotify says so).
-- **Doesn't work yet** (they need `flatpak-spawn --host`, phase 9): lyrembed
-  (lyrics search, romanization), cdimport, Ear Tag (`flatpak run` from inside
-  the sandbox) and soloistd's controls. Gatefold shows them as not installed.
+- **cdport** works through its D-Bus service on the host
+  (`cdport --install-dbus-service`; `--talk-name=io.github.sobakah.cdport`).
+  Preferences › Integrations shows the steps when it isn't set up.
+- **Doesn't work yet**: lyrembed (lyrics search, romanization; it will get a
+  D-Bus interface too), Ear Tag (`flatpak run` from inside the sandbox) and
+  soloistd's controls. Gatefold shows them as not installed.
   Soloist, which Gatefold downloads and runs itself, should work inside the
   sandbox (untested).
 - **No update check**: Flatpaks update through their repository.
@@ -47,7 +50,9 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Gatefold.Devel`
 
 Scanning the library (read-only), covers (glycin's loaders from the runtime),
 the album panel, playback and the visualizer, and the `bpmdetect` element for
-the song analysis. For an invisible, silent run like `build-aux/headless.sh`:
+the song analysis. cdport over D-Bus (with a test service file in the
+headless session's `XDG_DATA_HOME/dbus-1/services`): its status, unfinished
+imports, an import's page address, Stop and the `Finished` signal. For an invisible, silent run like `build-aux/headless.sh`:
 
 ```sh
 FLATPAK_USER_DIR=$HOME/.local/share/flatpak build-aux/headless.sh \

@@ -68,11 +68,19 @@ mod imp {
         #[template_child]
         pub lyrembed_path_row: TemplateChild<adw::EntryRow>,
         #[template_child]
-        pub cdimport_status: TemplateChild<adw::ActionRow>,
+        pub lyrembed_setup: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub cdimport_library: TemplateChild<adw::ActionRow>,
+        pub lyrembed_steps: TemplateChild<gtk::ListBox>,
         #[template_child]
-        pub cdimport_path_row: TemplateChild<adw::EntryRow>,
+        pub cdport_status: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub cdport_library: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub cdport_path_row: TemplateChild<adw::EntryRow>,
+        #[template_child]
+        pub cdport_setup: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub cdport_steps: TemplateChild<gtk::ListBox>,
         #[template_child]
         pub tag_editor_row: TemplateChild<adw::ComboRow>,
         #[template_child]
@@ -327,7 +335,7 @@ mod imp {
             // Paths apply when the entry is confirmed (Enter), not per key.
             for (row, key) in [
                 (&*self.lyrembed_path_row, "lyrembed-path"),
-                (&*self.cdimport_path_row, "cdimport-path"),
+                (&*self.cdport_path_row, "cdport-path"),
                 (&*self.tag_editor_command_row, "tag-editor-command"),
             ] {
                 row.set_text(&settings.string(key));
@@ -376,6 +384,12 @@ mod imp {
             );
             crate::widgets::disconnect_with(&*obj, &tools, detected);
             obj.show_tools();
+            // Looked for again: installed or set up since the last look.
+            tools.detect();
+            // A Flatpak doesn't see the programs: only D-Bus counts there.
+            let flatpak = crate::config::is_flatpak();
+            self.lyrembed_path_row.set_visible(!flatpak);
+            self.cdport_path_row.set_visible(!flatpak);
         }
     }
 
@@ -546,29 +560,24 @@ impl PreferencesDialog {
         }
     }
 
-    /// Found / version / path of each tool, or how to install it (§10.0).
+    /// Found / version / path of each tool, or the steps to install and
+    /// set it up (§10.0).
     fn show_tools(&self) {
-        use gatefold_tools::{cdimport, lyrembed};
+        use gatefold_tools::lyrembed;
         let imp = self.imp();
         let detected = crate::application::GatefoldApplication::get()
             .tools()
             .detected();
-        let describe = |tool: &Option<crate::tools::ToolInfo>, install: &str| match tool {
-            Some(tool) => match tool.version {
-                // Translators: {version} and {path} of a found program.
-                Some(version) => gettext("Version {version} · {path}")
-                    .replace("{version}", &version.to_string())
-                    .replace("{path}", &tool.path.display().to_string()),
-                None => tool.path.display().to_string(),
-            },
-            // Translators: {} is an install command, e.g. "pipx install lyrembed".
-            None => gettext("Not installed. Install it with “{}”").replace("{}", install),
-        };
-        imp.lyrembed_status
-            .set_subtitle(&describe(&detected.lyrembed, lyrembed::INSTALL_COMMAND));
-        imp.cdimport_status
-            .set_subtitle(&describe(&detected.cdimport, cdimport::INSTALL_COMMAND));
+        let flatpak = crate::config::is_flatpak();
 
+        // lyrembed
+        let lyrembed = detected.lyrembed.as_ref();
+        imp.lyrembed_status.set_subtitle(&match lyrembed {
+            Some(tool) => found(tool.version, Some(&tool.path)),
+            None if flatpak => gettext("Not available in the Flatpak version yet"),
+            None => gettext("Not installed"),
+        });
+        imp.romanize_status.set_visible(lyrembed.is_some());
         let romanize = if detected.romanize_stdio {
             gettext("Lyrics without romanization get it for display, also from LRCLIB")
         } else {
@@ -579,21 +588,113 @@ impl PreferencesDialog {
         };
         imp.romanize_status.set_subtitle(&romanize);
         imp.layout_hint
-            .set_visible(detected.lyrembed.is_some() && !lyrembed::Config::read().keeps_original());
+            .set_visible(lyrembed.is_some() && !lyrembed::Config::read().keeps_original());
+        let setup = if lyrembed.is_some() {
+            None
+        } else if flatpak {
+            Some(Setup {
+                title: gettext("lyrembed and the Flatpak"),
+                description: gettext(
+                    "A Flatpak can't start programs on your computer. lyrembed will get a D-Bus interface for this, as cdport has; until then, its lyrics features are only in the other versions of Gatefold.",
+                ),
+                steps: Vec::new(),
+            })
+        } else {
+            Some(Setup {
+                title: gettext("Install lyrembed"),
+                description: gettext(
+                    "In a terminal. Gatefold finds lyrembed by itself afterwards, or press Look Again above.",
+                ),
+                steps: [
+                    pipx_steps(),
+                    vec![Step::command(
+                        gettext("Install lyrembed, with romanization"),
+                        lyrembed::INSTALL_COMMAND,
+                    )],
+                ]
+                .concat(),
+            })
+        };
+        self.show_setup(&imp.lyrembed_setup, &imp.lyrembed_steps, setup);
 
-        let library = cdimport::Config::read().library_dir;
-        imp.cdimport_library
-            .set_visible(detected.cdimport.is_some());
-        imp.cdimport_library.set_subtitle(
-            &library
+        // cdport
+        let cdport = &detected.cdport;
+        imp.cdport_status
+            .set_subtitle(&cdport_status(cdport, flatpak));
+        imp.cdport_library.set_visible(cdport.usable());
+        imp.cdport_library.set_subtitle(
+            &cdport
+                .config
+                .library_dir
+                .as_ref()
                 .map(|dir| dir.display().to_string())
                 .unwrap_or_else(|| gettext("Asked on first use")),
         );
+        self.show_setup(
+            &imp.cdport_setup,
+            &imp.cdport_steps,
+            cdport_setup(cdport, flatpak),
+        );
+
         imp.ear_tag_status.set_subtitle(&if detected.ear_tag {
             gettext("Installed")
         } else {
             gettext("Not installed. Get it from GNOME Software.")
         });
+    }
+
+    /// Fills a setup group (hidden without one).
+    fn show_setup(&self, group: &adw::PreferencesGroup, list: &gtk::ListBox, setup: Option<Setup>) {
+        list.remove_all();
+        let Some(setup) = setup else {
+            group.set_visible(false);
+            return;
+        };
+        group.set_title(&setup.title);
+        group.set_description(Some(&setup.description));
+        list.set_visible(!setup.steps.is_empty());
+        let numbered = setup.steps.len() > 1;
+        for (index, step) in setup.steps.into_iter().enumerate() {
+            let title = if numbered {
+                format!("{}. {}", index + 1, step.text)
+            } else {
+                step.text
+            };
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(&title))
+                .subtitle_selectable(true)
+                .build();
+            if let Some(command) = step.command {
+                row.set_subtitle(&format!("<tt>{}</tt>", glib::markup_escape_text(&command)));
+                let copy = gtk::Button::builder()
+                    .icon_name("edit-copy-symbolic")
+                    .tooltip_text(gettext("Copy"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                copy.connect_clicked(glib::clone!(
+                    #[weak(rename_to = dialog)]
+                    self,
+                    move |button| {
+                        button.clipboard().set_text(&command);
+                        dialog.toast(&gettext("Copied"));
+                    }
+                ));
+                row.add_suffix(&copy);
+            }
+            if let Some((label, action)) = step.button {
+                let button = gtk::Button::builder()
+                    .label(label)
+                    .use_underline(true)
+                    .action_name(action)
+                    .valign(gtk::Align::Center)
+                    .css_classes(["suggested-action"])
+                    .build();
+                row.add_suffix(&button);
+            }
+            list.append(&row);
+        }
+        group.set_visible(true);
     }
 
     fn toast(&self, message: &str) {
@@ -647,4 +748,178 @@ fn bind_choice(
             values.get(index).map(|v| v.to_variant())
         })
         .build();
+}
+
+/// A setup group: what to do so Gatefold can use a tool.
+struct Setup {
+    title: String,
+    description: String,
+    steps: Vec<Step>,
+}
+
+/// One step: what it does, the command to run (copyable), and a button
+/// that does it (an action).
+#[derive(Clone)]
+struct Step {
+    text: String,
+    command: Option<String>,
+    button: Option<(String, &'static str)>,
+}
+
+impl Step {
+    fn command(text: String, command: &str) -> Self {
+        Self {
+            text,
+            command: Some(command.to_owned()),
+            button: None,
+        }
+    }
+}
+
+/// "Version 1.3.0 · /home/…/cdport", or less when unknown.
+fn found(version: Option<gatefold_tools::Version>, path: Option<&Path>) -> String {
+    match (version, path) {
+        // Translators: {version} and {path} of a found program.
+        (Some(version), Some(path)) => gettext("Version {version} · {path}")
+            .replace("{version}", &version.to_string())
+            .replace("{path}", &path.display().to_string()),
+        // Translators: {} is a version number.
+        (Some(version), None) => gettext("Version {}").replace("{}", &version.to_string()),
+        (None, Some(path)) => path.display().to_string(),
+        (None, None) => gettext("Found"),
+    }
+}
+
+/// Installing pipx and putting its programs on PATH (the first steps).
+fn pipx_steps() -> Vec<Step> {
+    use gatefold_tools::{PIPX_INSTALL_COMMAND, PIPX_PATH_COMMAND};
+    vec![
+        Step::command(
+            gettext("Install pipx (on Fedora; other distributions have a pipx package too)"),
+            PIPX_INSTALL_COMMAND,
+        ),
+        Step::command(
+            gettext(
+                "Let the terminal find the programs pipx installs (once, then open a new terminal)",
+            ),
+            PIPX_PATH_COMMAND,
+        ),
+    ]
+}
+
+fn cdport_status(cdport: &crate::tools::Cdport, flatpak: bool) -> String {
+    let path = cdport.program.as_ref().map(|p| p.path.as_path());
+    if cdport.dbus {
+        // Translators: {} is "Version 1.3.0 · <path>" or "Version 1.3.0".
+        return gettext("{} · through D-Bus").replace("{}", &found(cdport.version, path));
+    }
+    if let Some(error) = &cdport.dbus_error {
+        // Translators: {} is the error message.
+        return gettext("Its D-Bus service doesn't start: {}").replace("{}", error);
+    }
+    if cdport.is_old() {
+        // Translators: {} is "Version 1.2.1 · <path>".
+        return gettext("cdimport, cdport’s old version: {}")
+            .replace("{}", &found(cdport.version, path));
+    }
+    if cdport.program.is_some() {
+        return found(cdport.version, path);
+    }
+    if flatpak {
+        gettext("Not found: not installed, or its D-Bus service isn't set up")
+    } else {
+        gettext("Not installed")
+    }
+}
+
+fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
+    use gatefold_tools::cdport::{INSTALL_COMMAND, REMOVE_OLD_COMMAND, SERVICE_COMMAND};
+    let service_step = || {
+        Step::command(
+            gettext("Let Gatefold reach cdport through D-Bus"),
+            SERVICE_COMMAND,
+        )
+    };
+    if cdport.dbus {
+        return None;
+    }
+    if cdport.dbus_error.is_some() {
+        let mut steps = Vec::new();
+        if cdport.program.is_none() {
+            steps.push(Step::command(
+                gettext("If cdport was removed, install it again"),
+                INSTALL_COMMAND,
+            ));
+        }
+        steps.push(set_up_step(
+            cdport,
+            gettext("Set up its D-Bus service again"),
+        ));
+        return Some(Setup {
+            title: gettext("Repair cdport’s D-Bus Service"),
+            description: gettext(
+                "The service is set up, but cdport didn't start through it, e.g. because cdport was moved or removed since.",
+            ),
+            steps,
+        });
+    }
+    if cdport.is_old() {
+        return Some(Setup {
+            title: gettext("Update to cdport"),
+            description: gettext(
+                "cdimport is now called cdport. From version 1.3.0 on, it has a D-Bus interface: imports keep running when Gatefold closes, and the Flatpak version of Gatefold can use it too. Until you update, Gatefold uses cdimport as before.",
+            ),
+            steps: vec![
+                Step::command(
+                    gettext("Remove cdimport (your settings stay)"),
+                    REMOVE_OLD_COMMAND,
+                ),
+                Step::command(gettext("Install cdport"), INSTALL_COMMAND),
+                service_step(),
+            ],
+        });
+    }
+    if cdport.can_set_up_service() {
+        return Some(Setup {
+            title: gettext("Set Up cdport’s D-Bus Service"),
+            description: gettext(
+                "Recommended. Gatefold starts cdport directly now. Through D-Bus, imports keep running when Gatefold closes, and the Flatpak version of Gatefold can use cdport too.",
+            ),
+            steps: vec![set_up_step(cdport, gettext("Set up the D-Bus service"))],
+        });
+    }
+    let description = if flatpak {
+        gettext(
+            "In a terminal on your computer (not inside Gatefold). Gatefold, as a Flatpak, reaches cdport through its D-Bus service, the last step. cdport offers to install cyanrip, which it rips with, when it first needs it.",
+        )
+    } else {
+        gettext(
+            "In a terminal. cdport offers to install cyanrip, which it rips with, when it first needs it. Gatefold finds cdport by itself afterwards, or press Look Again above.",
+        )
+    };
+    Some(Setup {
+        title: gettext("Install cdport"),
+        description,
+        steps: [
+            pipx_steps(),
+            vec![
+                Step::command(gettext("Install cdport"), INSTALL_COMMAND),
+                service_step(),
+            ],
+        ]
+        .concat(),
+    })
+}
+
+/// `cdport --install-dbus-service`, with a button where Gatefold can run
+/// it (the program is visible: not from a Flatpak).
+fn set_up_step(cdport: &crate::tools::Cdport, text: String) -> Step {
+    Step {
+        text,
+        command: Some(gatefold_tools::cdport::SERVICE_COMMAND.to_owned()),
+        button: cdport
+            .program
+            .is_some()
+            .then(|| (gettext("_Set Up"), "app.set-up-cdport")),
+    }
 }

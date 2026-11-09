@@ -1,12 +1,13 @@
-//! Gatefold's companion tools (CONCEPT.md §10): lyrembed, cdimport and the
+//! Gatefold's companion tools (CONCEPT.md §10): lyrembed, cdport and the
 //! tag editor (Ear Tag by default).
 //!
 //! The command line is the stable interface: arguments, exit codes,
-//! `--version` and the "`<tool> is running at <url>`" line. This crate
-//! builds commands and reads the tools' configs; running them is the app's
-//! job (`gio::Subprocess`).
+//! `--version` and the "`<tool> is running at <url>`" line; cdport also
+//! has a D-Bus interface (its names are in `cdport`). This crate builds
+//! commands and reads the tools' configs; running them is the app's job
+//! (`gio::Subprocess`, D-Bus calls).
 
-pub mod cdimport;
+pub mod cdport;
 pub mod editor;
 pub mod lyrembed;
 
@@ -80,6 +81,11 @@ pub fn expand_home(path: &str) -> PathBuf {
         _ => PathBuf::from(path),
     }
 }
+
+/// How to install pipx on Fedora (other distributions have a pipx package
+/// too), and to put the programs it installs on PATH.
+pub const PIPX_INSTALL_COMMAND: &str = "sudo dnf install pipx";
+pub const PIPX_PATH_COMMAND: &str = "pipx ensurepath";
 
 /// `~/.config/<tool>/config.json`.
 pub fn config_path(tool: &str) -> PathBuf {

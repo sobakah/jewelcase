@@ -196,10 +196,10 @@
       <summary>lyrembed program</summary>
       <description>Empty: look in PATH and ~/.local/bin.</description>
     </key>
-    <key name="cdimport-path" type="s">
+    <key name="cdport-path" type="s">
       <default>""</default>
-      <summary>cdimport program</summary>
-      <description>Empty: look in PATH and ~/.local/bin.</description>
+      <summary>cdport program</summary>
+      <description>Empty: look for cdport (or cdimport, its old name) in PATH and ~/.local/bin. Not needed when cdport's D-Bus service is set up.</description>
     </key>
     <key name="tag-editor" type="s">
       <choices>
@@ -211,16 +211,16 @@
       </choices>
       <default>"auto"</default>
       <summary>Tag editor</summary>
-      <description>“auto” uses cdimport’s editor setting, else Ear Tag.</description>
+      <description>“auto” uses cdport’s editor setting, else Ear Tag.</description>
     </key>
     <key name="tag-editor-command" type="s">
       <default>""</default>
       <summary>Custom tag editor command</summary>
       <description>With {files} for the files or {dir} for their folder.</description>
     </key>
-    <key name="cdimport-folder-offered" type="b">
+    <key name="cdport-folder-offered" type="b">
       <default>false</default>
-      <summary>Whether cdimport’s library folder was offered as a music folder</summary>
+      <summary>Whether cdport’s library folder was offered as a music folder</summary>
     </key>
     <key name="artist-panel-width" type="i">
       <default>0</default>

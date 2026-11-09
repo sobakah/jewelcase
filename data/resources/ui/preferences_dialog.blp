@@ -335,6 +335,17 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       title: _("lyrembed");
       description: _("Finds, checks and romanizes lyrics. Its page opens in your browser.");
 
+      header-suffix: Gtk.Button {
+        icon-name: "view-refresh-symbolic";
+        tooltip-text: _("Look Again");
+        action-name: "app.detect-tools";
+        valign: center;
+
+        styles [
+          "flat",
+        ]
+      };
+
       Adw.ActionRow lyrembed_status {
         title: _("Status");
         use-markup: false;
@@ -358,22 +369,59 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
-    Adw.PreferencesGroup cdimport_group {
-      title: _("cdimport");
+    // How to install lyrembed, filled in from preferences_dialog.rs.
+    Adw.PreferencesGroup lyrembed_setup {
+      visible: false;
+
+      Gtk.ListBox lyrembed_steps {
+        selection-mode: none;
+
+        styles [
+          "boxed-list",
+        ]
+      }
+    }
+
+    Adw.PreferencesGroup cdport_group {
+      title: _("cdport");
       description: _("Rips CDs to tagged FLAC and moves them into your library. Its page opens in your browser.");
 
-      Adw.ActionRow cdimport_status {
+      header-suffix: Gtk.Button {
+        icon-name: "view-refresh-symbolic";
+        tooltip-text: _("Look Again");
+        action-name: "app.detect-tools";
+        valign: center;
+
+        styles [
+          "flat",
+        ]
+      };
+
+      Adw.ActionRow cdport_status {
         title: _("Status");
         use-markup: false;
       }
 
-      Adw.ActionRow cdimport_library {
+      Adw.ActionRow cdport_library {
         title: _("Imports Go To");
         use-markup: false;
       }
 
-      Adw.EntryRow cdimport_path_row {
+      Adw.EntryRow cdport_path_row {
         title: _("Program (empty: look in PATH and ~/.local/bin)");
+      }
+    }
+
+    // How to install or set up cdport, filled in from preferences_dialog.rs.
+    Adw.PreferencesGroup cdport_setup {
+      visible: false;
+
+      Gtk.ListBox cdport_steps {
+        selection-mode: none;
+
+        styles [
+          "boxed-list",
+        ]
       }
     }
 
@@ -387,7 +435,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
         model: Gtk.StringList {
           strings [
-            _("Automatic (as in cdimport)"),
+            _("Automatic (as in cdport)"),
             _("Ear Tag"),
             _("Kid3"),
             _("MusicBrainz Picard"),

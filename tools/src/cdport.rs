@@ -1,4 +1,10 @@
-//! cdimport: getting CDs into the library (CONCEPT.md §10.2).
+//! cdport (called cdimport before 1.3.0): getting CDs into the library
+//! (CONCEPT.md §10.2).
+//!
+//! From 1.3.0 on, cdport offers a D-Bus interface, which the bus starts on
+//! demand once `cdport --install-dbus-service` has run; it's the only way
+//! a Flatpak can reach it. Without it, the player starts the program
+//! (`cdport`, or `cdimport` for 1.2.x) as before.
 
 use std::ffi::OsString;
 use std::fs;
@@ -6,12 +12,32 @@ use std::path::{Path, PathBuf};
 
 use crate::{config_path, expand_home, read_json};
 
-pub const INSTALL_COMMAND: &str = "pipx install cdimport";
+/// How to install it (pipx, from its repository).
+pub const INSTALL_COMMAND: &str = "pipx install git+https://github.com/sobakah/cdport.git";
+/// Switching from cdimport 1.2.x: both install a `cdimport` command.
+pub const REMOVE_OLD_COMMAND: &str = "pipx uninstall cdimport";
+/// Lets the session bus start cdport when Gatefold calls it.
+pub const SERVICE_ARG: &str = "--install-dbus-service";
+pub const SERVICE_COMMAND: &str = "cdport --install-dbus-service";
 
-/// cdimport's marker of an unfinished import (only its presence is checked).
+/// The program's names: cdport, and its old name (still installed by
+/// cdport as an alias, and the only one of cdimport 1.2.x).
+pub const PROGRAMS: [&str; 2] = ["cdport", "cdimport"];
+
+/// The first version with the D-Bus interface.
+pub const DBUS_VERSION: crate::Version = crate::Version(1, 3, 0);
+
+/// cdport's D-Bus interface (`cdport/dbus_service.py`).
+pub const BUS_NAME: &str = "io.github.sobakah.cdport";
+pub const OBJECT_PATH: &str = "/io/github/sobakah/cdport";
+pub const INTERFACE: &str = "io.github.sobakah.cdport1";
+
+/// cdport's marker of an unfinished import (only its presence is checked;
+/// it kept the old name).
 const STATE_FILE: &str = ".cdimport.json";
 
-/// What the player reads from cdimport's config (it never writes it).
+/// What the player reads from cdport's config (it never writes it), or
+/// gets from its `GetInfo` over D-Bus.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     pub library_dir: Option<PathBuf>,
@@ -21,8 +47,14 @@ pub struct Config {
 }
 
 impl Config {
+    /// `~/.config/cdport/config.json`, or cdimport's before cdport moved it.
     pub fn read() -> Self {
-        Self::from_path(&config_path("cdimport"))
+        let new = config_path("cdport");
+        Self::from_path(&if new.is_file() {
+            new
+        } else {
+            config_path("cdimport")
+        })
     }
 
     pub fn from_path(path: &Path) -> Self {
@@ -46,8 +78,8 @@ impl Config {
     }
 }
 
-/// `cdimport --web --no-browser [-l <library>]`. `library` is passed only
-/// when cdimport's own library folder lies outside the player's folders,
+/// `cdport --web --no-browser [-l <library>]`. `library` is passed only
+/// when cdport's own library folder lies outside the player's folders,
 /// so imports always land where the player looks (§10.2).
 pub fn import_args(program: &Path, library: Option<&Path>) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![program.into(), "--web".into(), "--no-browser".into()];
@@ -58,7 +90,7 @@ pub fn import_args(program: &Path, library: Option<&Path>) -> Vec<OsString> {
     args
 }
 
-/// `cdimport <album dir> --web --no-browser …`: continue an unfinished import.
+/// `cdport <album dir> --web --no-browser …`: continue an unfinished import.
 pub fn continue_args(program: &Path, album_dir: &Path, library: Option<&Path>) -> Vec<OsString> {
     let mut args = import_args(program, library);
     args.insert(1, album_dir.into());
@@ -69,7 +101,7 @@ pub fn version_args(program: &Path) -> Vec<OsString> {
     vec![program.into(), "--version".into()]
 }
 
-/// The `-l` to pass: `None` if cdimport's library folder is inside one of
+/// The `-l` to pass: `None` if cdport's library folder is inside one of
 /// `folders` (its own choice already ends up in the library), else the
 /// player's first folder.
 pub fn library_arg<'a>(config: &Config, folders: &'a [PathBuf]) -> Option<&'a Path> {
@@ -84,7 +116,7 @@ pub fn library_arg<'a>(config: &Config, folders: &'a [PathBuf]) -> Option<&'a Pa
     }
 }
 
-/// Album folders in cdimport's work folder with an unfinished import.
+/// Album folders in cdport's work folder with an unfinished import.
 pub fn unfinished_imports(work_dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     find_state_files(work_dir, 0, &mut found);
@@ -146,8 +178,8 @@ mod tests {
             Some(Path::new("/home/u/Musik"))
         );
         assert_eq!(
-            continue_args(Path::new("cdimport"), Path::new("/w/Album"), None),
-            ["cdimport", "/w/Album", "--web", "--no-browser"].map(OsString::from)
+            continue_args(Path::new("cdport"), Path::new("/w/Album"), None),
+            ["cdport", "/w/Album", "--web", "--no-browser"].map(OsString::from)
         );
     }
 
