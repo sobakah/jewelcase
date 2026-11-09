@@ -1,9 +1,17 @@
 //! The Spotify logins in the keyring (oo7, CONCEPT.md §9.3, §12). Runs on a
 //! worker thread; oo7 brings its own async runtime (async-io).
+//!
+//! Without a keyring service (some desktops and window managers have
+//! none, and in a Flatpak the secret portal may be missing), the logins
+//! go to a file only the user can read (`file_store`), and Preferences say
+//! so; they used to be lost at every restart.
 #![cfg_attr(not(feature = "spotify-stream"), allow(dead_code))]
 
+use std::sync::OnceLock;
+
 use gatefold_spotify::Tokens;
-use gtk::gio;
+use gtk::prelude::*;
+use gtk::{gio, glib};
 
 /// Keyring attributes; `application` is the app ID (CONCEPT.md §12), so
 /// the development build and the installed app keep their own logins;
@@ -63,7 +71,12 @@ pub async fn delete_stream() -> Result<(), String> {
 }
 
 async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
-    run(move || async move {
+    if uses_file().await {
+        return file_store::load(kind);
+    }
+    // Saved there while no keyring was running.
+    let in_file = || file_store::load(kind).ok().flatten();
+    let found = run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
         let items = keyring.search_items(&attributes(kind)).await?;
@@ -92,11 +105,15 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
         mark_own_entry(kind);
         Ok(Some(text))
     })
-    .await
+    .await?;
+    Ok(found.or_else(in_file))
 }
 
 async fn save_text(kind: &'static str, label: &'static str, text: String) -> Result<(), String> {
     mark_own_entry(kind);
+    if uses_file().await {
+        return file_store::save(kind, &text);
+    }
     run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
@@ -104,16 +121,201 @@ async fn save_text(kind: &'static str, label: &'static str, text: String) -> Res
             .create_item(label, &attributes(kind), text, true)
             .await
     })
-    .await
+    .await?;
+    // In the keyring now: no copy stays in the file.
+    file_store::delete(kind)
 }
 
 async fn delete_kind(kind: &'static str) -> Result<(), String> {
     mark_own_entry(kind);
+    file_store::delete(kind)?;
+    if uses_file().await {
+        return Ok(());
+    }
     run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.delete(&attributes(kind)).await
     })
     .await
+}
+
+/// Whether the logins go to the file, as there's no keyring service:
+/// neither the Secret Service (`org.freedesktop.secrets`, from GNOME
+/// Keyring, KWallet, KeePassXC…) nor, in a Flatpak, the secret portal.
+/// Asked once per run.
+pub async fn uses_file() -> bool {
+    static NO_KEYRING: OnceLock<bool> = OnceLock::new();
+    if disabled() {
+        return false;
+    }
+    if let Some(answer) = NO_KEYRING.get() {
+        return *answer;
+    }
+    let available = gio::spawn_blocking(keyring_available)
+        .await
+        .unwrap_or(true);
+    if !available {
+        tracing::warn!("No keyring service; Spotify logins are kept in {}", file_store::path().display());
+    }
+    *NO_KEYRING.get_or_init(|| !available)
+}
+
+fn keyring_available() -> bool {
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else {
+        return false;
+    };
+    let call = |name: &str, path: &str, interface: &str, method: &str, args: glib::Variant| {
+        bus.call_sync(
+            Some(name),
+            path,
+            interface,
+            method,
+            Some(&args),
+            None,
+            gio::DBusCallFlags::NONE,
+            2000,
+            gio::Cancellable::NONE,
+        )
+    };
+    let dbus = |method: &str, args: glib::Variant| {
+        call(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            method,
+            args,
+        )
+    };
+    const SERVICE: &str = "org.freedesktop.secrets";
+    let running = dbus("NameHasOwner", (SERVICE,).to_variant())
+        .ok()
+        .and_then(|reply| reply.get::<(bool,)>())
+        .is_some_and(|(owned,)| owned);
+    let startable = || {
+        dbus("ListActivatableNames", ().to_variant())
+            .ok()
+            .and_then(|reply| reply.get::<(Vec<String>,)>())
+            .is_some_and(|(names,)| names.iter().any(|n| n == SERVICE))
+    };
+    // In a Flatpak, oo7 keeps the logins in a file of its own, encrypted
+    // with a key from the secret portal.
+    let portal = || {
+        std::path::Path::new("/.flatpak-info").exists()
+            && call(
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+                "org.freedesktop.DBus.Properties",
+                "Get",
+                ("org.freedesktop.portal.Secret", "version").to_variant(),
+            )
+            .is_ok()
+    };
+    running || startable() || portal()
+}
+
+/// The logins without a keyring: one JSON object (kind → text) in a file
+/// only the user can read (0600), next to the library database.
+mod file_store {
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    pub fn path() -> PathBuf {
+        gtk::glib::user_data_dir()
+            .join(crate::config::APP_ID)
+            .join("logins.json")
+    }
+
+    fn read(path: &Path) -> Result<BTreeMap<String, String>, String> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    fn write(path: &Path, entries: &BTreeMap<String, String>) -> Result<(), String> {
+        if entries.is_empty() {
+            return match std::fs::remove_file(path) {
+                Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.to_string()),
+                _ => Ok(()),
+            };
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        // Written beside it and renamed: never half a file, never readable
+        // by others for a moment.
+        let temporary = path.with_extension("json.new");
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&temporary)
+            .map_err(|e| e.to_string())?;
+        // Also when an old temporary file was left with other permissions.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+        let text = serde_json::to_string(entries).map_err(|e| e.to_string())?;
+        file.write_all(text.as_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        std::fs::rename(&temporary, path).map_err(|e| e.to_string())
+    }
+
+    pub fn load(kind: &str) -> Result<Option<String>, String> {
+        load_at(&path(), kind)
+    }
+
+    pub fn save(kind: &str, text: &str) -> Result<(), String> {
+        save_at(&path(), kind, text)
+    }
+
+    pub fn delete(kind: &str) -> Result<(), String> {
+        delete_at(&path(), kind)
+    }
+
+    fn load_at(path: &Path, kind: &str) -> Result<Option<String>, String> {
+        Ok(read(path)?.remove(kind))
+    }
+
+    fn save_at(path: &Path, kind: &str, text: &str) -> Result<(), String> {
+        let mut entries = read(path)?;
+        entries.insert(kind.to_owned(), text.to_owned());
+        write(path, &entries)
+    }
+
+    fn delete_at(path: &Path, kind: &str) -> Result<(), String> {
+        let mut entries = read(path)?;
+        if entries.remove(kind).is_some() {
+            write(path, &entries)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn kept_private_and_removed_when_empty() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("sub/logins.json");
+            assert_eq!(load_at(&path, "a").unwrap(), None);
+            save_at(&path, "a", "one").unwrap();
+            save_at(&path, "b", "two").unwrap();
+            assert_eq!(load_at(&path, "a").unwrap().as_deref(), Some("one"));
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+            delete_at(&path, "a").unwrap();
+            assert_eq!(load_at(&path, "a").unwrap(), None);
+            assert_eq!(load_at(&path, "b").unwrap().as_deref(), Some("two"));
+            delete_at(&path, "b").unwrap();
+            assert!(!path.exists());
+        }
+    }
 }
 
 /// Headless tests (build-aux/headless.sh) never touch a keyring.

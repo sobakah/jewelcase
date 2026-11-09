@@ -27,6 +27,20 @@ pub fn page() -> adw::PreferencesPage {
             "Control your Spotify devices from Gatefold and use your Spotify playlists here; songs you have play from your library. Needs Spotify Premium and a free developer app of your own.",
         ))
         .build();
+    // Without a keyring service, the logins are kept in a file (keyring.rs).
+    let no_keyring = adw::ActionRow::builder()
+        .title(gettext("No Keyring on This System"))
+        .subtitle(gettext(
+            "Your Spotify logins are kept in a file only your user account can read. With a keyring service running (such as GNOME Keyring or KWallet), Gatefold keeps them there instead.",
+        ))
+        .visible(false)
+        .build();
+    no_keyring.add_prefix(&gtk::Image::from_icon_name("dialog-information-symbolic"));
+    glib::spawn_future_local(glib::clone!(
+        #[weak]
+        no_keyring,
+        async move { no_keyring.set_visible(super::keyring::uses_file().await) }
+    ));
     let status = adw::ActionRow::builder().use_markup(false).build();
     let button = gtk::Button::builder()
         .valign(gtk::Align::Center)
@@ -53,6 +67,7 @@ pub fn page() -> adw::PreferencesPage {
     let spinner = adw::Spinner::builder().valign(gtk::Align::Center).build();
     status.add_suffix(&spinner);
     account.add(&status);
+    account.add(&no_keyring);
 
     let client_id = adw::EntryRow::builder().title(gettext("Client ID")).build();
     settings

@@ -55,7 +55,7 @@ Non-goals for v1: tag editing inside the player (delegated to Ear Tag), online l
 | Audio similarity | **bliss-audio** (bliss-rs) | Local song analysis (tempo, timbre, chroma, loudness) that gives a distance metric. Spotify's audio-features API is no longer available, so this replaces it. |
 | BPM detection | GStreamer **`bpmdetect`** (SoundTouch, installed on Fedora 45) | The reference library has **no BPM tags at all**, so BPM has to be measured. This runs in the same analysis pass as bliss. |
 | Desktop integration | **mpris-server** crate | Media keys, GNOME Shell media controls, KDE Connect. |
-| Secrets | **oo7** (GNOME's Rust Secret Service client) | Stores Spotify tokens in the keyring. |
+| Secrets | **oo7** (GNOME's Rust Secret Service client) | Stores Spotify tokens in the keyring; without a keyring service, in a file only the user can read (§11). |
 | Settings | **GSettings** | Standard GNOME settings storage, available through gio. |
 | Spotify streaming | **librespot** (optional Cargo feature) | The only maintained open-source Spotify client library. See §9. |
 | Companion tools | **gio::Subprocess** (async, GLib-integrated) | Runs lyrembed, cdimport and Ear Tag as separate processes. The tools' pages open in the default browser. See §10. |
@@ -611,6 +611,10 @@ These are small changes in lyrembed and cdimport that would make the integration
 - **Keyboard shortcuts** (`AdwShortcutsDialog`): Space play/pause, Ctrl+←/→ prev/next, Ctrl+F search, Ctrl+L lyrics, Ctrl+U queue, Ctrl+1/2/3 views. Ctrl+Q closes the window (and quits), as in other GNOME apps.
 - **Drag & drop** of files/folders onto the window → play now / add to queue.
 - **Accessibility**: every cover has accessible labels, and lyrics are readable by Orca.
+- **Other desktops** (KDE Plasma, Xfce, Cinnamon, window managers; checked 2026-11-09). Other distributions are reached through the Flatpak (phase 9), not by lowering the GTK/libadwaita requirement.
+  - *Icons*: every symbolic icon Gatefold uses is bundled (`data/resources/icons`, copied from adwaita-icon-theme). The desktop's icon theme still wins where it has the icon; the bundle fills its gaps (KDE's Breeze lacks six of them, e.g. the queue button and the drag handles). A test (`icons.rs`) fails when an icon is used but not bundled.
+  - *Light or dark*: Preferences › Library › Appearance › Style: Follow System, Light or Dark. Desktops that don't report a color scheme through the settings portal but use a dark GTK theme (`Adwaita-dark`, `GTK_THEME=…:dark`) get the dark style with Follow System.
+  - *Keyring*: without a Secret Service (GNOME Keyring, KWallet, KeePassXC…) or, in a Flatpak, the secret portal, the Spotify logins and the Soloist key go to `logins.json` in Gatefold's data folder (0600, written atomically) instead of being lost at every restart; Preferences › Spotify says so. A keyring that appears later takes them over at the next save.
 
 ---
 
