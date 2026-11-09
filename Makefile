@@ -6,7 +6,7 @@ MOCK_CHROOT ?= fedora-45-x86_64
 VERSION  := $(shell sed -n "s/^  version: '\(.*\)',$$/\1/p" meson.build)
 NAME     := gatefold
 
-.PHONY: all build run test lint fmt tarballs srpm rpm mock clean
+.PHONY: all build run test lint fmt tarballs srpm rpm mock flatpak flatpak-bundle clean
 
 all: build
 
@@ -56,6 +56,24 @@ rpm: tarballs
 mock: srpm
 	mock -r $(MOCK_CHROOT) --resultdir $(RPMDIR)/mock \
 	    --rebuild $$(ls -t $(RPMDIR)/SRPMS/$(NAME)-$(VERSION)-*.src.rpm | head -n1)
+
+# A test Flatpak of the working tree (build-aux/flatpak/README.md):
+# built and installed for this user as io.github.sobakah.Gatefold.Devel.
+# Uses flatpak-builder if installed, else the Flathub app org.flatpak.Builder.
+FLATPAK_BUILDER ?= $(shell command -v flatpak-builder 2>/dev/null || echo flatpak run org.flatpak.Builder)
+FLATPAK_MANIFEST := build-aux/flatpak/io.github.sobakah.Gatefold.Devel.yml
+FLATPAK_DIR := $(BUILDDIR)/flatpak
+
+flatpak:
+	$(FLATPAK_BUILDER) --user --install --force-clean \
+	    --install-deps-from=flathub \
+	    --state-dir=$(FLATPAK_DIR)/state --repo=$(FLATPAK_DIR)/repo \
+	    $(FLATPAK_DIR)/build $(FLATPAK_MANIFEST)
+
+# A single file to install elsewhere: flatpak install --user gatefold-devel.flatpak
+flatpak-bundle: flatpak
+	flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+	    $(FLATPAK_DIR)/repo $(FLATPAK_DIR)/gatefold-devel.flatpak io.github.sobakah.Gatefold.Devel
 
 clean:
 	rm -rf $(BUILDDIR) target vendor $(RPMDIR)

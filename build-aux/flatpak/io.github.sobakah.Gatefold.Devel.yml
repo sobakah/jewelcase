@@ -1,0 +1,105 @@
+# A Flatpak of the working tree, for testing (CONCEPT.md §13, phase 9).
+# Build and install it with `make flatpak` (or a bundle file with
+# `make flatpak-bundle`); see build-aux/flatpak/README.md.
+#
+# Its own app ID (.Devel, like `make build`), so it runs next to the RPM
+# install without sharing its window, MPRIS name or desktop entry; its
+# data lives in ~/.var/app/io.github.sobakah.Gatefold.Devel.
+#
+# Not for Flathub as it is: Cargo fetches crates over the network while
+# building (Flathub builds offline, from a generated cargo-sources.json).
+id: io.github.sobakah.Gatefold.Devel
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: gatefold-devel
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # Spotify, artist information, lyrics (LRCLIB), cover and portrait downloads.
+  - --share=network
+  # The library. Read-only: Gatefold never writes there (tags are Ear Tag's
+  # job, playlist exports go where the file chooser says).
+  - --filesystem=xdg-music:ro
+  # Media keys and GNOME Shell's media controls.
+  - --own-name=org.mpris.MediaPlayer2.Gatefold.Devel
+  # Song analysis waits while on battery.
+  - --system-talk-name=org.freedesktop.UPower
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/doc
+  - '*.a'
+  - '*.la'
+
+modules:
+  # The `bpmdetect` element for the song analysis (smart shuffle, smart
+  # crossfade); the GNOME runtime doesn't have it.
+  - name: soundtouch
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DSOUNDSTRETCH=OFF
+    sources:
+      - type: archive
+        url: https://www.surina.net/soundtouch/soundtouch-2.4.0.tar.gz
+        sha256: 3dda3c9ab1e287f15028c010a66ab7145fa855dfa62763538f341e70b4d10abd
+
+  # Only the soundtouch plugin of gst-plugins-bad, at the runtime's
+  # GStreamer version.
+  - name: gst-plugins-bad-soundtouch
+    buildsystem: meson
+    config-opts:
+      - -Dauto_features=disabled
+      - -Dsoundtouch=enabled
+      - -Dexamples=disabled
+      - -Dtests=disabled
+      - -Dtools=disabled
+      - -Dintrospection=disabled
+      - -Dnls=disabled
+      - -Ddoc=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.6.tar.xz
+        sha256: 6636f2c2289ceda52c4aba971338c81e2b5780d3381bd3673c1c116ec87587c3
+    # The plugin alone: the runtime has the rest (its own libraries win).
+    post-install:
+      - find /app/lib/gstreamer-1.0 -type f ! -name libgstsoundtouch.so -delete
+    cleanup:
+      - /lib/libgst*
+      - /lib/girepository-1.0
+      - /share
+
+  - name: gatefold
+    buildsystem: meson
+    config-opts:
+      - -Dprofile=development
+      # Flatpaks update through their repository, not Gatefold's own check.
+      - -Dupdate_check=false
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/gatefold/cargo
+      # Cargo downloads the crates (see the note at the top).
+      build-args:
+        - --share=network
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - _build
+          - target
+          - vendor
+          - rpmbuild
+          - .cargo
+          - .git
+          - .flatpak-builder
