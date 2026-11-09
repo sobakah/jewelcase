@@ -3,6 +3,7 @@ mod application;
 mod config;
 mod covers;
 mod format;
+mod icons;
 mod library;
 mod library_folders;
 mod lrclib;

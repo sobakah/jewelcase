@@ -13,8 +13,9 @@ Summary:        Album-focused local music player
 # Gatefold's own code is GPL-3.0-or-later; bliss-audio (smart shuffle) is
 # GPL-3.0-only, so the built program is GPL-3.0-only. The vendored crates'
 # licenses are listed in LICENSE.dependencies; add them here before
-# publishing this anywhere.
-License:        GPL-3.0-only
+# publishing this anywhere. The bundled Adwaita icons are
+# LGPL-3.0-only OR CC-BY-SA-3.0 (data/resources/icons/README.md).
+License:        GPL-3.0-only AND (LGPL-3.0-only OR CC-BY-SA-3.0)
 URL:            https://github.com/sobakah/gatefold
 Source0:        %{name}-%{version}.tar.xz
 # Rust dependencies: `cargo vendor` output, created by `make tarballs`.
