@@ -33,6 +33,16 @@
       <summary>View at start</summary>
       <description>The library view Gatefold opens with; “last” is the one used last.</description>
     </key>
+    <key name="style" type="s">
+      <choices>
+        <choice value="follow"/>
+        <choice value="light"/>
+        <choice value="dark"/>
+      </choices>
+      <default>"follow"</default>
+      <summary>Light or dark style</summary>
+      <description>“follow” follows the desktop; where it doesn't tell (some desktops), a GTK theme whose name says dark makes Gatefold dark too.</description>
+    </key>
     <key name="lyrics-pane" type="s">
       <choices>
         <choice value="remember"/>

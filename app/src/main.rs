@@ -14,6 +14,7 @@ mod player;
 mod preferences_dialog;
 mod romanizer;
 mod spotify;
+mod style;
 mod theme;
 mod tools;
 mod updates;

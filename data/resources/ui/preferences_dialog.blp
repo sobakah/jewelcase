@@ -48,6 +48,24 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    Adw.PreferencesGroup {
+      title: _("Appearance");
+
+      Adw.ComboRow style_row {
+        title: _("_Style");
+        subtitle: _("Light or dark; Follow System uses the desktop’s choice");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Follow System"),
+            _("Light"),
+            _("Dark"),
+          ]
+        };
+      }
+    }
+
     // Smart shuffle's analysis (CONCEPT.md §7), filled in from
     // preferences_dialog.rs.
     Adw.PreferencesGroup {

@@ -39,6 +39,7 @@ mod imp {
             let app = self.obj();
             app.setup_actions();
             app.setup_accels();
+            crate::style::start();
 
             let tools = Tools::new();
             tools.start();

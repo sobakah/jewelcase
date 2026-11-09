@@ -52,6 +52,8 @@ mod imp {
         #[template_child]
         pub start_view_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub style_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
         pub lyrics_pane_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub queue_pane_row: TemplateChild<adw::ComboRow>,
@@ -148,6 +150,7 @@ mod imp {
                 move |_| obj.ask_delete_stats()
             ));
             bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
+            bind_choice(&settings, "style", &self.style_row, &crate::style::STYLES);
             bind_choice(&settings, "lyrics-pane", &self.lyrics_pane_row, &PANE_MODES);
             bind_choice(&settings, "queue-pane", &self.queue_pane_row, &PANE_MODES);
             settings
