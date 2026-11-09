@@ -48,6 +48,19 @@
   </branding>
 
   <releases>
+    <release version="0.3.0" date="2026-11-09" type="development">
+      <description>
+        <p>A new icon, sliding panels, and the companion tools over D-Bus.</p>
+        <ul>
+          <li>A new icon: a gatefold LP, slightly opened, the record halfway out</li>
+          <li>Side panels slide like a record leaving its sleeve, with a shadow</li>
+          <li>cdimport is now cdport; cdport and lyrembed work over D-Bus</li>
+          <li>Preferences show how to install and set up the companion tools</li>
+          <li>A light or dark choice, and dark GTK themes followed on other desktops</li>
+          <li>Bundled icons, and Spotify logins kept without a keyring</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-11-08" type="development">
       <description>
         <p>Saving albums and following artists on Spotify, and fixes.</p>

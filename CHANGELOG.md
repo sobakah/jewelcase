@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 (pre-release)
+
+A new icon, side panels that slide like a record sleeve, cdimport's new name cdport, and both companion tools over D-Bus, with steps in Preferences to install and set them up. Gatefold also fits better on other desktops: a light or dark choice, its own icons, and Spotify logins kept without a keyring. The database doesn't change: 0.2.3 can still open it. 0.2.3 offers this update itself (its banner, then Install).
+
+- A new icon: a gatefold LP, its cover slightly opened and the record halfway out.
+- The side panels (album, playlist, artist page, and an album on an artist page) slide in like a record leaving its sleeve: a little slower, with a slight bounce and a shadow. The album panel on an artist page now reaches up to the top bar. When a panel closes, the albums behind it take the space right away instead of leaving a grey strip. The player's handle on top can be clicked to close it, like the panels' handles.
+- Behind the top of the album, playlist and artist panels, the cover is now blurred as in the player (as large as the window, softer), so it reads as colour rather than as a second copy of the picture.
+- The mini player's controls stay on the right also with the visualizer off.
+- cdimport is now called **cdport**. From cdport 1.3.0 and lyrembed 1.2.0 on, Gatefold talks to them over D-Bus once their service is set up (`cdport --install-dbus-service`, `lyrembed --install-dbus-service`, or *Set Up* in Preferences). CD imports, lyrembed's pages and lyrics searches then keep running when Gatefold closes, and a Gatefold started again shows them. Without the service, Gatefold starts them directly, as before; cdimport 1.2.x still works.
+- Preferences → Integrations shows, for lyrembed and cdport, what's missing and the steps to install, update or set them up, with commands to copy. A tool that's needed but not set up offers *How to Set Up*.
+- Preferences → Library → Appearance → Style: Follow System, Light or Dark. On Xfce, MATE, Cinnamon and window managers, Follow System now also follows a dark GTK theme.
+- Gatefold brings every icon it uses, so icon themes that lack some (such as KDE's Breeze) no longer show missing icons.
+- Without a keyring service, Spotify logins are kept in a file only you can read instead of being lost at every restart; Preferences → Spotify says so.
+- Spotify: artists' releases are asked for in fewer requests and kept for a week, which helps against Spotify's daily limit. When Spotify blocks those requests, the artist page says so also for artists in your library.
+- For testing: `make flatpak` builds a Flatpak of Gatefold (see `build-aux/flatpak/README.md`).
+
+### Install
+
+Download `gatefold-0.3.0-1.fc45.x86_64.rpm` below and install it, or use the update notice in Gatefold 0.2.3:
+
+```sh
+sudo dnf install ./gatefold-0.3.0-1.fc45.x86_64.rpm
+```
+
 ## 0.2.3 (pre-release)
 
 A fix for Spotify songs played through Soloist, saving albums and following artists on Spotify, and songs without a stored length. Gatefold's database is updated on the first start; after that, 0.2.2 can't open it any more. 0.2.2 offers this update itself (its banner, then Install).

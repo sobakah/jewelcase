@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.2.3
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -98,6 +98,13 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Mon Nov 09 2026 sobakah - 0.3.0-1
+- New icon; side panels slide like a record sleeve
+- cdimport is now cdport; cdport and lyrembed over D-Bus, with setup
+  steps in Preferences
+- Light or dark choice; bundled icons; logins kept without a keyring
+- Fewer Spotify artist requests
+
 * Sun Nov 08 2026 sobakah - 0.2.3-1
 - Fixed racing through an album at the end of a Spotify song played
   through Soloist; Soloist's decisions go to the system log
