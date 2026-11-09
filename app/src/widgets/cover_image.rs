@@ -1,5 +1,6 @@
-//! A square cover. It takes the width it's given (so grid columns always
-//! fill the row, CONCEPT.md §4.1) and stays square inside any allocation.
+//! A square cover. It takes the width it's given, up to its natural size
+//! when capped (grid tiles keep the size set in Preferences, CONCEPT.md
+//! §4.1), and stays square inside any allocation.
 
 use std::cell::{Cell, RefCell};
 
@@ -29,6 +30,9 @@ mod imp {
         /// stays square and centered). Off: height always equals width.
         #[property(get, set = Self::set_shrinkable)]
         pub shrinkable: Cell<bool>,
+        /// Never larger than the natural size (grid tiles in wider cells).
+        #[property(get, set = Self::set_capped)]
+        pub capped: Cell<bool>,
         pub picture: gtk::Picture,
         pub placeholder: gtk::Image,
         /// The cache key shown by `set_cover`.
@@ -42,6 +46,7 @@ mod imp {
                 natural_size: Cell::new(180),
                 kind: RefCell::new("grid".into()),
                 shrinkable: Cell::new(false),
+                capped: Cell::new(false),
                 picture: gtk::Picture::builder()
                     .content_fit(gtk::ContentFit::Cover)
                     .can_shrink(true)
@@ -98,6 +103,11 @@ mod imp {
                 // A fixed size, like the mini player's cover.
                 return (min, min, -1, -1);
             }
+            let for_size = if self.capped.get() && for_size >= 0 {
+                for_size.min(natural)
+            } else {
+                for_size
+            };
             match orientation {
                 gtk::Orientation::Horizontal => (min, natural, -1, -1),
                 _ if for_size >= 0 && self.shrinkable.get() => {
@@ -109,7 +119,10 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            let side = width.min(height);
+            let mut side = width.min(height);
+            if self.capped.get() {
+                side = side.min(self.natural_size.get().max(self.min_size.get()));
+            }
             let x = (width - side) / 2;
             let y = (height - side) / 2;
             let transform = gtk::gsk::Transform::new()
@@ -132,6 +145,11 @@ mod imp {
 
         fn set_shrinkable(&self, shrinkable: bool) {
             self.shrinkable.set(shrinkable);
+            self.obj().queue_resize();
+        }
+
+        fn set_capped(&self, capped: bool) {
+            self.capped.set(capped);
             self.obj().queue_resize();
         }
 

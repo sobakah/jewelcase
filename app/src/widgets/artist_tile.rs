@@ -22,13 +22,13 @@ mod imp {
     impl Default for ArtistTile {
         fn default() -> Self {
             Self {
-                portrait: glib::Object::builder()
-                    .property("min-size", 120)
-                    .property("natural-size", 180)
-                    .build(),
+                portrait: super::super::tile_cover(),
+                // Narrow on its own: the portrait decides the tile's width.
                 name: gtk::Label::builder()
                     .xalign(0.0)
                     .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .width_chars(1)
+                    .max_width_chars(1)
                     .css_classes(["album-title", "artist-name"])
                     .build(),
             }
@@ -48,6 +48,8 @@ mod imp {
             let obj = self.obj();
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
+            // The portrait's size, also in a wider cell.
+            obj.set_halign(gtk::Align::Center);
             obj.add_css_class("artist-tile");
             self.portrait
                 .set_placeholder_icon("avatar-default-symbolic");

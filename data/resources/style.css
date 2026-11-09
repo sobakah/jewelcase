@@ -14,7 +14,8 @@
   min-height: 56px;
 }
 
-/* Album grid (CONCEPT.md §4.1): tiles fill the row; covers adapt. */
+/* Album grid (CONCEPT.md §4.1): covers keep the size set in Preferences;
+   the columns share the rest of the row. */
 .album-grid {
   padding: 12px;
 }

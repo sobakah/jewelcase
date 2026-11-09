@@ -2,7 +2,6 @@
 //! and a dim line, like the library's tiles.
 
 use adw::prelude::*;
-use gtk::glib;
 
 use super::CoverImage;
 
@@ -17,11 +16,8 @@ pub struct ShelfItem {
 }
 
 /// The tile's content, and its cover (to show it once downloaded).
-pub fn tile_content(item: &ShelfItem, natural: i32) -> (gtk::Box, CoverImage) {
-    let cover: CoverImage = glib::Object::builder()
-        .property("min-size", 120)
-        .property("natural-size", natural)
-        .build();
+pub fn tile_content(item: &ShelfItem) -> (gtk::Box, CoverImage) {
+    let cover = super::tile_cover();
     if item.artist {
         cover.set_placeholder_icon("avatar-default-symbolic");
     }
@@ -39,6 +35,8 @@ pub fn tile_content(item: &ShelfItem, natural: i32) -> (gtk::Box, CoverImage) {
             .build()
     };
     let content = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    // The cover's size, also in a wider cell.
+    content.set_halign(gtk::Align::Center);
     content.add_css_class(if item.artist {
         "artist-tile"
     } else {

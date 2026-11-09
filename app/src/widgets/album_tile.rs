@@ -22,17 +22,17 @@ mod imp {
     impl Default for AlbumTile {
         fn default() -> Self {
             let label = |classes: &[&str]| {
+                // Narrow on their own: the cover decides the tile's width.
                 gtk::Label::builder()
                     .xalign(0.0)
                     .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .width_chars(1)
+                    .max_width_chars(1)
                     .css_classes(classes)
                     .build()
             };
             Self {
-                cover: glib::Object::builder()
-                    .property("min-size", 120)
-                    .property("natural-size", 180)
-                    .build(),
+                cover: super::super::tile_cover(),
                 title: label(&["album-title"]),
                 artist: label(&["dim-label"]),
             }
@@ -52,6 +52,8 @@ mod imp {
             let obj = self.obj();
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
+            // The cover's size, also in a wider cell.
+            obj.set_halign(gtk::Align::Center);
             obj.add_css_class("album-tile");
             self.cover.set_margin_bottom(6);
             obj.append(&self.cover);

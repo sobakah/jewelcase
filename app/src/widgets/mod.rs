@@ -45,6 +45,55 @@ pub use spotify_tile::{ShelfItem, tile_content};
 pub use track_row::TrackRow;
 pub use visualizer::Visualizer;
 
+thread_local! {
+    static TILE_SETTINGS: gtk::gio::Settings =
+        gtk::gio::Settings::new(crate::config::APP_ID);
+}
+
+/// The settings the grids' cover size comes from.
+fn tile_settings() -> gtk::gio::Settings {
+    TILE_SETTINGS.with(Clone::clone)
+}
+
+/// The cover size in the grids (Preferences › Appearance, CONCEPT.md §4.1).
+pub fn tile_size() -> i32 {
+    use gtk::prelude::*;
+    tile_settings().int("tile-size")
+}
+
+/// Calls `changed` on `owner` when the cover size in the grids changes,
+/// while `owner` lives.
+pub fn connect_tile_size<O: gtk::glib::object::IsA<gtk::glib::Object>>(
+    owner: &O,
+    changed: impl Fn(&O) + 'static,
+) {
+    use gtk::prelude::*;
+    let settings = tile_settings();
+    let weak = owner.downgrade();
+    let id = settings.connect_changed(Some("tile-size"), move |_, _| {
+        if let Some(owner) = weak.upgrade() {
+            changed(&owner);
+        }
+    });
+    disconnect_with(owner, &settings, id);
+}
+
+/// A grid tile's cover: as large as set in Preferences, never larger (a
+/// wider cell leaves room around it), smaller only where the window is
+/// too narrow for two columns.
+pub fn tile_cover() -> CoverImage {
+    use gtk::prelude::*;
+    let cover: CoverImage = gtk::glib::Object::builder()
+        .property("min-size", 120)
+        .property("capped", true)
+        .build();
+    tile_settings()
+        .bind("tile-size", &cover, "natural-size")
+        .get()
+        .build();
+    cover
+}
+
 /// Disconnects a handler `owner` put on a long-lived `source` (the
 /// library, player, settings) once `owner` is gone, so pages and dialogs
 /// opened again and again don't leave handlers running for nothing.

@@ -54,6 +54,8 @@ mod imp {
         #[template_child]
         pub style_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub tile_size_scale: TemplateChild<gtk::Scale>,
+        #[template_child]
         pub lyrics_pane_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub queue_pane_row: TemplateChild<adw::ComboRow>,
@@ -159,6 +161,13 @@ mod imp {
             ));
             bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
             bind_choice(&settings, "style", &self.style_row, &crate::style::STYLES);
+            settings
+                .bind("tile-size", &self.tile_size_scale.adjustment(), "value")
+                .mapping(|value, _| Some(f64::from(value.get::<i32>()?).to_value()))
+                .set_mapping(|value, _| {
+                    Some((value.get::<f64>().ok()?.round() as i32).to_variant())
+                })
+                .build();
             bind_choice(&settings, "lyrics-pane", &self.lyrics_pane_row, &PANE_MODES);
             bind_choice(&settings, "queue-pane", &self.queue_pane_row, &PANE_MODES);
             settings

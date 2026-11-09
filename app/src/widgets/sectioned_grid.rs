@@ -4,8 +4,9 @@
 //!
 //! GTK's grid view has no sections, so this is a list view of rows, each
 //! a line of tiles: only the rows on screen are built, as in a grid view,
-//! and a row can be a full-width header. The rows are laid out again when
-//! the width changes the number of columns.
+//! and a row can be a full-width header. Tiles keep the cover size set in
+//! Preferences: a width change only changes the number of columns (the
+//! rows are laid out again then) and the room between them.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -22,7 +23,7 @@ use crate::config::APP_ID;
 /// The grid's padding on each side (style.css: .album-grid, .artist-grid).
 const PADDING: i32 = 12;
 const MIN_COLUMNS: i32 = 2;
-const MAX_COLUMNS: i32 = 12;
+const MAX_COLUMNS: i32 = 40;
 
 /// One line of the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,8 +57,8 @@ mod imp {
         pub create: OnceCell<Create>,
         pub bind: OnceCell<Bind>,
         pub activate: OnceCell<Activate>,
-        /// The narrowest column (a tile's smallest width with its padding).
-        pub min_width: Cell<i32>,
+        /// A tile's padding on both sides (style.css: .grid-tile).
+        pub tile_padding: Cell<i32>,
         /// 0 until the first width is known (rows built for a guess would
         /// show huge tiles for a frame). Shared with the rows, which size
         /// their tiles by it.
@@ -89,7 +90,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
-            self.min_width.set(138);
+            self.tile_padding.set(18);
             let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
             let factory = gtk::SignalListItemFactory::new();
             let columns = self.columns.clone();
@@ -126,6 +127,7 @@ mod imp {
             self.scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
             self.scroller.set_child(Some(&self.list));
             self.scroller.set_parent(&*obj);
+            super::super::connect_tile_size(&*obj, |grid| grid.queue_resize());
         }
 
         fn dispose(&self) {
@@ -141,8 +143,8 @@ mod imp {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.scroller.allocate(width, height, baseline, None);
             let available = width - 2 * PADDING;
-            let columns =
-                (available / self.min_width.get().max(1)).clamp(MIN_COLUMNS, MAX_COLUMNS) as u32;
+            let column = super::super::tile_size() + self.tile_padding.get();
+            let columns = (available / column.max(1)).clamp(MIN_COLUMNS, MAX_COLUMNS) as u32;
             if columns != self.columns.get() {
                 self.columns.set(columns);
                 // Not while allocating: the rows change the list.
@@ -160,19 +162,20 @@ glib::wrapper! {
 
 impl SectionedGrid {
     /// The library part: `create` makes a tile, `bind` shows an item in it,
-    /// `activate` opens an item. `min_width` is the narrowest column;
+    /// `activate` opens an item. `tile_padding` is a tile's padding on both
+    /// sides;
     /// `class` the grid's style class ("album-grid", "artist-grid").
     pub fn setup(
         &self,
         model: &impl IsA<gio::ListModel>,
-        min_width: i32,
+        tile_padding: i32,
         class: &str,
         create: impl Fn() -> gtk::Widget + 'static,
         bind: impl Fn(&gtk::Widget, &glib::Object) + 'static,
         activate: impl Fn(&glib::Object) + 'static,
     ) {
         let imp = self.imp();
-        imp.min_width.set(min_width);
+        imp.tile_padding.set(tile_padding);
         imp.list.add_css_class(class);
         let _ = imp.create.set(Rc::new(create));
         let _ = imp.bind.set(Rc::new(bind));
@@ -421,7 +424,8 @@ mod row_imp {
     use super::*;
 
     /// A line of tiles (or the section header). It lays them out itself,
-    /// in equal columns, and may get narrower than its tiles: the grid
+    /// each in the middle of an equal column and no wider than it wants
+    /// (the cover size), and may get narrower than its tiles: the grid
     /// picks fewer columns then, so the window can shrink.
     #[derive(Default)]
     pub struct GridRow {
@@ -468,6 +472,14 @@ mod row_imp {
                 .map_or(0, |c| c.get() as usize);
             live.max(slots).max(1) as i32
         }
+
+        /// A tile's width in a column: its natural width (the cover size
+        /// and padding), less where the column is narrower, never below
+        /// its minimum.
+        fn slot_width(slot: &gtk::Button, column: i32) -> i32 {
+            let (narrowest, natural, _, _) = slot.measure(gtk::Orientation::Horizontal, -1);
+            column.min(natural).max(narrowest)
+        }
     }
 
     impl WidgetImpl for GridRow {
@@ -497,11 +509,10 @@ mod row_imp {
                 _ => {
                     let (mut min, mut natural) = (0, 0);
                     for slot in slots.iter() {
-                        let narrowest = slot.measure(gtk::Orientation::Horizontal, -1).0;
                         let width = if for_size < 0 {
                             -1
                         } else {
-                            (for_size / count).max(narrowest)
+                            Self::slot_width(slot, for_size / count)
                         };
                         let (m, n, _, _) = slot.measure(orientation, width);
                         min = min.max(m);
@@ -521,13 +532,13 @@ mod row_imp {
             let count = self.column_count(slots.len());
             let column = width / count;
             for (index, slot) in slots.iter().enumerate() {
-                let x = column * index as i32;
-                let transform =
-                    gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x as f32, 0.0));
                 // Never below the tile's own minimum (it'd overflow into
                 // the next column only while the grid picks fewer columns).
-                let narrowest = slot.measure(gtk::Orientation::Horizontal, -1).0;
-                slot.allocate(column.max(narrowest), height, -1, Some(transform));
+                let slot_width = Self::slot_width(slot, column);
+                let x = column * index as i32 + ((column - slot_width) / 2).max(0);
+                let transform =
+                    gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x as f32, 0.0));
+                slot.allocate(slot_width, height, -1, Some(transform));
             }
         }
     }
@@ -636,7 +647,7 @@ impl GridRow {
             button.set_visible(item.is_some());
             match item {
                 Some(item) => {
-                    button.set_child(Some(&tile_content(item, 180).0));
+                    button.set_child(Some(&tile_content(item).0));
                     button.set_tooltip_text(Some(&item.title));
                 }
                 None => button.set_child(None::<&gtk::Widget>),

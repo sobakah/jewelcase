@@ -64,6 +64,33 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
           ]
         };
       }
+
+      // Covers keep this size when the window or a panel changes width.
+      Adw.ActionRow tile_size_row {
+        title: _("_Cover Size");
+        subtitle: _("In the album, artist and playlist grids");
+        use-underline: true;
+        activatable-widget: tile_size_scale;
+
+        [suffix]
+        Gtk.Scale tile_size_scale {
+          width-request: 200;
+          valign: center;
+          draw-value: false;
+          round-digits: 0;
+
+          adjustment: Gtk.Adjustment {
+            lower: 120;
+            upper: 280;
+            step-increment: 10;
+            page-increment: 40;
+          };
+
+          accessibility {
+            labelled-by: tile_size_row;
+          }
+        }
+      }
     }
 
     // Smart shuffle's analysis (CONCEPT.md §7), filled in from

@@ -34,12 +34,7 @@ mod imp {
                     .build()
             };
             Self {
-                cover: glib::Object::builder()
-                    // Flow boxes fit tiles by their natural size (the album
-                    // grid by the minimum): small, so both look alike.
-                    .property("min-size", 120)
-                    .property("natural-size", 128)
-                    .build(),
+                cover: super::super::tile_cover(),
                 name: label(&["album-title"]),
                 count: label(&["dim-label"]),
             }
@@ -59,6 +54,8 @@ mod imp {
             let obj = self.obj();
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
+            // The cover's size, also in a wider cell.
+            obj.set_halign(gtk::Align::Center);
             obj.add_css_class("album-tile");
             self.cover.set_margin_bottom(6);
             obj.append(&self.cover);

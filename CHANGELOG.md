@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Covers in the album, artist and playlist grids and on artist pages keep their size when the window or a panel changes width; only the number of columns changes. Their size is set in Preferences → Library → Appearance → Cover Size (120–280 px).
+
 ## 0.3.0 (pre-release)
 
 A new icon, side panels that slide like a record sleeve, cdimport's new name cdport, and both companion tools over D-Bus, with steps in Preferences to install and set them up. Gatefold also fits better on other desktops: a light or dark choice, its own icons, and Spotify logins kept without a keyring. The database doesn't change: 0.2.3 can still open it. 0.2.3 offers this update itself (its banner, then Install).

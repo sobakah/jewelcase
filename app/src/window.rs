@@ -408,8 +408,8 @@ impl GatefoldWindow {
         self.setup_genre_menu();
         imp.album_grid.setup(
             &filtered,
-            // A tile's smallest width (120) and its padding.
-            138,
+            // A tile's padding (style.css: .grid-tile).
+            18,
             "album-grid",
             || AlbumTile::new().upcast(),
             |tile, item| {
@@ -508,8 +508,8 @@ impl GatefoldWindow {
 
         imp.artist_grid.setup(
             library.artists(),
-            // A tile's smallest width (120) and its padding.
-            144,
+            // A tile's padding (style.css: .artist-grid .grid-tile).
+            24,
             "artist-grid",
             || ArtistTile::new().upcast(),
             |tile, item| {
@@ -571,6 +571,17 @@ impl GatefoldWindow {
         );
         let tile = |item: &glib::Object| -> gtk::Widget {
             let tile = PlaylistTile::new();
+            // Its cell in the flow box only as wide as the tile (a wider
+            // cell, highlighted, would look like a larger tile).
+            // (After the flow box has added it: not while inserting.)
+            tile.connect_notify_local(Some("parent"), |tile, _| {
+                let tile = tile.downgrade();
+                glib::idle_add_local_once(move || {
+                    if let Some(child) = tile.upgrade().and_then(|t| t.parent()) {
+                        child.set_halign(gtk::Align::Center);
+                    }
+                });
+            });
             if let Some(playlist) = item.downcast_ref::<PlaylistObject>() {
                 tile.bind(playlist);
                 tile.update_property(&[gtk::accessible::Property::Label(

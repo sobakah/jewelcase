@@ -43,6 +43,12 @@
       <summary>Light or dark style</summary>
       <description>“follow” follows the desktop; where it doesn't tell (some desktops), a GTK theme whose name says dark makes Gatefold dark too.</description>
     </key>
+    <key name="tile-size" type="i">
+      <range min="120" max="280"/>
+      <default>160</default>
+      <summary>Cover size in the grids</summary>
+      <description>The width of a cover in the album, artist and playlist grids, in pixels. Covers keep it when the window or a panel changes width; the grids then fit more or fewer columns.</description>
+    </key>
     <key name="lyrics-pane" type="s">
       <choices>
         <choice value="remember"/>

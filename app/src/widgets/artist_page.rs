@@ -18,8 +18,8 @@ use crate::application::GatefoldApplication;
 use crate::objects::{AlbumObject, ArtistObject, TrackObject};
 use crate::{covers, format};
 
-/// The width of an album tile on artist pages, with its spacing.
-const TILE_WIDTH: u32 = 198;
+/// The room between album tiles on artist pages.
+const TILE_SPACING: i32 = 18;
 
 /// The blurred portrait behind the top of the page: its height.
 const ARTIST_BACKDROP_HEIGHT: f32 = 380.0;
@@ -155,6 +155,7 @@ mod imp {
             // The page is wide: a lower band of color.
             self.backdrop.set_max_height(ARTIST_BACKDROP_HEIGHT);
             let obj = self.obj();
+            super::super::connect_tile_size(&*obj, |page| page.queue_resize());
             self.portrait
                 .set_placeholder_icon("avatar-default-symbolic");
             obj.set_layout_manager(None::<gtk::LayoutManager>);
@@ -276,13 +277,15 @@ mod imp {
             if let Some(child) = self.obj().child() {
                 child.allocate(width, height, baseline, None);
             }
-            // Same tile size in every section: as many columns as fit
-            // tiles of about TILE_WIDTH, also for sections with few releases.
+            // The cover size set in Preferences in every section: as many
+            // columns as fit (the flow boxes are only as wide as their
+            // tiles, at the start).
             let available = self.sections.width();
             if available <= 0 {
                 return;
             }
-            let columns = (available as u32 / TILE_WIDTH).clamp(2, 8);
+            let column = super::super::tile_size() + TILE_SPACING;
+            let columns = ((available + TILE_SPACING) / column).clamp(2, 40) as u32;
             if self.columns.replace(columns) != columns {
                 let obj = self.obj().downgrade();
                 glib::idle_add_local_once(move || {
@@ -793,8 +796,9 @@ impl ArtistPage {
             .homogeneous(true)
             .min_children_per_line(columns)
             .max_children_per_line(columns)
-            .column_spacing(18)
-            .row_spacing(18)
+            .column_spacing(TILE_SPACING as u32)
+            .row_spacing(TILE_SPACING as u32)
+            .halign(gtk::Align::Start)
             .activate_on_single_click(true)
             .build();
         let mut covers = Vec::new();
@@ -808,7 +812,7 @@ impl ArtistPage {
                 subtitle: album.year.map(|y| y.to_string()).unwrap_or_default(),
                 artist: false,
             };
-            let (tile, cover) = super::tile_content(&item, 180);
+            let (tile, cover) = super::tile_content(&item);
             tile.set_tooltip_text(Some(&album.name));
             if let Some(url) = album.image_url.clone() {
                 covers.push((url.clone(), cover, album.cover_key()));
@@ -867,8 +871,9 @@ impl ArtistPage {
             .homogeneous(true)
             .min_children_per_line(columns)
             .max_children_per_line(columns)
-            .column_spacing(18)
-            .row_spacing(18)
+            .column_spacing(TILE_SPACING as u32)
+            .row_spacing(TILE_SPACING as u32)
+            .halign(gtk::Align::Start)
             .activate_on_single_click(true)
             .build();
         for album in albums {
