@@ -29,8 +29,10 @@ finish-args:
   - --filesystem=xdg-music:ro
   # Media keys and GNOME Shell's media controls.
   - --own-name=org.mpris.MediaPlayer2.Gatefold.Devel
-  # cdport (CD imports) through its D-Bus service on the host.
+  # cdport (CD imports) and lyrembed (lyrics) through their D-Bus services
+  # on the host.
   - --talk-name=io.github.sobakah.cdport
+  - --talk-name=io.github.sobakah.lyrembed
   # Song analysis waits while on battery.
   - --system-talk-name=org.freedesktop.UPower
 

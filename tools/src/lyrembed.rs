@@ -1,4 +1,8 @@
 //! lyrembed: lyrics search, checking and romanization (CONCEPT.md §10.1).
+//!
+//! From 1.2.0 on, lyrembed offers a D-Bus interface, which the bus starts
+//! on demand once `lyrembed --install-dbus-service` has run; it's the only
+//! way a Flatpak can reach it. Without it, the player starts the program.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -10,6 +14,20 @@ use crate::{Version, config_path, read_json};
 /// How to install it (pipx, from its repository, with romanization).
 pub const INSTALL_COMMAND: &str =
     "pipx install \"lyrembed[all] @ git+https://github.com/sobakah/lyrembed.git\"";
+/// Updating a pipx install (its page offers the same).
+pub const UPGRADE_COMMAND: &str = "pipx upgrade lyrembed";
+/// Lets the session bus start lyrembed when Gatefold calls it.
+pub const SERVICE_ARG: &str = "--install-dbus-service";
+pub const SERVICE_COMMAND: &str = "lyrembed --install-dbus-service";
+
+/// The first version with the D-Bus interface.
+pub const DBUS_VERSION: Version = Version(1, 2, 0);
+
+/// lyrembed's D-Bus interface (`lyrembed/dbus_service.py`). It opens its
+/// pages in the browser itself: their address never comes over the bus.
+pub const BUS_NAME: &str = "io.github.sobakah.lyrembed";
+pub const OBJECT_PATH: &str = "/io/github/sobakah/lyrembed";
+pub const INTERFACE: &str = "io.github.sobakah.lyrembed1";
 
 /// `lyrembed <album dir> --auto`: tag tracks with confident matches.
 pub fn auto_args(program: &Path, album_dir: &Path) -> Vec<OsString> {

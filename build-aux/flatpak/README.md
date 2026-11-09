@@ -36,11 +36,11 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Gatefold.Devel`
   outside it would come through the folder chooser's portal (untested).
 - **Spotify logins** are kept through the secret portal; on desktops without
   one, in a file only the user can read (Preferences › Spotify says so).
-- **cdport** works through its D-Bus service on the host
-  (`cdport --install-dbus-service`; `--talk-name=io.github.sobakah.cdport`).
-  Preferences › Integrations shows the steps when it isn't set up.
-- **Doesn't work yet**: lyrembed (lyrics search, romanization; it will get a
-  D-Bus interface too), Ear Tag (`flatpak run` from inside the sandbox) and
+- **cdport and lyrembed** work through their D-Bus services on the host
+  (`cdport --install-dbus-service`, `lyrembed --install-dbus-service`;
+  `--talk-name=io.github.sobakah.cdport`, `…lyrembed`). Preferences ›
+  Integrations shows the steps when they aren't set up.
+- **Doesn't work yet**: Ear Tag (`flatpak run` from inside the sandbox) and
   soloistd's controls. Gatefold shows them as not installed.
   Soloist, which Gatefold downloads and runs itself, should work inside the
   sandbox (untested).

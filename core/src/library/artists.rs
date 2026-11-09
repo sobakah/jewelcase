@@ -118,7 +118,13 @@ impl Aliases {
     /// identified by their aliases, so a list that comes and goes would
     /// split them and lose what was looked up about them.
     pub fn from_program_cached(program: Option<&std::path::Path>, cache: &std::path::Path) -> Self {
-        if let Some(text) = program.and_then(Self::list_from_program) {
+        Self::from_text_cached(program.and_then(Self::list_from_program), cache)
+    }
+
+    /// `text` (as `--list-aliases` prints it) remembered in `cache`, or,
+    /// without it, the last one remembered.
+    pub fn from_text_cached(text: Option<String>, cache: &std::path::Path) -> Self {
+        if let Some(text) = text {
             if let Err(err) = std::fs::write(cache, &text) {
                 tracing::info!("Cannot remember lyrembed's aliases: {err}");
             }
@@ -131,6 +137,16 @@ impl Aliases {
             }
             Err(_) => Self::default(),
         }
+    }
+
+    /// Alias groups (lyrembed's `ArtistAliases` over D-Bus) as
+    /// `--list-aliases` prints them, for `parse_lyrembed` and the cache.
+    pub fn groups_to_text(groups: &[Vec<String>]) -> String {
+        groups
+            .iter()
+            .filter(|group| group.len() > 1)
+            .map(|group| format!("  {}\n", group.join(" = ")))
+            .collect()
     }
 
     /// `lyrembed` from `PATH`.
@@ -479,6 +495,22 @@ fn split_ignore_case(text: &str, separator: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn alias_groups_from_dbus() {
+        let groups = vec![
+            vec![
+                "BTS".to_owned(),
+                "Bangtan Boys".to_owned(),
+                "방탄소년단".to_owned(),
+            ],
+            vec!["Alone".to_owned()],
+        ];
+        let aliases = Aliases::parse_lyrembed(&Aliases::groups_to_text(&groups));
+        assert_eq!(aliases.identity("방탄소년단"), aliases.identity("bts"));
+        assert_eq!(aliases.len(), 3);
+    }
+
     use super::*;
     use crate::library::grouping::group_albums;
     use crate::library::tags::TrackTags;

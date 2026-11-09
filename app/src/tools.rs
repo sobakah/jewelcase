@@ -6,9 +6,9 @@
 //! "Show Page" and "Stop" (SIGINT, as Ctrl+C). Results arrive through the
 //! files: the library's inotify watcher picks them up.
 //!
-//! cdport 1.3.0 and newer is reached over D-Bus when its service is set up
-//! (`cdport --install-dbus-service`): its runs then belong to cdport, not
-//! to Gatefold, and it's the only way from a Flatpak.
+//! cdport 1.3.0 and lyrembed 1.2.0 and newer are reached over D-Bus when
+//! their service is set up (`--install-dbus-service`): their runs then
+//! belong to them, not to Gatefold, and it's the only way from a Flatpak.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
@@ -32,8 +32,9 @@ use crate::library_folders;
 
 /// SIGINT: the tools stop as with Ctrl+C (cdport finishes cyanrip's log).
 const SIGINT: i32 = 2;
-/// cdport's Import answers once its page is up, within 20 s.
-const IMPORT_TIMEOUT_MS: i32 = 30_000;
+/// cdport's Import and lyrembed's OpenPage answer once the page is up,
+/// within 20 s.
+const START_TIMEOUT_MS: i32 = 30_000;
 
 /// A found tool: its program and version.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,55 +46,136 @@ pub struct ToolInfo {
 /// What detection found (runs on a background thread).
 #[derive(Debug, Clone, Default)]
 pub struct Detected {
-    pub lyrembed: Option<ToolInfo>,
+    pub lyrembed: Lyrembed,
     pub cdport: Cdport,
+    /// The lyrembed program has `romanize --stdio` (without D-Bus).
     pub romanize_stdio: bool,
     pub ear_tag: bool,
 }
 
-/// cdport as found: over D-Bus, as a program here, or both.
-#[derive(Debug, Clone, Default)]
-pub struct Cdport {
-    /// The program (`cdport`, or `cdimport` before 1.3.0). A Flatpak
-    /// doesn't see it.
+impl Detected {
+    /// Automatic romanization for display is possible (§5.1).
+    pub fn can_romanize(&self) -> bool {
+        self.lyrembed.dbus || (self.lyrembed.program.is_some() && self.romanize_stdio)
+    }
+}
+
+/// A companion tool as found: over D-Bus, as a program here, or both.
+#[derive(Debug, Clone)]
+pub struct Companion<C> {
+    /// The program. A Flatpak doesn't see it.
     pub program: Option<ToolInfo>,
     /// Its D-Bus service answered.
     pub dbus: bool,
     /// Why its D-Bus service didn't start, when it's set up but broken
-    /// (e.g. cdport was removed or moved since).
+    /// (e.g. the program was removed or moved since).
     pub dbus_error: Option<String>,
     pub version: Option<Version>,
-    pub config: cdport::Config,
+    pub config: C,
+    /// The first version with the D-Bus interface.
+    pub dbus_version: Version,
+    /// The program's old name (cdport's `cdimport`).
+    pub old_name: Option<&'static str>,
 }
 
-impl Cdport {
-    /// Gatefold can import CDs with it.
+/// cdport (`cdport`, or `cdimport` before 1.3.0).
+pub type Cdport = Companion<cdport::Config>;
+pub type Lyrembed = Companion<lyrembed::Config>;
+
+impl Default for Cdport {
+    fn default() -> Self {
+        Companion::new(cdport::DBUS_VERSION, Some("cdimport"))
+    }
+}
+
+impl Default for Lyrembed {
+    fn default() -> Self {
+        Companion::new(lyrembed::DBUS_VERSION, None)
+    }
+}
+
+impl<C: Default> Companion<C> {
+    fn new(dbus_version: Version, old_name: Option<&'static str>) -> Self {
+        Self {
+            program: None,
+            dbus: false,
+            dbus_error: None,
+            version: None,
+            config: C::default(),
+            dbus_version,
+            old_name,
+        }
+    }
+}
+
+impl<C> Companion<C> {
+    /// Gatefold can use it.
     pub fn usable(&self) -> bool {
         self.dbus || self.program.is_some()
     }
 
-    /// cdimport 1.2.x, from before cdport's new name and D-Bus interface.
+    /// A version from before the D-Bus interface (for cdport: cdimport).
     pub fn is_old(&self) -> bool {
         let Some(program) = self.program.as_ref().filter(|_| !self.dbus) else {
             return false;
         };
         match self.version {
-            Some(version) => version < cdport::DBUS_VERSION,
+            Some(version) => version < self.dbus_version,
             // Its version unknown: the name tells.
-            None => program.path.file_name().is_some_and(|n| n == "cdimport"),
+            None => self
+                .old_name
+                .is_some_and(|old| program.path.file_name().is_some_and(|n| n == old)),
         }
     }
 
-    /// cdport 1.3.0 or newer, without its D-Bus service set up.
+    /// A version with the D-Bus interface, without its service set up.
     pub fn can_set_up_service(&self) -> bool {
         !self.dbus && self.program.is_some() && !self.is_old()
     }
 }
 
+/// The companion tools with a page (and a D-Bus interface).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageTool {
     Lyrembed,
     Cdport,
+}
+
+impl PageTool {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Lyrembed => "lyrembed",
+            Self::Cdport => "cdport",
+        }
+    }
+
+    fn bus_name(self) -> &'static str {
+        match self {
+            Self::Lyrembed => lyrembed::BUS_NAME,
+            Self::Cdport => cdport::BUS_NAME,
+        }
+    }
+
+    fn object_path(self) -> &'static str {
+        match self {
+            Self::Lyrembed => lyrembed::OBJECT_PATH,
+            Self::Cdport => cdport::OBJECT_PATH,
+        }
+    }
+
+    fn interface(self) -> &'static str {
+        match self {
+            Self::Lyrembed => lyrembed::INTERFACE,
+            Self::Cdport => cdport::INTERFACE,
+        }
+    }
+
+    fn status(self) -> String {
+        match self {
+            Self::Lyrembed => gettext("lyrembed is open in your browser"),
+            Self::Cdport => gettext("Importing a CD with cdport"),
+        }
+    }
 }
 
 /// A tool with a page, while it runs.
@@ -101,9 +183,9 @@ pub enum PageTool {
 pub enum PageRun {
     /// Started by Gatefold: it ends with Gatefold.
     Process(gio::Subprocess),
-    /// A cdport run over D-Bus (its ID; empty until Import answered): it
-    /// runs on without Gatefold.
-    Cdport(String),
+    /// A run of the tool's D-Bus service (its ID; empty until the service
+    /// answered): it runs on without Gatefold.
+    Service(String),
 }
 
 /// A page to open (now, or once the running one has closed).
@@ -114,8 +196,12 @@ pub enum PageStart {
         argv: Vec<OsString>,
         status: String,
     },
-    /// cdport over D-Bus; `folder` continues an unfinished import.
-    Cdport { folder: Option<PathBuf> },
+    /// Over D-Bus: cdport (`folder` continues an unfinished import) or
+    /// lyrembed (`folder`'s page).
+    Service {
+        tool: PageTool,
+        folder: Option<PathBuf>,
+    },
 }
 
 mod imp {
@@ -145,15 +231,17 @@ mod imp {
         pub page_url: RefCell<Option<String>>,
         /// Counts the pages opened, to tell them apart later.
         pub page_generation: Cell<u64>,
-        /// Stop was asked for before cdport's Import answered.
+        /// Stop was asked for before the service's run started.
         pub stop_when_started: Cell<bool>,
         /// A page to open once the running one has closed.
         pub pending_page: RefCell<Option<PageStart>>,
-        /// The session bus (cdport's D-Bus interface).
+        /// The session bus (the tools' D-Bus interfaces).
         pub bus: OnceCell<gio::DBusConnection>,
-        pub finished_signal: RefCell<Option<gio::SignalSubscription>>,
+        pub finished_signals: RefCell<Vec<gio::SignalSubscription>>,
         pub auto_queue: RefCell<VecDeque<PathBuf>>,
         pub auto_running: Cell<bool>,
+        /// The lyrics search running over D-Bus (lyrembed's run ID).
+        pub auto_run: RefCell<Option<String>>,
         pub unfinished: RefCell<Vec<PathBuf>>,
         /// When the last cdport run started (Unix seconds), for the
         /// "New album" toast.
@@ -215,7 +303,7 @@ impl Tools {
         let _ = self.imp().settings.set(settings);
         self.detect();
         self.watch_cds();
-        self.watch_cdport();
+        self.watch_services();
     }
 
     fn settings(&self) -> &gio::Settings {
@@ -251,25 +339,34 @@ impl Tools {
                     return;
                 }
                 tracing::info!("Companion tools: {detected:?}");
-                let dbus = detected.cdport.dbus;
+                let services = [
+                    (PageTool::Cdport, detected.cdport.dbus),
+                    (PageTool::Lyrembed, detected.lyrembed.dbus),
+                ];
                 tools.imp().detected.replace(detected);
                 tools.check_unfinished_imports();
-                if dbus {
-                    tools.adopt_cdport_run();
+                for (tool, dbus) in services {
+                    if dbus {
+                        tools.adopt_service_run(tool);
+                    }
                 }
                 tools.emit_by_name::<()>("detected", &[]);
             }
         ));
     }
 
-    /// The lyrembed program for `--list-aliases` (also used by scans).
+    /// The lyrembed program (without D-Bus: `romanize --stdio`).
     pub fn lyrembed_path(&self) -> Option<PathBuf> {
-        self.imp()
-            .detected
-            .borrow()
-            .lyrembed
-            .as_ref()
-            .map(|t| t.path.clone())
+        self.lyrembed().program.map(|t| t.path)
+    }
+
+    fn lyrembed(&self) -> Lyrembed {
+        self.imp().detected.borrow().lyrembed.clone()
+    }
+
+    /// lyrembed can be used (over D-Bus, or as a program).
+    pub fn lyrembed_usable(&self) -> bool {
+        self.imp().detected.borrow().lyrembed.usable()
     }
 
     // Running tools ----------------------------------------------------------
@@ -342,7 +439,7 @@ impl Tools {
         }
         match start {
             PageStart::Command { tool, argv, status } => self.run_page_command(tool, &argv, status),
-            PageStart::Cdport { folder } => self.start_cdport_run(folder),
+            PageStart::Service { tool, folder } => self.start_service_run(tool, folder),
         }
     }
 
@@ -405,10 +502,7 @@ impl Tools {
     }
 
     async fn confirm_replace_page(&self, open: Option<PageTool>) -> bool {
-        let name = match open {
-            Some(PageTool::Cdport) => "cdport",
-            _ => "lyrembed",
-        };
+        let name = open.unwrap_or(PageTool::Lyrembed).name();
         let dialog = adw::AlertDialog::builder()
             // Translators: {} is a program name (lyrembed, cdport).
             .heading(gettext("Close the Open {} Page?").replace("{}", name))
@@ -427,9 +521,36 @@ impl Tools {
         dialog.choose_future(window.as_ref()).await == "replace"
     }
 
-    /// Reopens the page's address (if the tab was lost).
+    /// Reopens the page's address (if the tab was lost). lyrembed's
+    /// service opens its pages itself (their address isn't handed out).
     pub fn show_page(&self) {
-        let Some(url) = self.imp().page_url.borrow().clone() else {
+        let imp = self.imp();
+        if imp.page_tool.get() == Some(PageTool::Lyrembed)
+            && let Some(PageRun::Service(run)) = imp.page_run.borrow().clone()
+            && !run.is_empty()
+        {
+            glib::spawn_future_local(glib::clone!(
+                #[weak(rename_to = tools)]
+                self,
+                async move {
+                    let args = glib::Variant::tuple_from_iter([run.to_variant()]);
+                    let reply = tools
+                        .call_service(
+                            PageTool::Lyrembed,
+                            "ShowPage",
+                            Some(args),
+                            Some("(b)"),
+                            10_000,
+                        )
+                        .await;
+                    if !matches!(reply.map(|r| r.get::<(bool,)>()), Ok(Some((true,)))) {
+                        tools.message(&gettext("lyrembed couldn't open your browser"));
+                    }
+                }
+            ));
+            return;
+        }
+        let Some(url) = imp.page_url.borrow().clone() else {
             return;
         };
         // Development aid for headless tests: never touch the real browser.
@@ -455,9 +576,13 @@ impl Tools {
         };
         match run {
             PageRun::Process(process) => process.send_signal(SIGINT),
-            // Import hasn't answered yet: stopped once it has.
-            PageRun::Cdport(id) if id.is_empty() => imp.stop_when_started.set(true),
-            PageRun::Cdport(id) => self.stop_cdport_run(id),
+            // The service hasn't answered yet: stopped once it has.
+            PageRun::Service(id) if id.is_empty() => imp.stop_when_started.set(true),
+            PageRun::Service(id) => {
+                if let Some(tool) = imp.page_tool.get() {
+                    self.stop_service_run(tool, id);
+                }
+            }
         }
         let generation = imp.page_generation.get();
         glib::timeout_add_seconds_local_once(
@@ -482,7 +607,7 @@ impl Tools {
     }
 
     /// The running page tool ends when Gatefold quits (one Gatefold
-    /// started; cdport's runs over D-Bus go on).
+    /// started; runs over D-Bus go on).
     pub fn page_needs_gatefold(&self) -> bool {
         matches!(*self.imp().page_run.borrow(), Some(PageRun::Process(_)))
     }
@@ -491,21 +616,29 @@ impl Tools {
 
     /// "Check & Edit in lyrembed…": the album folder's page.
     pub fn lyrembed_page(&self, album_dir: &Path) {
-        let Some(program) = self.lyrembed_path() else {
+        let lyrembed = self.lyrembed();
+        if lyrembed.dbus {
+            self.open_page(PageStart::Service {
+                tool: PageTool::Lyrembed,
+                folder: Some(album_dir.to_path_buf()),
+            });
+            return;
+        }
+        let Some(program) = lyrembed.program.map(|p| p.path) else {
             self.missing_tool("lyrembed");
             return;
         };
         self.open_page(PageStart::Command {
             tool: PageTool::Lyrembed,
             argv: lyrembed::page_args(&program, album_dir),
-            status: gettext("lyrembed is open in your browser"),
+            status: PageTool::Lyrembed.status(),
         });
     }
 
-    /// "Find Lyrics Automatically": `lyrembed --auto`, one album folder per
-    /// call, one job at a time.
+    /// "Find Lyrics Automatically": `lyrembed --auto` (or its service's
+    /// FetchLyrics), one album folder per call, one job at a time.
     pub fn find_lyrics(&self, album_dir: &Path) {
-        if self.lyrembed_path().is_none() {
+        if !self.lyrembed_usable() {
             self.missing_tool("lyrembed");
             return;
         }
@@ -535,13 +668,26 @@ impl Tools {
         let Some(dir) = imp.auto_queue.borrow_mut().pop_front() else {
             return;
         };
-        let Some(program) = self.lyrembed_path() else {
-            return;
-        };
+        let lyrembed = self.lyrembed();
         imp.auto_running.set(true);
         self.update_lyrics_jobs();
+        if lyrembed.dbus {
+            self.fetch_lyrics_over_dbus(dir, lyrembed.program.map(|p| p.path));
+            return;
+        }
+        let Some(program) = lyrembed.program.map(|p| p.path) else {
+            imp.auto_running.set(false);
+            self.update_lyrics_jobs();
+            return;
+        };
+        self.fetch_lyrics_with(&program, &dir);
+    }
+
+    /// `lyrembed <dir> --auto`.
+    fn fetch_lyrics_with(&self, program: &Path, dir: &Path) {
+        let imp = self.imp();
         let process = self.spawn(
-            &lyrembed::auto_args(&program, &dir),
+            &lyrembed::auto_args(program, dir),
             |_| {},
             glib::clone!(
                 #[weak(rename_to = tools)]
@@ -557,7 +703,60 @@ impl Tools {
         if process.is_none() {
             imp.auto_running.set(false);
             self.update_lyrics_jobs();
+            self.run_next_lyrics_job();
         }
+    }
+
+    /// lyrembed's FetchLyrics. It only searches inside the music folder;
+    /// elsewhere the program does it, when Gatefold sees it.
+    fn fetch_lyrics_over_dbus(&self, dir: PathBuf, program: Option<PathBuf>) {
+        let options = glib::VariantDict::new(None).end();
+        let args =
+            glib::Variant::tuple_from_iter([dir.to_string_lossy().as_ref().to_variant(), options]);
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = tools)]
+            self,
+            async move {
+                let reply = tools
+                    .call_service(
+                        PageTool::Lyrembed,
+                        "FetchLyrics",
+                        Some(args),
+                        Some("(s)"),
+                        10_000,
+                    )
+                    .await;
+                match reply.map(|r| r.get::<(String,)>()) {
+                    Ok(Some((run,))) => {
+                        tracing::info!("lyrembed lyrics search {run} on {}", dir.display());
+                        tools.imp().auto_run.replace(Some(run));
+                    }
+                    Ok(None) => tools.lyrics_job_ended(None),
+                    Err(mut err) => {
+                        gio::DBusError::strip_remote_error(&mut err);
+                        tracing::info!("lyrembed's FetchLyrics: {err}");
+                        if let Some(program) = program {
+                            tools.fetch_lyrics_with(&program, &dir);
+                        } else {
+                            tools.message(err.message());
+                            tools.lyrics_job_ended(None);
+                        }
+                    }
+                }
+            }
+        ));
+    }
+
+    /// A lyrics search over D-Bus ended (`None`: it didn't start).
+    fn lyrics_job_ended(&self, code: Option<i32>) {
+        let imp = self.imp();
+        imp.auto_run.replace(None);
+        imp.auto_running.set(false);
+        self.update_lyrics_jobs();
+        if let Some(code) = code {
+            self.lyrics_job_done(code);
+        }
+        self.run_next_lyrics_job();
     }
 
     fn lyrics_job_done(&self, code: i32) {
@@ -607,7 +806,10 @@ impl Tools {
         }
         self.imp().import_started.set(Some(crate::metadata::now()));
         if cdport.dbus {
-            self.open_page(PageStart::Cdport { folder });
+            self.open_page(PageStart::Service {
+                tool: PageTool::Cdport,
+                folder,
+            });
             return;
         }
         let Some(program) = cdport.program.map(|p| p.path) else {
@@ -621,7 +823,7 @@ impl Tools {
         self.open_page(PageStart::Command {
             tool: PageTool::Cdport,
             argv,
-            status: gettext("Importing a CD with cdport"),
+            status: PageTool::Cdport.status(),
         });
     }
 
@@ -642,7 +844,13 @@ impl Tools {
                 self,
                 async move {
                     let reply = tools
-                        .call_cdport("UnfinishedAlbums", None, Some("(as)"), 10_000)
+                        .call_service(
+                            PageTool::Cdport,
+                            "UnfinishedAlbums",
+                            None,
+                            Some("(as)"),
+                            10_000,
+                        )
                         .await;
                     match reply.map(|r| r.get::<(Vec<String>,)>()) {
                         Ok(Some((folders,))) => {
@@ -672,11 +880,11 @@ impl Tools {
         }
     }
 
-    // cdport over D-Bus ------------------------------------------------------
+    // The tools over D-Bus -----------------------------------------------------
 
-    /// Follows cdport's runs: their end (`Finished`), and the service
-    /// going away while one of ours runs (it would have crashed).
-    fn watch_cdport(&self) {
+    /// Follows the tools' runs: their end (`Finished`), and a service going
+    /// away while one of ours runs (it would have crashed).
+    fn watch_services(&self) {
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
             self,
@@ -684,57 +892,56 @@ impl Tools {
                 let bus = match gio::bus_get_future(gio::BusType::Session).await {
                     Ok(bus) => bus,
                     Err(err) => {
-                        tracing::warn!("No session bus for cdport: {err}");
+                        tracing::warn!("No session bus for the companion tools: {err}");
                         return;
                     }
                 };
-                let finished = bus.subscribe_to_signal(
-                    Some(cdport::BUS_NAME),
-                    Some(cdport::INTERFACE),
-                    Some("Finished"),
-                    Some(cdport::OBJECT_PATH),
-                    None,
-                    gio::DBusSignalFlags::NONE,
-                    glib::clone!(
-                        #[weak]
-                        tools,
-                        move |signal| {
-                            if let Some((run, code, album)) =
-                                signal.parameters.get::<(String, i32, String)>()
-                            {
-                                tools.cdport_run_finished(&run, code, &album);
+                for tool in [PageTool::Cdport, PageTool::Lyrembed] {
+                    let finished = bus.subscribe_to_signal(
+                        Some(tool.bus_name()),
+                        Some(tool.interface()),
+                        Some("Finished"),
+                        Some(tool.object_path()),
+                        None,
+                        gio::DBusSignalFlags::NONE,
+                        glib::clone!(
+                            #[weak]
+                            tools,
+                            move |signal| {
+                                // (run, exit code, …): cdport adds the album.
+                                let parameters = signal.parameters;
+                                if parameters.n_children() < 2 {
+                                    return;
+                                }
+                                let run = parameters.child_value(0).get::<String>();
+                                let code = parameters.child_value(1).get::<i32>();
+                                if let (Some(run), Some(code)) = (run, code) {
+                                    tools.service_run_finished(tool, &run, code);
+                                }
                             }
-                        }
-                    ),
-                );
-                tools.imp().finished_signal.replace(Some(finished));
-                gio::bus_watch_name_on_connection(
-                    &bus,
-                    cdport::BUS_NAME,
-                    gio::BusNameWatcherFlags::NONE,
-                    |_, _, _| {},
-                    glib::clone!(
-                        #[weak]
-                        tools,
-                        move |_, _| {
-                            let ours = matches!(
-                                &*tools.imp().page_run.borrow(),
-                                Some(PageRun::Cdport(id)) if !id.is_empty()
-                            );
-                            if ours {
-                                tracing::warn!("cdport's D-Bus service went away during a run");
-                                tools.page_closed(PageTool::Cdport, -1);
-                            }
-                        }
-                    ),
-                );
+                        ),
+                    );
+                    tools.imp().finished_signals.borrow_mut().push(finished);
+                    gio::bus_watch_name_on_connection(
+                        &bus,
+                        tool.bus_name(),
+                        gio::BusNameWatcherFlags::NONE,
+                        |_, _, _| {},
+                        glib::clone!(
+                            #[weak]
+                            tools,
+                            move |_, _| tools.service_gone(tool)
+                        ),
+                    );
+                }
                 let _ = tools.imp().bus.set(bus);
             }
         ));
     }
 
-    async fn call_cdport(
+    async fn call_service(
         &self,
+        tool: PageTool,
         method: &str,
         args: Option<glib::Variant>,
         reply: Option<&str>,
@@ -745,9 +952,9 @@ impl Tools {
             None => gio::bus_get_future(gio::BusType::Session).await?,
         };
         bus.call_future(
-            Some(cdport::BUS_NAME),
-            cdport::OBJECT_PATH,
-            cdport::INTERFACE,
+            Some(tool.bus_name()),
+            tool.object_path(),
+            tool.interface(),
             method,
             args.as_ref(),
             reply.and_then(|r| glib::VariantTy::new(r).ok()),
@@ -757,54 +964,87 @@ impl Tools {
         .await
     }
 
-    /// cdport's `Import`: a run on its own page, whose address comes back.
-    fn start_cdport_run(&self, folder: Option<PathBuf>) {
-        let status = gettext("Importing a CD with cdport");
-        self.page_opened(
-            PageTool::Cdport,
-            PageRun::Cdport(String::new()),
-            None,
-            status,
-        );
+    /// The running page is this run of `tool`'s service.
+    fn is_page_run(&self, tool: PageTool, run: &str) -> bool {
+        let imp = self.imp();
+        imp.page_tool.get() == Some(tool)
+            && matches!(&*imp.page_run.borrow(), Some(PageRun::Service(id)) if id == run)
+    }
+
+    /// cdport's `Import` (the page's address comes back, Gatefold opens
+    /// it) or lyrembed's `OpenPage` (it opens the page itself).
+    fn start_service_run(&self, tool: PageTool, folder: Option<PathBuf>) {
+        self.page_opened(tool, PageRun::Service(String::new()), None, tool.status());
+        if tool == PageTool::Lyrembed {
+            // lyrembed's editor plays the track in the page (§10.0).
+            GatefoldApplication::get().player().pause();
+        }
         let generation = self.imp().page_generation.get();
-        let options = glib::VariantDict::new(None);
-        if let Some(library) = self.cdport_library(&self.cdport().config) {
-            options.insert("Library", library.to_string_lossy().as_ref());
-        }
-        if let Some(folder) = folder {
-            options.insert("Folder", folder.to_string_lossy().as_ref());
-        }
-        let args = glib::Variant::tuple_from_iter([options.end()]);
+        let folder_text = folder
+            .as_ref()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (method, args, reply) = match tool {
+            PageTool::Cdport => {
+                let options = glib::VariantDict::new(None);
+                if let Some(library) = self.cdport_library(&self.cdport().config) {
+                    options.insert("Library", library.to_string_lossy().as_ref());
+                }
+                if folder.is_some() {
+                    options.insert("Folder", folder_text.as_str());
+                }
+                (
+                    "Import",
+                    glib::Variant::tuple_from_iter([options.end()]),
+                    "(ss)",
+                )
+            }
+            PageTool::Lyrembed => (
+                "OpenPage",
+                glib::Variant::tuple_from_iter([folder_text.to_variant()]),
+                "(sb)",
+            ),
+        };
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
             self,
             async move {
                 let reply = tools
-                    .call_cdport("Import", Some(args), Some("(ss)"), IMPORT_TIMEOUT_MS)
+                    .call_service(tool, method, Some(args), Some(reply), START_TIMEOUT_MS)
                     .await;
                 let imp = tools.imp();
                 if imp.page_generation.get() != generation {
                     return;
                 }
-                match reply.map(|r| r.get::<(String, String)>()) {
-                    Ok(Some((run, url))) => {
-                        tracing::info!("cdport run {run} at {url}");
-                        imp.page_run.replace(Some(PageRun::Cdport(run.clone())));
-                        imp.page_url.replace(Some(url));
+                let started = reply.map(|reply| {
+                    let run = reply.child_value(0).get::<String>();
+                    // cdport: the address; lyrembed: whether it opened.
+                    let second = reply.child_value(1);
+                    (run, second.get::<String>(), second.get::<bool>())
+                });
+                match started {
+                    Ok((Some(run), url, opened)) => {
+                        tracing::info!("{} run {run} started", tool.name());
+                        imp.page_run.replace(Some(PageRun::Service(run.clone())));
+                        imp.page_url.replace(url);
                         if imp.stop_when_started.take() {
-                            tools.stop_cdport_run(run);
-                        } else {
+                            tools.stop_service_run(tool, run);
+                        } else if tool == PageTool::Cdport {
                             tools.show_page();
+                        } else if opened == Some(false) {
+                            tools.message(&gettext("lyrembed couldn't open your browser"));
                         }
                     }
-                    Ok(None) => tools.page_closed(PageTool::Cdport, -1),
+                    Ok(_) => tools.page_closed(tool, -1),
                     Err(mut err) => {
                         gio::DBusError::strip_remote_error(&mut err);
-                        tracing::warn!("cdport couldn't start an import: {err}");
-                        tools.page_closed(PageTool::Cdport, -1);
-                        // Translators: {} is cdport's own message.
+                        tracing::warn!("{} couldn't start: {err}", tool.name());
+                        tools.page_closed(tool, -1);
+                        // Translators: {tool} is a program name, {message} its own message.
                         tools.message(
-                            &gettext("cdport couldn't start: {}").replace("{}", err.message()),
+                            &gettext("{tool} couldn't start: {message}")
+                                .replace("{tool}", tool.name())
+                                .replace("{message}", err.message()),
                         );
                     }
                 }
@@ -812,42 +1052,55 @@ impl Tools {
         ));
     }
 
-    fn stop_cdport_run(&self, run: String) {
+    fn stop_service_run(&self, tool: PageTool, run: String) {
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
             self,
             async move {
                 let args = glib::Variant::tuple_from_iter([run.to_variant()]);
-                if let Err(err) = tools.call_cdport("Stop", Some(args), None, 10_000).await {
+                if let Err(err) = tools
+                    .call_service(tool, "Stop", Some(args), None, 10_000)
+                    .await
+                {
                     // Ended meanwhile (UnknownRun): nothing to stop.
-                    tracing::info!("cdport's Stop: {err}");
-                    let ours = matches!(
-                        &*tools.imp().page_run.borrow(),
-                        Some(PageRun::Cdport(id)) if *id == run
-                    );
-                    if ours {
-                        tools.page_closed(PageTool::Cdport, -1);
+                    tracing::info!("{}'s Stop: {err}", tool.name());
+                    if tools.is_page_run(tool, &run) {
+                        tools.page_closed(tool, -1);
                     }
                 }
             }
         ));
     }
 
-    fn cdport_run_finished(&self, run: &str, code: i32, album: &str) {
-        let ours = matches!(
-            &*self.imp().page_run.borrow(),
-            Some(PageRun::Cdport(id)) if id == run
-        );
-        if !ours {
-            return;
+    fn service_run_finished(&self, tool: PageTool, run: &str, code: i32) {
+        if self.is_page_run(tool, run) {
+            tracing::info!("{} run {run} finished with {code}", tool.name());
+            self.page_closed(tool, code);
+        } else if tool == PageTool::Lyrembed && self.imp().auto_run.borrow().as_deref() == Some(run)
+        {
+            tracing::info!("lyrembed lyrics search {run} finished with {code}");
+            self.lyrics_job_ended(Some(code));
         }
-        tracing::info!("cdport run {run} finished with {code} ({album:?})");
-        self.page_closed(PageTool::Cdport, code);
     }
 
-    /// A cdport run still going (Gatefold was restarted meanwhile): shown
-    /// in the status bar again, so it can be shown and stopped.
-    fn adopt_cdport_run(&self) {
+    /// A service went away: its runs of ours ended with it.
+    fn service_gone(&self, tool: PageTool) {
+        let imp = self.imp();
+        let page = imp.page_tool.get() == Some(tool)
+            && matches!(&*imp.page_run.borrow(), Some(PageRun::Service(id)) if !id.is_empty());
+        if page {
+            tracing::warn!("{}'s D-Bus service went away during a run", tool.name());
+            self.page_closed(tool, -1);
+        }
+        if tool == PageTool::Lyrembed && imp.auto_run.borrow().is_some() {
+            tracing::warn!("lyrembed's D-Bus service went away during a lyrics search");
+            self.lyrics_job_ended(Some(-1));
+        }
+    }
+
+    /// A page run still going (Gatefold was restarted meanwhile): shown in
+    /// the status bar again, so it can be shown and stopped.
+    fn adopt_service_run(&self, tool: PageTool) {
         if self.page_running() {
             return;
         }
@@ -855,39 +1108,57 @@ impl Tools {
             #[weak(rename_to = tools)]
             self,
             async move {
+                let (signature, kind_at) = match tool {
+                    // (run, address)
+                    PageTool::Cdport => ("(a(ss))", None),
+                    // (run, kind, folder)
+                    PageTool::Lyrembed => ("(a(sss))", Some(1)),
+                };
                 let Ok(reply) = tools
-                    .call_cdport("Runs", None, Some("(a(ss))"), 10_000)
+                    .call_service(tool, "Runs", None, Some(signature), 10_000)
                     .await
                 else {
                     return;
                 };
-                let Some((runs,)) = reply.get::<(Vec<(String, String)>,)>() else {
+                let runs = reply.child_value(0);
+                let found = (0..runs.n_children())
+                    .map(|i| runs.child_value(i))
+                    .find(|run| {
+                        kind_at.is_none_or(|at| {
+                            run.child_value(at).get::<String>().as_deref() == Some("page")
+                        })
+                    });
+                let Some(found) = found else {
                     return;
                 };
-                let Some((run, url)) = runs.into_iter().next() else {
+                let Some(run) = found.child_value(0).get::<String>() else {
                     return;
                 };
                 if tools.page_running() {
                     return;
                 }
-                tracing::info!("cdport run {run} is still going");
-                tools.page_opened(
-                    PageTool::Cdport,
-                    PageRun::Cdport(run),
-                    Some(url),
-                    gettext("Importing a CD with cdport"),
-                );
+                // cdport hands out the page's address, lyrembed doesn't.
+                let url = match tool {
+                    PageTool::Cdport => found.child_value(1).get::<String>(),
+                    PageTool::Lyrembed => None,
+                };
+                tracing::info!("{} run {run} is still going", tool.name());
+                tools.page_opened(tool, PageRun::Service(run), url, tool.status());
             }
         ));
     }
 
-    /// Preferences' "Set Up": `cdport --install-dbus-service`, then a new
+    /// Preferences' "Set Up": `<tool> --install-dbus-service`, then a new
     /// detection.
-    pub fn set_up_cdport_service(&self) {
-        let Some(program) = self.cdport().program.map(|p| p.path) else {
+    pub fn set_up_service(&self, tool: PageTool) {
+        let (program, arg) = match tool {
+            PageTool::Cdport => (self.cdport().program, cdport::SERVICE_ARG),
+            PageTool::Lyrembed => (self.lyrembed().program, lyrembed::SERVICE_ARG),
+        };
+        let Some(program) = program.map(|p| p.path) else {
             return;
         };
-        let argv = vec![program.into_os_string(), cdport::SERVICE_ARG.into()];
+        let argv = vec![program.into_os_string(), arg.into()];
         self.spawn(
             &argv,
             |_| {},
@@ -895,11 +1166,17 @@ impl Tools {
                 #[weak(rename_to = tools)]
                 self,
                 move |code| {
+                    // Translators: {} is a program name (lyrembed, cdport).
                     if code == 0 {
-                        tools.message(&gettext("cdport's D-Bus service is set up"));
+                        tools.message(
+                            &gettext("{}'s D-Bus service is set up").replace("{}", tool.name()),
+                        );
                     } else {
-                        tracing::warn!("cdport --install-dbus-service exited with {code}");
-                        tools.message(&gettext("cdport's D-Bus service couldn't be set up"));
+                        tracing::warn!("{} --install-dbus-service exited with {code}", tool.name());
+                        tools.message(
+                            &gettext("{}'s D-Bus service couldn't be set up")
+                                .replace("{}", tool.name()),
+                        );
                     }
                     tools.detect();
                 }
@@ -1052,17 +1329,22 @@ fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
             .and_then(parse_version);
         Some(ToolInfo { path, version })
     };
-    let lyrembed = probe("lyrembed", lyrembed_override);
-    let romanize_stdio = lyrembed.as_ref().is_some_and(|tool| {
-        run_for_output(&[
-            tool.path.as_os_str(),
-            OsStr::new("romanize"),
-            OsStr::new("--help"),
-        ])
-        .is_some_and(|help| lyrembed::supports_romanize_stdio(&help))
-    });
+    let lyrembed = detect_lyrembed(probe("lyrembed", lyrembed_override));
+    // Without D-Bus, romanizing needs `romanize --stdio` (1.1.1).
+    let romanize_stdio = !lyrembed.dbus
+        && lyrembed.program.as_ref().is_some_and(|tool| {
+            run_for_output(&[
+                tool.path.as_os_str(),
+                OsStr::new("romanize"),
+                OsStr::new("--help"),
+            ])
+            .is_some_and(|help| lyrembed::supports_romanize_stdio(&help))
+        });
+    let cdport_program = cdport::PROGRAMS
+        .iter()
+        .find_map(|name| probe(name, cdport_override));
     Detected {
-        cdport: detect_cdport(|name| probe(name, cdport_override)),
+        cdport: detect_cdport(cdport_program),
         lyrembed,
         romanize_stdio,
         ear_tag: ear_tag_installed(),
@@ -1071,75 +1353,144 @@ fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
 
 /// cdport over D-Bus (its `GetInfo`) and as a program; the settings from
 /// D-Bus, else from its config file.
-fn detect_cdport(probe: impl Fn(&str) -> Option<ToolInfo>) -> Cdport {
-    let program = cdport::PROGRAMS.iter().find_map(|name| probe(name));
-    match cdport_info() {
-        Ok((version, config)) => Cdport {
-            version: version.or_else(|| program.as_ref().and_then(|p| p.version)),
-            program,
-            dbus: true,
-            dbus_error: None,
-            config,
-        },
-        Err(dbus_error) => Cdport {
-            version: program.as_ref().and_then(|p| p.version),
-            config: if program.is_some() {
-                cdport::Config::read()
-            } else {
-                cdport::Config::default()
-            },
-            program,
-            dbus: false,
-            dbus_error,
-        },
+fn detect_cdport(program: Option<ToolInfo>) -> Cdport {
+    let mut cdport = Cdport {
+        version: program.as_ref().and_then(|p| p.version),
+        program,
+        ..Cdport::default()
+    };
+    match service_info(PageTool::Cdport) {
+        Ok(info) => {
+            cdport.dbus = true;
+            cdport.version = info_text(&info, "Version")
+                .as_deref()
+                .and_then(parse_version)
+                .or(cdport.version);
+            cdport.config = cdport::Config {
+                library_dir: info_text(&info, "LibraryDir").map(PathBuf::from),
+                work_dir: info_text(&info, "WorkDir").map(PathBuf::from),
+                editor: info_text(&info, "Editor"),
+            };
+        }
+        Err(error) => {
+            cdport.dbus_error = error;
+            if cdport.program.is_some() {
+                cdport.config = cdport::Config::read();
+            }
+        }
     }
+    cdport
 }
 
-/// `GetInfo` over D-Bus: the version and settings. `Err(None)`: no service
-/// set up; `Err(Some(why))`: set up, but it didn't answer.
-fn cdport_info() -> Result<(Option<Version>, cdport::Config), Option<String>> {
+/// lyrembed over D-Bus (its `GetInfo`) and as a program; the settings from
+/// D-Bus, else from its config file.
+fn detect_lyrembed(program: Option<ToolInfo>) -> Lyrembed {
+    let mut lyrembed = Lyrembed {
+        version: program.as_ref().and_then(|p| p.version),
+        program,
+        ..Lyrembed::default()
+    };
+    match service_info(PageTool::Lyrembed) {
+        Ok(info) => {
+            lyrembed.dbus = true;
+            lyrembed.version = info_text(&info, "Version")
+                .as_deref()
+                .and_then(parse_version)
+                .or(lyrembed.version);
+            lyrembed.config = lyrembed::Config {
+                romanization_layout: info_text(&info, "RomanizationLayout"),
+                max_file_count: info
+                    .lookup::<u32>("MaxFileCount")
+                    .ok()
+                    .flatten()
+                    .map(u64::from),
+            };
+        }
+        Err(error) => {
+            lyrembed.dbus_error = error;
+            if lyrembed.program.is_some() {
+                lyrembed.config = lyrembed::Config::read();
+            }
+        }
+    }
+    lyrembed
+}
+
+fn info_text(info: &glib::VariantDict, key: &str) -> Option<String> {
+    info.lookup::<String>(key)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+}
+
+/// A tool's `GetInfo` over D-Bus. `Err(None)`: no service set up;
+/// `Err(Some(why))`: set up, but it didn't answer.
+fn service_info(tool: PageTool) -> Result<glib::VariantDict, Option<String>> {
+    let reply = call_service_sync(tool, "GetInfo", None, "(a{sv})", 15_000)?;
+    Ok(glib::VariantDict::new(Some(&reply.child_value(0))))
+}
+
+/// A call from a worker thread. `Err(None)`: the service isn't there (not
+/// set up); `Err(Some(why))`: it failed.
+fn call_service_sync(
+    tool: PageTool,
+    method: &str,
+    args: Option<&glib::Variant>,
+    reply: &str,
+    timeout_ms: i32,
+) -> Result<glib::Variant, Option<String>> {
     let bus = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)
         .map_err(|e| Some(e.to_string()))?;
-    let reply = bus.call_sync(
-        Some(cdport::BUS_NAME),
-        cdport::OBJECT_PATH,
-        cdport::INTERFACE,
-        "GetInfo",
-        None,
-        glib::VariantTy::new("(a{sv})").ok(),
+    bus.call_sync(
+        Some(tool.bus_name()),
+        tool.object_path(),
+        tool.interface(),
+        method,
+        args,
+        glib::VariantTy::new(reply).ok(),
         gio::DBusCallFlags::NONE,
-        15_000,
+        timeout_ms,
         gio::Cancellable::NONE,
-    );
-    let reply = match reply {
-        Ok(reply) => reply,
-        Err(mut err) => {
-            let missing = gio::DBusError::remote_error(&err).is_some_and(|name| {
-                name == "org.freedesktop.DBus.Error.ServiceUnknown"
-                    || name == "org.freedesktop.DBus.Error.NameHasNoOwner"
-            });
-            if missing {
-                return Err(None);
-            }
-            gio::DBusError::strip_remote_error(&mut err);
-            tracing::warn!("cdport's D-Bus service doesn't answer: {err}");
-            return Err(Some(err.message().to_owned()));
+    )
+    .map_err(|mut err| {
+        let missing = gio::DBusError::remote_error(&err).is_some_and(|name| {
+            name == "org.freedesktop.DBus.Error.ServiceUnknown"
+                || name == "org.freedesktop.DBus.Error.NameHasNoOwner"
+        });
+        if missing {
+            return None;
         }
-    };
-    let info = glib::VariantDict::new(Some(&reply.child_value(0)));
-    let text = |key: &str| {
-        info.lookup::<String>(key)
-            .ok()
-            .flatten()
-            .filter(|s| !s.is_empty())
-    };
-    let version = text("Version").as_deref().and_then(parse_version);
-    let config = cdport::Config {
-        library_dir: text("LibraryDir").map(PathBuf::from),
-        work_dir: text("WorkDir").map(PathBuf::from),
-        editor: text("Editor"),
-    };
-    Ok((version, config))
+        gio::DBusError::strip_remote_error(&mut err);
+        tracing::warn!("{}'s D-Bus service: {err}", tool.name());
+        Some(err.message().to_owned())
+    })
+}
+
+/// lyrembed's alias groups over D-Bus, as `--list-aliases` prints them
+/// (from a worker thread: the library scan). `None` without the service.
+pub fn lyrembed_aliases_over_dbus() -> Option<String> {
+    let reply =
+        call_service_sync(PageTool::Lyrembed, "ArtistAliases", None, "(aas)", 20_000).ok()?;
+    let (groups,) = reply.get::<(Vec<Vec<String>>,)>()?;
+    Some(gatefold_core::library::artists::Aliases::groups_to_text(
+        &groups,
+    ))
+}
+
+/// lyrembed's `Romanize` (from a worker thread): `Ok(None)` when it left
+/// the lyrics as they are.
+pub fn romanize_over_dbus(lyrics: &str, hint: Option<&str>) -> Result<Option<String>, String> {
+    let args = (lyrics, hint.unwrap_or("")).to_variant();
+    let reply = call_service_sync(PageTool::Lyrembed, "Romanize", Some(&args), "(sss)", 30_000)
+        .map_err(|e| e.unwrap_or_else(|| "lyrembed's D-Bus service is gone".to_owned()))?;
+    let (romanized, _language, reason) = reply
+        .get::<(String, String, String)>()
+        .ok_or("an unexpected answer")?;
+    if romanized.is_empty() {
+        tracing::debug!("lyrembed left the lyrics as they are: {reason}");
+        return Ok(None);
+    }
+    Ok(Some(romanized))
 }
 
 fn ear_tag_installed() -> bool {
@@ -1237,6 +1588,21 @@ mod tests {
     #[test]
     fn cdport_states() {
         let none = Cdport::default();
+        assert!(!Lyrembed::default().usable());
+        let old_lyrembed = Lyrembed {
+            program: program(Some(Version(1, 1, 1))),
+            version: Some(Version(1, 1, 1)),
+            ..Lyrembed::default()
+        };
+        assert!(old_lyrembed.usable() && old_lyrembed.is_old());
+        assert!(
+            !Lyrembed {
+                program: program(None),
+                ..Lyrembed::default()
+            }
+            .is_old(),
+            "lyrembed has no old name to tell by"
+        );
         assert!(!none.usable() && !none.is_old() && !none.can_set_up_service());
 
         let old = Cdport {

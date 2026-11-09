@@ -435,7 +435,7 @@ impl LyricsView {
         let imp = self.imp();
         imp.state.replace(Some(state.clone()));
         let tools = GatefoldApplication::get().tools();
-        let has_lyrembed = tools.lyrembed_path().is_some();
+        let has_lyrembed = tools.lyrembed_usable();
         imp.status_actions
             .set_visible(state == LyricsState::None && has_lyrembed && tools.lyrics_jobs() == 0);
         if state == LyricsState::None && tools.lyrics_jobs() > 0 {
@@ -551,9 +551,7 @@ impl LyricsView {
             rows.push((line.time_ms, button));
         }
         imp.rows.replace(rows);
-        if !imp.lines.borrow().is_empty()
-            && GatefoldApplication::get().tools().lyrembed_path().is_some()
-        {
+        if !imp.lines.borrow().is_empty() && GatefoldApplication::get().tools().lyrembed_usable() {
             let button = self.lyrembed_button();
             button.set_margin_top(24);
             button.add_css_class("flat");

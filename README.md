@@ -18,7 +18,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 
 **Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes. Preferences → Integrations shows whether they're found and, if not, the steps to install and set them up:
 
-- **lyrembed** finds lyrics automatically, or opens its page to check and edit them.
+- **lyrembed** finds lyrics automatically, or opens its page to check and edit them, and romanizes lyrics for display. With its D-Bus service set up (`lyrembed --install-dbus-service`), the Flatpak can use it too.
 - **cdport** (formerly cdimport) imports CDs; a banner offers it when you insert one. With its D-Bus service set up (`cdport --install-dbus-service`), imports keep running when Gatefold closes, and the Flatpak can use it.
 - [Ear Tag](https://flathub.org/apps/app.drey.EarTag) (or Kid3, Picard, or a command of your own) edits tags and covers.
 

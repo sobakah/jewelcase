@@ -219,7 +219,14 @@ impl GatefoldApplication {
             .activate(|app: &Self, _, _| app.tools().detect())
             .build();
         let set_up_cdport = gio::ActionEntry::builder("set-up-cdport")
-            .activate(|app: &Self, _, _| app.tools().set_up_cdport_service())
+            .activate(|app: &Self, _, _| {
+                app.tools().set_up_service(crate::tools::PageTool::Cdport);
+            })
+            .build();
+        let set_up_lyrembed = gio::ActionEntry::builder("set-up-lyrembed")
+            .activate(|app: &Self, _, _| {
+                app.tools().set_up_service(crate::tools::PageTool::Lyrembed);
+            })
             .build();
         // Preferences › Integrations: how to install and set up the tools.
         let show_integrations = gio::ActionEntry::builder("show-integrations")
@@ -245,6 +252,7 @@ impl GatefoldApplication {
             show_integrations,
             detect_tools,
             set_up_cdport,
+            set_up_lyrembed,
         ]);
     }
 

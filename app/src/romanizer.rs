@@ -1,7 +1,8 @@
 //! Automatic romanization for display (CONCEPT.md §5.1) with lyrembed's
-//! engine: `lyrembed romanize --stdio`, one process started on first need
-//! and stopped after 5 minutes without requests (Python and its
-//! dictionaries take about a second to start). Results are kept in the
+//! engine: its D-Bus service's `Romanize` when it's set up (lyrembed 1.2.0),
+//! else `lyrembed romanize --stdio`, one process started on first need and
+//! stopped after 5 minutes without requests (Python and its dictionaries
+//! take about a second to start). Results are kept in the
 //! database by the lyrics text, so each text is romanized once. Nothing is
 //! written to the files.
 
@@ -45,7 +46,7 @@ static HELPER: Mutex<Option<Helper>> = Mutex::new(None);
 /// Whether the installed lyrembed can do it (Preferences → Integrations
 /// says so too).
 pub fn available() -> bool {
-    GatefoldApplication::get().tools().detected().romanize_stdio
+    GatefoldApplication::get().tools().detected().can_romanize()
 }
 
 /// These lyrics with romanization under their non-Latin lines, from the
@@ -55,7 +56,13 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
     if !lyrics.needs_romanization() || !available() {
         return None;
     }
-    let program = GatefoldApplication::get().tools().lyrembed_path()?;
+    let tools = GatefoldApplication::get().tools();
+    // Over D-Bus (`None`), or the program.
+    let program = if tools.detected().lyrembed.dbus {
+        None
+    } else {
+        Some(tools.lyrembed_path()?)
+    };
     let text = lyrics.to_text();
     let hint = lyrics.han_hint();
     let key = gatefold_core::library::covers::cover_key(
@@ -70,9 +77,12 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
         return cached.map(|text| lyrics.with_romanization(&text));
     }
     let request = text.clone();
-    let answer = gio::spawn_blocking(move || ask(&program, &request, hint, ANSWER_TIMEOUT))
-        .await
-        .unwrap_or_else(|_| Err("the romanization job failed".into()));
+    let answer = gio::spawn_blocking(move || match program {
+        Some(program) => ask(&program, &request, hint, ANSWER_TIMEOUT),
+        None => crate::tools::romanize_over_dbus(&request, hint),
+    })
+    .await
+    .unwrap_or_else(|_| Err("the romanization job failed".into()));
     match answer {
         Ok(romanized) => {
             if let Some(mut db) = library.db()

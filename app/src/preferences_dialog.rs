@@ -563,7 +563,6 @@ impl PreferencesDialog {
     /// Found / version / path of each tool, or the steps to install and
     /// set it up (§10.0).
     fn show_tools(&self) {
-        use gatefold_tools::lyrembed;
         let imp = self.imp();
         let detected = crate::application::GatefoldApplication::get()
             .tools()
@@ -571,14 +570,11 @@ impl PreferencesDialog {
         let flatpak = crate::config::is_flatpak();
 
         // lyrembed
-        let lyrembed = detected.lyrembed.as_ref();
-        imp.lyrembed_status.set_subtitle(&match lyrembed {
-            Some(tool) => found(tool.version, Some(&tool.path)),
-            None if flatpak => gettext("Not available in the Flatpak version yet"),
-            None => gettext("Not installed"),
-        });
-        imp.romanize_status.set_visible(lyrembed.is_some());
-        let romanize = if detected.romanize_stdio {
+        let lyrembed = &detected.lyrembed;
+        imp.lyrembed_status
+            .set_subtitle(&companion_status(lyrembed, "lyrembed", flatpak));
+        imp.romanize_status.set_visible(lyrembed.usable());
+        let romanize = if detected.can_romanize() {
             gettext("Lyrics without romanization get it for display, also from LRCLIB")
         } else {
             // §5.1: without "romanize --stdio", lyrics show as tagged.
@@ -588,39 +584,17 @@ impl PreferencesDialog {
         };
         imp.romanize_status.set_subtitle(&romanize);
         imp.layout_hint
-            .set_visible(lyrembed.is_some() && !lyrembed::Config::read().keeps_original());
-        let setup = if lyrembed.is_some() {
-            None
-        } else if flatpak {
-            Some(Setup {
-                title: gettext("lyrembed and the Flatpak"),
-                description: gettext(
-                    "A Flatpak can't start programs on your computer. lyrembed will get a D-Bus interface for this, as cdport has; until then, its lyrics features are only in the other versions of Gatefold.",
-                ),
-                steps: Vec::new(),
-            })
-        } else {
-            Some(Setup {
-                title: gettext("Install lyrembed"),
-                description: gettext(
-                    "In a terminal. Gatefold finds lyrembed by itself afterwards, or press Look Again above.",
-                ),
-                steps: [
-                    pipx_steps(),
-                    vec![Step::command(
-                        gettext("Install lyrembed, with romanization"),
-                        lyrembed::INSTALL_COMMAND,
-                    )],
-                ]
-                .concat(),
-            })
-        };
-        self.show_setup(&imp.lyrembed_setup, &imp.lyrembed_steps, setup);
+            .set_visible(lyrembed.usable() && !lyrembed.config.keeps_original());
+        self.show_setup(
+            &imp.lyrembed_setup,
+            &imp.lyrembed_steps,
+            lyrembed_setup(lyrembed, flatpak),
+        );
 
         // cdport
         let cdport = &detected.cdport;
         imp.cdport_status
-            .set_subtitle(&cdport_status(cdport, flatpak));
+            .set_subtitle(&companion_status(cdport, "cdport", flatpak));
         imp.cdport_library.set_visible(cdport.usable());
         imp.cdport_library.set_subtitle(
             &cdport
@@ -807,29 +781,123 @@ fn pipx_steps() -> Vec<Step> {
     ]
 }
 
-fn cdport_status(cdport: &crate::tools::Cdport, flatpak: bool) -> String {
-    let path = cdport.program.as_ref().map(|p| p.path.as_path());
-    if cdport.dbus {
+/// A companion tool's status line (`name`: "lyrembed" or "cdport").
+fn companion_status<C>(tool: &crate::tools::Companion<C>, name: &str, flatpak: bool) -> String {
+    let path = tool.program.as_ref().map(|p| p.path.as_path());
+    if tool.dbus {
         // Translators: {} is "Version 1.3.0 · <path>" or "Version 1.3.0".
-        return gettext("{} · through D-Bus").replace("{}", &found(cdport.version, path));
+        return gettext("{} · through D-Bus").replace("{}", &found(tool.version, path));
     }
-    if let Some(error) = &cdport.dbus_error {
+    if let Some(error) = &tool.dbus_error {
         // Translators: {} is the error message.
         return gettext("Its D-Bus service doesn't start: {}").replace("{}", error);
     }
-    if cdport.is_old() {
-        // Translators: {} is "Version 1.2.1 · <path>".
-        return gettext("cdimport, cdport’s old version: {}")
-            .replace("{}", &found(cdport.version, path));
+    if tool.is_old() {
+        let found = found(tool.version, path);
+        return if name == "cdport" {
+            // Translators: {} is "Version 1.2.1 · <path>".
+            gettext("cdimport, cdport’s old version: {}").replace("{}", &found)
+        } else {
+            // Translators: {} is "Version 1.1.1 · <path>".
+            gettext("{} (without D-Bus)").replace("{}", &found)
+        };
     }
-    if cdport.program.is_some() {
-        return found(cdport.version, path);
+    if tool.program.is_some() {
+        return found(tool.version, path);
     }
     if flatpak {
         gettext("Not found: not installed, or its D-Bus service isn't set up")
     } else {
         gettext("Not installed")
     }
+}
+
+/// The steps to install lyrembed or set up its D-Bus service.
+fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Setup> {
+    use gatefold_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND, UPGRADE_COMMAND};
+    const ACTION: &str = "app.set-up-lyrembed";
+    let has_program = lyrembed.program.is_some();
+    if lyrembed.dbus {
+        return None;
+    }
+    if lyrembed.dbus_error.is_some() {
+        let mut steps = Vec::new();
+        if !has_program {
+            steps.push(Step::command(
+                gettext("If lyrembed was removed, install it again"),
+                INSTALL_COMMAND,
+            ));
+        }
+        steps.push(set_up_step(
+            has_program,
+            gettext("Set up its D-Bus service again"),
+            SERVICE_COMMAND,
+            ACTION,
+        ));
+        return Some(Setup {
+            title: gettext("Repair lyrembed’s D-Bus Service"),
+            description: gettext(
+                "The service is set up, but lyrembed didn't start through it, e.g. because lyrembed was moved or removed since.",
+            ),
+            steps,
+        });
+    }
+    if lyrembed.is_old() {
+        return Some(Setup {
+            title: gettext("Update lyrembed"),
+            description: gettext(
+                "From version 1.2.0 on, lyrembed has a D-Bus interface: its pages and lyrics searches keep running when Gatefold closes, and the Flatpak version of Gatefold can use it too. Until you update, Gatefold uses it as before. Its page offers the update too.",
+            ),
+            steps: vec![
+                Step::command(gettext("Update lyrembed"), UPGRADE_COMMAND),
+                Step::command(
+                    gettext("Let Gatefold reach lyrembed through D-Bus"),
+                    SERVICE_COMMAND,
+                ),
+            ],
+        });
+    }
+    if lyrembed.can_set_up_service() {
+        return Some(Setup {
+            title: gettext("Set Up lyrembed’s D-Bus Service"),
+            description: gettext(
+                "Recommended. Gatefold starts lyrembed directly now. Through D-Bus, its pages and lyrics searches keep running when Gatefold closes, and the Flatpak version of Gatefold can use lyrembed too.",
+            ),
+            steps: vec![set_up_step(
+                has_program,
+                gettext("Set up the D-Bus service"),
+                SERVICE_COMMAND,
+                ACTION,
+            )],
+        });
+    }
+    let description = if flatpak {
+        gettext(
+            "In a terminal on your computer (not inside Gatefold). Gatefold, as a Flatpak, reaches lyrembed through its D-Bus service, the last step.",
+        )
+    } else {
+        gettext(
+            "In a terminal. Gatefold finds lyrembed by itself afterwards, or press Look Again above.",
+        )
+    };
+    Some(Setup {
+        title: gettext("Install lyrembed"),
+        description,
+        steps: [
+            pipx_steps(),
+            vec![
+                Step::command(
+                    gettext("Install lyrembed, with romanization"),
+                    INSTALL_COMMAND,
+                ),
+                Step::command(
+                    gettext("Let Gatefold reach lyrembed through D-Bus"),
+                    SERVICE_COMMAND,
+                ),
+            ],
+        ]
+        .concat(),
+    })
 }
 
 fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
@@ -852,8 +920,10 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
             ));
         }
         steps.push(set_up_step(
-            cdport,
+            cdport.program.is_some(),
             gettext("Set up its D-Bus service again"),
+            SERVICE_COMMAND,
+            "app.set-up-cdport",
         ));
         return Some(Setup {
             title: gettext("Repair cdport’s D-Bus Service"),
@@ -885,7 +955,12 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
             description: gettext(
                 "Recommended. Gatefold starts cdport directly now. Through D-Bus, imports keep running when Gatefold closes, and the Flatpak version of Gatefold can use cdport too.",
             ),
-            steps: vec![set_up_step(cdport, gettext("Set up the D-Bus service"))],
+            steps: vec![set_up_step(
+                cdport.program.is_some(),
+                gettext("Set up the D-Bus service"),
+                SERVICE_COMMAND,
+                "app.set-up-cdport",
+            )],
         });
     }
     let description = if flatpak {
@@ -911,15 +986,12 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
     })
 }
 
-/// `cdport --install-dbus-service`, with a button where Gatefold can run
-/// it (the program is visible: not from a Flatpak).
-fn set_up_step(cdport: &crate::tools::Cdport, text: String) -> Step {
+/// `<tool> --install-dbus-service`, with a button (`action`) where
+/// Gatefold can run it (the program is visible: not from a Flatpak).
+fn set_up_step(has_program: bool, text: String, command: &str, action: &'static str) -> Step {
     Step {
         text,
-        command: Some(gatefold_tools::cdport::SERVICE_COMMAND.to_owned()),
-        button: cdport
-            .program
-            .is_some()
-            .then(|| (gettext("_Set Up"), "app.set-up-cdport")),
+        command: Some(command.to_owned()),
+        button: has_program.then(|| (gettext("_Set Up"), action)),
     }
 }

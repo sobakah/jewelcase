@@ -1477,8 +1477,11 @@ impl Library {
                 Some(std::path::Path::new(&lyrembed_override)),
             )
             .or_else(|| gatefold_tools::find_program("lyrembed", None));
-            let aliases =
-                Aliases::from_program_cached(lyrembed.as_deref(), &config::aliases_cache_path());
+            // lyrembed's service when it's set up (also from a Flatpak),
+            // else the program.
+            let text = crate::tools::lyrembed_aliases_over_dbus()
+                .or_else(|| lyrembed.as_deref().and_then(Aliases::list_from_program));
+            let aliases = Aliases::from_text_cached(text, &config::aliases_cache_path());
             let result = Database::open(&config::database_path())
                 .map_err(|e| e.to_string())
                 .and_then(|mut db| {
