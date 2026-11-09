@@ -10,12 +10,11 @@ use gtk::{gdk, glib, graphene, gsk};
 
 use super::CoverImage;
 
-/// How strongly the blurred cover shows (stronger than the player's 0.35:
-/// here the cover hides most of it).
-const OPACITY: f32 = 0.7;
+/// The player's backdrop (`.player-backdrop` in style.css, `.player-tint`
+/// in theme.rs): its opacity, blur and tint, top to bottom.
+const OPACITY: f32 = 0.35;
 const BLUR: f32 = 60.0;
-/// The cover color's strength at the top.
-const TINT: f32 = 0.35;
+const TINT: [(f32, f32); 3] = [(0.0, 0.55), (0.55, 0.18), (1.0, 0.05)];
 /// The backdrop's height, relative to the panel's width, and at most.
 const HEIGHT_PER_WIDTH: f32 = 1.4;
 const MAX_HEIGHT: f32 = 760.0;
@@ -31,8 +30,8 @@ mod imp {
         /// The cover's dominant color (from the scan), as the player's
         /// tint: a blurred cover of many colors alone turns grey.
         pub tint: std::cell::Cell<Option<[u8; 3]>>,
-        /// Height and blur other than the defaults (see `set_shape`).
-        pub shape: std::cell::Cell<Option<(f32, f32)>>,
+        /// A height other than the default (see `set_max_height`).
+        pub max_height: std::cell::Cell<Option<f32>>,
         pub followed: RefCell<Option<(glib::WeakRef<gtk::Picture>, glib::SignalHandlerId)>>,
     }
 
@@ -57,13 +56,22 @@ mod imp {
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
             if let Some(texture) = self.texture.borrow().as_ref() {
-                let (max_height, blur) = self.shape.get().unwrap_or((MAX_HEIGHT, BLUR));
+                let max_height = self.max_height.get().unwrap_or(MAX_HEIGHT);
                 let width = obj.width() as f32;
-                let height = (width * HEIGHT_PER_WIDTH)
-                    .min(max_height)
-                    .min(obj.height() as f32);
+                let full_height = obj.height() as f32;
+                let height = (width * HEIGHT_PER_WIDTH).min(max_height).min(full_height);
+                // The player shows the cover as large as the window.
+                let window = obj
+                    .root()
+                    .map(|root| (root.width() as f32, root.height() as f32))
+                    .unwrap_or((width, full_height));
                 if width > 0.0 && height > 0.0 {
-                    draw(snapshot, texture, self.tint.get(), blur, width, height);
+                    draw(
+                        snapshot,
+                        texture,
+                        self.tint.get(),
+                        Size { width, height, full_height, window },
+                    );
                 }
             }
             self.parent_snapshot(snapshot);
@@ -80,10 +88,10 @@ glib::wrapper! {
 }
 
 impl CoverBackdrop {
-    /// At most `max_height` px tall, blurred by `blur` px (wide panels
-    /// like the artist page: lower and softer, so no shapes show).
-    pub fn set_shape(&self, max_height: f32, blur: f32) {
-        self.imp().shape.set(Some((max_height, blur)));
+    /// At most `max_height` px tall (wide panels like the artist page: a
+    /// lower band).
+    pub fn set_max_height(&self, max_height: f32) {
+        self.imp().max_height.set(Some(max_height));
         self.queue_draw();
     }
 
@@ -118,16 +126,25 @@ impl CoverBackdrop {
     }
 }
 
-/// The blurred, slightly more saturated cover over `width` × `height`,
-/// faded out from `FADE_FROM` down.
-fn draw(
-    snapshot: &gtk::Snapshot,
-    texture: &gdk::Texture,
-    tint: Option<[u8; 3]>,
-    blur: f32,
+/// Where the backdrop is drawn: `width` × `height` at the top of a widget
+/// `full_height` tall, in a window of the size `window`.
+struct Size {
     width: f32,
     height: f32,
-) {
+    full_height: f32,
+    window: (f32, f32),
+}
+
+/// The blurred, slightly more saturated cover over `width` × `height`,
+/// faded out from `FADE_FROM` down: the player's backdrop, at the same
+/// size (the window's) and centered on the widget.
+fn draw(snapshot: &gtk::Snapshot, texture: &gdk::Texture, tint: Option<[u8; 3]>, size: Size) {
+    let Size {
+        width,
+        height,
+        full_height,
+        window,
+    } = size;
     let area = graphene::Rect::new(0.0, 0.0, width, height);
     snapshot.push_clip(&area);
     snapshot.push_mask(gsk::MaskMode::Alpha);
@@ -144,13 +161,23 @@ fn draw(
     snapshot.pop();
     snapshot.push_opacity(f64::from(OPACITY));
     snapshot.push_color_matrix(&saturation(1.3), &graphene::Vec4::zero());
-    snapshot.push_blur(f64::from(blur));
-    // Larger than the area, so the blur doesn't fade at the edges; square
-    // like the cover, centered.
-    let side = width.max(height) + 4.0 * blur;
+    snapshot.push_blur(f64::from(BLUR));
+    // Square like the cover, as large as in the player (which fills the
+    // window), and at least so large that the blur doesn't fade at the
+    // widget's edges.
+    let side = window
+        .0
+        .max(window.1)
+        .max(width + 4.0 * BLUR)
+        .max(full_height + 4.0 * BLUR);
     snapshot.append_texture(
         texture,
-        &graphene::Rect::new((width - side) / 2.0, (height - side) / 2.0, side, side),
+        &graphene::Rect::new(
+            (width - side) / 2.0,
+            (full_height - side) / 2.0,
+            side,
+            side,
+        ),
     );
     snapshot.pop();
     snapshot.pop();
@@ -169,10 +196,7 @@ fn draw(
             &area,
             &graphene::Point::new(0.0, 0.0),
             &graphene::Point::new(0.0, height),
-            &[
-                gsk::ColorStop::new(0.0, color(TINT)),
-                gsk::ColorStop::new(1.0, color(TINT / 3.0)),
-            ],
+            &TINT.map(|(at, alpha)| gsk::ColorStop::new(at, color(alpha))),
         );
     }
     snapshot.pop();

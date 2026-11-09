@@ -21,9 +21,8 @@ use crate::{covers, format};
 /// The width of an album tile on artist pages, with its spacing.
 const TILE_WIDTH: u32 = 198;
 
-/// The blurred portrait behind the top of the page: height and blur.
+/// The blurred portrait behind the top of the page: its height.
 const ARTIST_BACKDROP_HEIGHT: f32 = 380.0;
-const ARTIST_BACKDROP_BLUR: f32 = 120.0;
 
 mod imp {
     use super::*;
@@ -153,10 +152,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             self.backdrop.follow(&self.portrait);
-            // The page is wide: a low band of color, blurred so much that
-            // the portrait's shapes don't show.
-            self.backdrop
-                .set_shape(ARTIST_BACKDROP_HEIGHT, ARTIST_BACKDROP_BLUR);
+            // The page is wide: a lower band of color.
+            self.backdrop.set_max_height(ARTIST_BACKDROP_HEIGHT);
             let obj = self.obj();
             self.portrait
                 .set_placeholder_icon("avatar-default-symbolic");
