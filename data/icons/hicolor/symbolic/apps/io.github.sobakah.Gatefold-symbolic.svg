@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <!-- the record coming out of an opened gatefold sleeve -->
-  <path fill="#222222" d="M 6.1 5 A 5 5 0 0 1 15.9 5 Z"/>
-  <path fill="#222222" d="M 5 6.2 L 5 15 L 2.2 15.7 C 1.6 15.85 1 15.4 1 14.8 L 1 5.4 C 1 4.8 1.6 4.35 2.2 4.5 Z"/>
-  <path fill="#222222" fill-rule="evenodd" d="M 8 6 C 6.9 6 6 6.9 6 8 L 6 13 C 6 14.1 6.9 15 8 15 L 13 15 C 14.1 15 15 14.1 15 13 L 15 8 C 15 6.9 14.1 6 13 6 Z M 10.5 8.5 C 11.6 8.5 12.5 9.4 12.5 10.5 C 12.5 11.6 11.6 12.5 10.5 12.5 C 9.4 12.5 8.5 11.6 8.5 10.5 C 8.5 9.4 9.4 8.5 10.5 8.5 Z"/>
+  <!-- an album sleeve with a music note, its record half pulled out -->
+  <path fill="#222222" d="M 11 3.05 A 5 5 0 0 1 11 12.95 Z"/>
+  <path fill="#222222" fill-rule="evenodd" d="M 2.5 4 C 1.67 4 1 4.67 1 5.5 L 1 13.5 C 1 14.33 1.67 15 2.5 15 L 8.5 15 C 9.33 15 10 14.33 10 13.5 L 10 5.5 C 10 4.67 9.33 4 8.5 4 Z M 5.5 6 L 8 6 L 8 7.5 L 6.5 7.5 L 6.5 11.5 C 6.5 12.6 5.6 13.2 4.7 13.2 C 3.8 13.2 3 12.6 3 11.7 C 3 10.8 3.8 10.2 4.7 10.2 C 5 10.2 5.3 10.27 5.5 10.4 Z"/>
 </svg>
