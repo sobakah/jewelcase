@@ -113,16 +113,11 @@ impl Aliases {
             .unwrap_or_default()
     }
 
-    /// lyrembed's aliases, remembered in `cache`: when lyrembed can't be
-    /// asked (not found, failing), the last list it gave. Artists are
-    /// identified by their aliases, so a list that comes and goes would
-    /// split them and lose what was looked up about them.
-    pub fn from_program_cached(program: Option<&std::path::Path>, cache: &std::path::Path) -> Self {
-        Self::from_text_cached(program.and_then(Self::list_from_program), cache)
-    }
-
-    /// `text` (as `--list-aliases` prints it) remembered in `cache`, or,
-    /// without it, the last one remembered.
+    /// lyrembed's aliases (`text`, as `--list-aliases` prints them),
+    /// remembered in `cache`; when lyrembed can't be asked (`None`: not
+    /// found, failing), the last list it gave. Artists are identified by
+    /// their aliases, so a list that comes and goes would split them and
+    /// lose what was looked up about them.
     pub fn from_text_cached(text: Option<String>, cache: &std::path::Path) -> Self {
         if let Some(text) = text {
             if let Err(err) = std::fs::write(cache, &text) {

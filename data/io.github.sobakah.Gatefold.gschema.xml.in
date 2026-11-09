@@ -218,6 +218,16 @@
       <summary>Custom tag editor command</summary>
       <description>With {files} for the files or {dir} for their folder.</description>
     </key>
+    <!-- cdimport's keys before cdport's name (0.2.x): read once by tools.rs
+         and carried over to the cdport keys. -->
+    <key name="cdimport-path" type="s">
+      <default>""</default>
+      <summary>Deprecated: see cdport-path</summary>
+    </key>
+    <key name="cdimport-folder-offered" type="b">
+      <default>false</default>
+      <summary>Deprecated: see cdport-folder-offered</summary>
+    </key>
     <key name="cdport-folder-offered" type="b">
       <default>false</default>
       <summary>Whether cdport’s library folder was offered as a music folder</summary>

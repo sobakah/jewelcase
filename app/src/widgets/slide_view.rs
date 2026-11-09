@@ -271,6 +271,11 @@ mod imp {
             if self.show_sidebar.replace(show) == show {
                 return;
             }
+            // Opened or closed while collapsed: that's what uncollapsing
+            // keeps, not the state from before.
+            if self.collapsed.get() {
+                self.open_before_collapse.set(false);
+            }
             self.animate_to(if show { 1.0 } else { 0.0 });
             self.obj().queue_resize();
         }

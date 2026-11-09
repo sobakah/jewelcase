@@ -122,21 +122,37 @@ async fn save_text(kind: &'static str, label: &'static str, text: String) -> Res
             .await
     })
     .await?;
-    // In the keyring now: no copy stays in the file.
-    file_store::delete(kind)
+    // In the keyring now: no copy stays in the file (one that can't be
+    // read doesn't make the save fail).
+    if let Err(err) = file_store::delete(kind) {
+        tracing::warn!(
+            "Cannot remove the login from {}: {err}",
+            file_store::path().display()
+        );
+    }
+    Ok(())
 }
 
 async fn delete_kind(kind: &'static str) -> Result<(), String> {
     mark_own_entry(kind);
-    file_store::delete(kind)?;
+    // Both places, whatever the other says: a login must not survive a
+    // disconnect because one of them failed.
+    let in_file = file_store::delete(kind);
     if uses_file().await {
-        return Ok(());
+        return in_file;
     }
-    run(move || async move {
+    let in_keyring = run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.delete(&attributes(kind)).await
     })
-    .await
+    .await;
+    if let Err(err) = &in_file {
+        tracing::warn!(
+            "Cannot remove the login from {}: {err}",
+            file_store::path().display()
+        );
+    }
+    in_keyring
 }
 
 /// Whether the logins go to the file, as there's no keyring service:

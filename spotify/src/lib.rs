@@ -238,19 +238,23 @@ impl Default for RequestCount {
 }
 
 impl RequestCount {
-    /// "artists 34, search 5".
+    /// "artists 34, search 5 (in 12 min)": the counts, and the time they
+    /// were counted in (it only rolls over at the next request, so it may
+    /// be longer than COUNT_PERIOD).
     fn summary(&self) -> String {
-        self.kinds
+        let kinds = self
+            .kinds
             .iter()
             .map(|(kind, n)| format!("{kind} {n}"))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ");
+        format!("{kinds} (in {} min)", self.since.elapsed().as_secs() / 60)
     }
 
     fn add(&mut self, kind: &str) {
         if self.since.elapsed() >= COUNT_PERIOD {
             if !self.kinds.is_empty() {
-                tracing::info!("Spotify requests in the last hour: {}", self.summary());
+                tracing::info!("Spotify requests: {}", self.summary());
             }
             *self = Self::default();
         }
@@ -410,7 +414,7 @@ impl Client {
                         .unwrap_or_default();
                     tracing::warn!(
                         "Spotify asks to wait {wait:?} before asking for {kind} again \
-                         (requests sent within the hour: {sent})"
+                         (requests sent: {sent})"
                     );
                     let until = SystemTime::now() + wait;
                     if let Ok(mut blocked) = self.blocked.lock() {

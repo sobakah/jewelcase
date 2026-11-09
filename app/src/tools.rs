@@ -242,6 +242,9 @@ mod imp {
         pub auto_running: Cell<bool>,
         /// The lyrics search running over D-Bus (lyrembed's run ID).
         pub auto_run: RefCell<Option<String>>,
+        /// Runs that ended before their start's reply was handled (the
+        /// signal can be dispatched first): checked when it is.
+        pub early_finished: RefCell<VecDeque<(PageTool, String, i32)>>,
         pub unfinished: RefCell<Vec<PathBuf>>,
         /// When the last cdport run started (Unix seconds), for the
         /// "New album" toast.
@@ -290,6 +293,7 @@ impl Tools {
 
     pub fn start(&self) {
         let settings = gio::Settings::new(APP_ID);
+        migrate_cdimport_settings(&settings);
         for key in ["lyrembed-path", "cdport-path"] {
             settings.connect_changed(
                 Some(key),
@@ -494,7 +498,9 @@ impl Tools {
         let library = GatefoldApplication::get().library();
         library.rescan();
         if tool == PageTool::Cdport {
-            self.check_unfinished_imports();
+            // cdport may have saved new settings (its folders on a first
+            // run): asked again, unfinished imports included.
+            self.detect();
         }
         if let Some(start) = imp.pending_page.take() {
             self.open_page(start);
@@ -676,8 +682,11 @@ impl Tools {
             return;
         }
         let Some(program) = lyrembed.program.map(|p| p.path) else {
+            // lyrembed is gone: none of the waiting searches can run.
+            imp.auto_queue.borrow_mut().clear();
             imp.auto_running.set(false);
             self.update_lyrics_jobs();
+            self.missing_tool("lyrembed");
             return;
         };
         self.fetch_lyrics_with(&program, &dir);
@@ -729,7 +738,8 @@ impl Tools {
                 match reply.map(|r| r.get::<(String,)>()) {
                     Ok(Some((run,))) => {
                         tracing::info!("lyrembed lyrics search {run} on {}", dir.display());
-                        tools.imp().auto_run.replace(Some(run));
+                        tools.imp().auto_run.replace(Some(run.clone()));
+                        tools.check_early_finished(PageTool::Lyrembed, &run);
                     }
                     Ok(None) => tools.lyrics_job_ended(None),
                     Err(mut err) => {
@@ -815,7 +825,8 @@ impl Tools {
         let Some(program) = cdport.program.map(|p| p.path) else {
             return;
         };
-        let library = self.cdport_library(&cdport.config);
+        // Read now: cdport may have changed its settings since detection.
+        let library = self.cdport_library(&cdport::Config::read());
         let argv = match folder {
             Some(dir) => cdport::continue_args(&program, &dir, library.as_deref()),
             None => cdport::import_args(&program, library.as_deref()),
@@ -1028,12 +1039,13 @@ impl Tools {
                         imp.page_run.replace(Some(PageRun::Service(run.clone())));
                         imp.page_url.replace(url);
                         if imp.stop_when_started.take() {
-                            tools.stop_service_run(tool, run);
+                            tools.stop_service_run(tool, run.clone());
                         } else if tool == PageTool::Cdport {
                             tools.show_page();
                         } else if opened == Some(false) {
                             tools.message(&gettext("lyrembed couldn't open your browser"));
                         }
+                        tools.check_early_finished(tool, &run);
                     }
                     Ok(_) => tools.page_closed(tool, -1),
                     Err(mut err) => {
@@ -1080,6 +1092,26 @@ impl Tools {
         {
             tracing::info!("lyrembed lyrics search {run} finished with {code}");
             self.lyrics_job_ended(Some(code));
+        } else {
+            // Perhaps one of ours whose start reply isn't handled yet (or
+            // another program's): kept for a moment.
+            let mut early = self.imp().early_finished.borrow_mut();
+            early.push_back((tool, run.to_owned(), code));
+            if early.len() > 8 {
+                early.pop_front();
+            }
+        }
+    }
+
+    /// A run of ours that started: if it already ended, now's its end.
+    fn check_early_finished(&self, tool: PageTool, run: &str) {
+        let ended = {
+            let mut early = self.imp().early_finished.borrow_mut();
+            let at = early.iter().position(|(t, r, _)| *t == tool && r == run);
+            at.and_then(|at| early.remove(at))
+        };
+        if let Some((_, _, code)) = ended {
+            self.service_run_finished(tool, run, code);
         }
     }
 
@@ -1320,6 +1352,22 @@ impl Default for Tools {
     }
 }
 
+/// cdimport's settings (0.2.x) carried over to cdport's keys, once: the old
+/// keys are reset afterwards.
+fn migrate_cdimport_settings(settings: &gio::Settings) {
+    let path = settings.string("cdimport-path");
+    if !path.is_empty() {
+        if settings.string("cdport-path").is_empty() {
+            let _ = settings.set_string("cdport-path", &path);
+        }
+        settings.reset("cdimport-path");
+    }
+    if settings.boolean("cdimport-folder-offered") {
+        let _ = settings.set_boolean("cdport-folder-offered", true);
+        settings.reset("cdimport-folder-offered");
+    }
+}
+
 /// Runs on a background thread: find the tools and ask their versions.
 fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
     let probe = |name: &str, path: &Path| -> Option<ToolInfo> {
@@ -1354,66 +1402,66 @@ fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
 /// cdport over D-Bus (its `GetInfo`) and as a program; the settings from
 /// D-Bus, else from its config file.
 fn detect_cdport(program: Option<ToolInfo>) -> Cdport {
-    let mut cdport = Cdport {
-        version: program.as_ref().and_then(|p| p.version),
-        program,
-        ..Cdport::default()
-    };
-    match service_info(PageTool::Cdport) {
-        Ok(info) => {
-            cdport.dbus = true;
-            cdport.version = info_text(&info, "Version")
-                .as_deref()
-                .and_then(parse_version)
-                .or(cdport.version);
-            cdport.config = cdport::Config {
-                library_dir: info_text(&info, "LibraryDir").map(PathBuf::from),
-                work_dir: info_text(&info, "WorkDir").map(PathBuf::from),
-                editor: info_text(&info, "Editor"),
-            };
+    detect_companion(PageTool::Cdport, program, cdport::Config::read, |info| {
+        cdport::Config {
+            library_dir: info_text(info, "LibraryDir").map(PathBuf::from),
+            work_dir: info_text(info, "WorkDir").map(PathBuf::from),
+            editor: info_text(info, "Editor"),
         }
-        Err(error) => {
-            cdport.dbus_error = error;
-            if cdport.program.is_some() {
-                cdport.config = cdport::Config::read();
-            }
-        }
-    }
-    cdport
+    })
 }
 
 /// lyrembed over D-Bus (its `GetInfo`) and as a program; the settings from
 /// D-Bus, else from its config file.
 fn detect_lyrembed(program: Option<ToolInfo>) -> Lyrembed {
-    let mut lyrembed = Lyrembed {
+    detect_companion(
+        PageTool::Lyrembed,
+        program,
+        lyrembed::Config::read,
+        |info| lyrembed::Config {
+            romanization_layout: info_text(info, "RomanizationLayout"),
+            max_file_count: info
+                .lookup::<u32>("MaxFileCount")
+                .ok()
+                .flatten()
+                .map(u64::from),
+        },
+    )
+}
+
+/// A tool over D-Bus (`GetInfo`: version and settings, by `from_info`) and
+/// as a program (its version; its settings by `read_config`).
+fn detect_companion<C>(
+    tool: PageTool,
+    program: Option<ToolInfo>,
+    read_config: impl FnOnce() -> C,
+    from_info: impl FnOnce(&glib::VariantDict) -> C,
+) -> Companion<C>
+where
+    Companion<C>: Default,
+{
+    let mut found = Companion::<C> {
         version: program.as_ref().and_then(|p| p.version),
         program,
-        ..Lyrembed::default()
+        ..Companion::default()
     };
-    match service_info(PageTool::Lyrembed) {
+    match service_info(tool) {
         Ok(info) => {
-            lyrembed.dbus = true;
-            lyrembed.version = info_text(&info, "Version")
+            found.dbus = true;
+            found.version = info_text(&info, "Version")
                 .as_deref()
                 .and_then(parse_version)
-                .or(lyrembed.version);
-            lyrembed.config = lyrembed::Config {
-                romanization_layout: info_text(&info, "RomanizationLayout"),
-                max_file_count: info
-                    .lookup::<u32>("MaxFileCount")
-                    .ok()
-                    .flatten()
-                    .map(u64::from),
-            };
+                .or(found.version);
+            found.config = from_info(&info);
         }
         Err(error) => {
-            lyrembed.dbus_error = error;
-            if lyrembed.program.is_some() {
-                lyrembed.config = lyrembed::Config::read();
+            found.dbus_error = error;
+            if found.program.is_some() {
+                found.config = read_config();
             }
         }
     }
-    lyrembed
+    found
 }
 
 fn info_text(info: &glib::VariantDict, key: &str) -> Option<String> {
