@@ -1,34 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Gatefold: an album sleeve, its record half pulled out. The cover nods to
-     a famous one: light through a prism, a spectrum coming out. -->
+<!-- Gatefold: an LP in a gatefold sleeve, its front cover slightly opened and
+     the record halfway out. The cover nods to a famous one: light through a
+     prism, a spectrum coming out. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
     <linearGradient id="vinyl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d3846"/><stop offset="1" stop-color="#241f31"/></linearGradient>
     <linearGradient id="label" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffa348"/><stop offset="1" stop-color="#e66100"/></linearGradient>
-    <clipPath id="face"><rect x="8" y="30" width="72" height="76" rx="8"/></clipPath>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1e1a26"/><stop offset="1" stop-color="#302c3a"/></linearGradient>
+    <clipPath id="face"><path d="M12 32 L64 22 L64 116 L12 106 Z"/></clipPath>
   </defs>
-  <!-- the record: edge, face, rim, a groove, a reflection, the label -->
-  <circle cx="84" cy="66" r="38" fill="#1e1a26"/>
-  <circle cx="84" cy="62" r="38" fill="url(#vinyl)"/>
-  <circle cx="84" cy="62" r="37" fill="none" stroke="#5e5c64" stroke-width="2"/>
-  <circle cx="84" cy="62" r="29" fill="none" stroke="#77767b" stroke-width="1.5" opacity="0.5"/>
-  <path d="M106 37 A31 31 0 0 1 115 55" fill="none" stroke="#c0bfbc" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
-  <circle cx="84" cy="62" r="13" fill="url(#label)"/>
-  <circle cx="84" cy="62" r="2.5" fill="#241f31"/>
-  <!-- the sleeve: edge, face -->
-  <rect x="8" y="34" width="72" height="76" rx="8" fill="#000000"/>
-  <rect x="8" y="30" width="72" height="76" rx="8" fill="#241f31"/>
-  <!-- the cover: light into a prism, a spectrum out of it -->
+  <!-- the inner panel of the gatefold: edge, face, rim -->
+  <rect x="12" y="36" width="74" height="74" rx="5" fill="#000000"/>
+  <rect x="12" y="32" width="74" height="74" rx="5" fill="#241f31"/>
+  <rect x="13" y="33" width="72" height="72" rx="4" fill="none" stroke="#5e5c64" stroke-width="2"/>
+  <!-- the record, halfway out from between the panels -->
+  <circle cx="86" cy="62" r="34" fill="#000000" opacity="0.5"/>
+  <circle cx="86" cy="58" r="34" fill="url(#vinyl)"/>
+  <circle cx="86" cy="58" r="33" fill="none" stroke="#5e5c64" stroke-width="2"/>
+  <circle cx="86" cy="58" r="25.8" fill="none" stroke="#77767b" stroke-width="1.5" opacity="0.5"/>
+  <path d="M104.7 35.9 A27.9 27.9 0 0 1 113.2 51.2" fill="none" stroke="#c0bfbc" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="86" cy="58" r="12.2" fill="url(#label)"/>
+  <circle cx="86" cy="58" r="2.5" fill="#241f31"/>
+  <!-- the front cover, swung open towards us: its edge, its face -->
+  <path d="M12 106 L64 116 L64 120 L12 110 Z" fill="#000000"/>
+  <path d="M12 32 L64 22 L64 116 L12 106 Z" fill="url(#cover)" stroke="#5e5c64" stroke-width="2" stroke-linejoin="round"/>
   <g clip-path="url(#face)">
-    <path d="M8 75 L35 64" stroke="#ffffff" stroke-width="2.5"/>
-    <path d="M52.0 61.3 L80 57 L80 62.5 L52.7 62.6 Z" fill="#e01b24"/>
-    <path d="M52.7 62.6 L80 62.5 L80 68 L53.5 64.0 Z" fill="#ff7800"/>
-    <path d="M53.5 64.0 L80 68 L80 73.5 L54.3 65.4 Z" fill="#f6d32d"/>
-    <path d="M54.3 65.4 L80 73.5 L80 79 L55.0 66.7 Z" fill="#33d17a"/>
-    <path d="M55.0 66.7 L80 79 L80 84.5 L55.8 68.1 Z" fill="#3584e4"/>
-    <path d="M55.8 68.1 L80 84.5 L80 90 L56.5 69.4 Z" fill="#9141ac"/>
-    <path d="M44 47 L63 81 L25 81 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M11.0 76.4 L31.8 66.6" stroke="#ffffff" stroke-width="2.5"/>
+    <path d="M43.7 62.5 L65.0 55.8 L65.0 62.4 L44.2 64.0 Z" fill="#e01b24"/>
+    <path d="M44.2 64.0 L65.0 62.4 L65.0 69.0 L44.8 65.5 Z" fill="#ff7800"/>
+    <path d="M44.8 65.5 L65.0 69.0 L65.0 75.6 L45.3 67.1 Z" fill="#f6d32d"/>
+    <path d="M45.3 67.1 L65.0 75.6 L65.0 82.2 L45.8 68.6 Z" fill="#33d17a"/>
+    <path d="M45.8 68.6 L65.0 82.2 L65.0 88.8 L46.4 70.1 Z" fill="#3584e4"/>
+    <path d="M46.4 70.1 L65.0 88.8 L65.0 95.4 L46.9 71.7 Z" fill="#9141ac"/>
+    <path d="M38.0 47.2 L51.5 85.1 L24.5 83.2 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
   </g>
-  <!-- a light rim, so the sleeve stands out from the record -->
-  <rect x="9" y="31" width="70" height="74" rx="7" fill="none" stroke="#5e5c64" stroke-width="2"/>
 </svg>
