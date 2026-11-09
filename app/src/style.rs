@@ -61,10 +61,22 @@ mod tests {
 
     #[test]
     fn dark_theme_names() {
-        for name in ["Adwaita-dark", "Adwaita:dark", "Arc-Dark", "Greybird_dark", "Mint-Y-Dark-Aqua"] {
+        for name in [
+            "Adwaita-dark",
+            "Adwaita:dark",
+            "Arc-Dark",
+            "Greybird_dark",
+            "Mint-Y-Dark-Aqua",
+        ] {
             assert!(name_is_dark(name), "{name}");
         }
-        for name in ["Adwaita", "Breeze", "Greybird", "Darkly-ish-light", "Adwaita:light"] {
+        for name in [
+            "Adwaita",
+            "Breeze",
+            "Greybird",
+            "Darkly-ish-light",
+            "Adwaita:light",
+        ] {
             assert!(!name_is_dark(name), "{name}");
         }
     }

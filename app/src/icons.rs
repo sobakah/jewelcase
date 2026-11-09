@@ -51,8 +51,8 @@ mod tests {
 
     #[test]
     fn every_used_icon_is_bundled() {
-        let xml = std::fs::read_to_string(repo().join("data/resources/resources.gresource.xml"))
-            .unwrap();
+        let xml =
+            std::fs::read_to_string(repo().join("data/resources/resources.gresource.xml")).unwrap();
         let dir = repo().join("data/resources/icons/scalable/actions");
         let missing: Vec<_> = used()
             .into_iter()

@@ -70,7 +70,12 @@ mod imp {
                         snapshot,
                         texture,
                         self.tint.get(),
-                        Size { width, height, full_height, window },
+                        Size {
+                            width,
+                            height,
+                            full_height,
+                            window,
+                        },
                     );
                 }
             }
@@ -172,12 +177,7 @@ fn draw(snapshot: &gtk::Snapshot, texture: &gdk::Texture, tint: Option<[u8; 3]>,
         .max(full_height + 4.0 * BLUR);
     snapshot.append_texture(
         texture,
-        &graphene::Rect::new(
-            (width - side) / 2.0,
-            (full_height - side) / 2.0,
-            side,
-            side,
-        ),
+        &graphene::Rect::new((width - side) / 2.0, (full_height - side) / 2.0, side, side),
     );
     snapshot.pop();
     snapshot.pop();

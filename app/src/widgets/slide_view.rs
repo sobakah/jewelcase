@@ -262,7 +262,9 @@ mod imp {
             } else {
                 (f64::from(width) * self.sidebar_width_fraction.get()).clamp(min, max)
             };
-            (wanted.round() as i32).max(pane_min).min(width.max(pane_min))
+            (wanted.round() as i32)
+                .max(pane_min)
+                .min(width.max(pane_min))
         }
 
         fn set_show_sidebar(&self, show: bool) {
@@ -354,7 +356,6 @@ mod imp {
             self.obj().queue_allocate();
         }
     }
-
 }
 
 glib::wrapper! {
