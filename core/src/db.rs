@@ -1011,21 +1011,38 @@ impl Database {
         Ok(())
     }
 
-    /// How a playlist is listed: ("custom" | "title" | "artist" | "album"
-    /// | "added" | "duration", reversed).
-    pub fn playlist_sort(&self, id: i64) -> Result<(String, bool)> {
-        Ok(self
+    /// How a playlist is listed, if chosen for it: ("custom" | "title" |
+    /// "artist" | "album" | "added" | "duration", reversed). `None`: never
+    /// chosen (the default from Preferences applies).
+    ///
+    /// Stored without a new column, so older versions still open the
+    /// database: the column's default ('custom', not reversed) means "not
+    /// chosen", and a chosen own order is stored as 'own' (which older
+    /// versions list in the playlist's order too).
+    pub fn playlist_sort(&self, id: i64) -> Result<Option<(String, bool)>> {
+        let stored: Option<(String, bool)> = self
             .conn
             .query_row(
                 "SELECT sort_by, sort_reversed FROM playlist WHERE id = ?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?
-            .unwrap_or_else(|| ("custom".to_owned(), false)))
+            .optional()?;
+        Ok(match stored {
+            None => None,
+            Some((by, false)) if by == "custom" => None,
+            Some((by, reversed)) if by == "own" => Some(("custom".to_owned(), reversed)),
+            Some(sort) => Some(sort),
+        })
     }
 
-    pub fn set_playlist_sort(&mut self, id: i64, by: &str, reversed: bool) -> Result<()> {
+    /// Chooses how the playlist is listed; `None` goes back to the default.
+    pub fn set_playlist_sort(&mut self, id: i64, sort: Option<(&str, bool)>) -> Result<()> {
+        let (by, reversed) = match sort {
+            None => ("custom", false),
+            Some(("custom", reversed)) => ("own", reversed),
+            Some(sort) => sort,
+        };
         self.conn.execute(
             "UPDATE playlist SET sort_by = ?2, sort_reversed = ?3 WHERE id = ?1",
             params![id, by, reversed],
@@ -2597,15 +2614,22 @@ mod tests {
         rebuild(&mut db);
         let ids = track_ids(&db);
         let playlist = db.create_playlist("Mix", 5).unwrap();
+        assert_eq!(db.playlist_sort(playlist).unwrap(), None);
+        db.set_playlist_sort(playlist, Some(("added", true)))
+            .unwrap();
         assert_eq!(
             db.playlist_sort(playlist).unwrap(),
-            ("custom".to_owned(), false)
+            Some(("added".to_owned(), true))
         );
-        db.set_playlist_sort(playlist, "added", true).unwrap();
+        // The own order, chosen, isn't the default.
+        db.set_playlist_sort(playlist, Some(("custom", false)))
+            .unwrap();
         assert_eq!(
             db.playlist_sort(playlist).unwrap(),
-            ("added".to_owned(), true)
+            Some(("custom".to_owned(), false))
         );
+        db.set_playlist_sort(playlist, None).unwrap();
+        assert_eq!(db.playlist_sort(playlist).unwrap(), None);
         let before = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

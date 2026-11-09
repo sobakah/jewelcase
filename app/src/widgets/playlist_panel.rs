@@ -13,7 +13,36 @@ use gtk::{gio, glib};
 use super::playlist_picker::ask_name;
 use super::{CoverBackdrop, CoverImage};
 use crate::application::GatefoldApplication;
+use crate::config::APP_ID;
 use crate::format;
+
+/// The default sorts in Preferences ("playlist-sort",
+/// "spotify-playlist-sort"), in the order of their menus: a sort, with
+/// "-reversed" for the reversed one.
+pub const DEFAULT_SORTS: [&str; 7] = [
+    "custom",
+    "title",
+    "artist",
+    "album",
+    "added",
+    "added-reversed",
+    "duration",
+];
+
+/// How playlists whose sort wasn't chosen are listed: Spotify's or
+/// Gatefold's playlists (Preferences › Library › Playlists).
+fn default_sort(spotify: bool) -> (String, bool) {
+    let key = if spotify {
+        "spotify-playlist-sort"
+    } else {
+        "playlist-sort"
+    };
+    let value = gio::Settings::new(APP_ID).string(key);
+    match value.strip_suffix("-reversed") {
+        Some(by) => (by.to_owned(), true),
+        None => (value.to_string(), false),
+    }
+}
 use crate::objects::{PlaylistObject, TrackObject};
 
 mod imp {
@@ -68,6 +97,8 @@ mod imp {
             RefCell<std::collections::HashMap<String, Vec<glib::WeakRef<CoverImage>>>>,
         /// How the playlist is listed: (by, reversed); see `Sort`.
         pub sort: RefCell<(String, bool)>,
+        /// The sort was chosen for this playlist (else Preferences' default).
+        pub sort_chosen: std::cell::Cell<bool>,
         /// The "sort.by" and "sort.reversed" actions, to show the sort.
         pub sort_actions: std::cell::OnceCell<(gio::SimpleAction, gio::SimpleAction)>,
     }
@@ -245,6 +276,23 @@ mod imp {
                     move |_| obj.refresh()
                 ));
             obj.setup_sort();
+            // A new default lists the playlists without their own sort anew.
+            let settings = gio::Settings::new(APP_ID);
+            for key in ["playlist-sort", "spotify-playlist-sort"] {
+                let id = settings.connect_changed(
+                    Some(key),
+                    glib::clone!(
+                        #[weak]
+                        obj,
+                        move |_, _| {
+                            if !obj.imp().sort_chosen.get() {
+                                obj.refresh();
+                            }
+                        }
+                    ),
+                );
+                crate::widgets::disconnect_with(&*obj, &settings, id);
+            }
             GatefoldApplication::get().library().connect_local(
                 "playlists-changed",
                 false,
@@ -528,10 +576,13 @@ impl PlaylistPanel {
             .is_some_and(|old| kind(old.playlist()) != kind(info));
         imp.playlist.replace(Some(playlist.clone()));
 
-        let sort = library
+        let chosen = library
             .db()
             .and_then(|db| db.playlist_sort(id).ok())
-            .unwrap_or_else(|| ("custom".to_owned(), false));
+            .flatten();
+        imp.sort_chosen.set(chosen.is_some());
+        self.action_set_enabled("sort.default", chosen.is_some());
+        let sort = chosen.unwrap_or_else(|| default_sort(info.spotify_id.is_some()));
         self.show_sort(&sort);
         let mut entries = library.playlist_items(id);
         sort_entries(&mut entries, &sort.0, sort.1);
@@ -1011,18 +1062,31 @@ impl PlaylistPanel {
                 panel.set_sort(&by, !reversed);
             }
         ));
+        // Back to the default from Preferences.
+        let default = gio::SimpleAction::new("default", None);
+        default.connect_activate(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, _| panel.store_sort(None)
+        ));
         group.add_action(&by);
         group.add_action(&reversed);
+        group.add_action(&default);
         self.insert_action_group("sort", Some(&group));
         let _ = self.imp().sort_actions.set((by, reversed));
     }
 
     /// Lists the playlist sorted (remembered per playlist).
     fn set_sort(&self, by: &str, reversed: bool) {
+        self.store_sort(Some((by, reversed)));
+    }
+
+    /// Keeps the playlist's sort (`None`: the default from Preferences).
+    fn store_sort(&self, sort: Option<(&str, bool)>) {
         let Some(id) = self.playlist_id() else { return };
         let library = GatefoldApplication::get().library();
         if let Some(mut db) = library.db()
-            && let Err(err) = db.set_playlist_sort(id, by, reversed)
+            && let Err(err) = db.set_playlist_sort(id, sort)
         {
             tracing::warn!("Cannot keep the playlist's sort: {err}");
         }

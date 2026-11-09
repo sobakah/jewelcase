@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Covers in the album, artist and playlist grids and on artist pages keep their size when the window or a panel changes width; only the number of columns changes. Their size is set in Preferences → Library → Appearance → Cover Size (120–280 px).
+- Preferences → Library → Playlists: how songs are listed in playlists whose sort you haven't changed, separately for Gatefold's and Spotify's playlists (for example newest first). A sort chosen in a playlist stays; its sort menu's *Use Default Sort* goes back to the default.
 
 ## 0.3.0 (pre-release)
 

@@ -158,7 +158,7 @@ template $GatefoldPlaylistPanel: Adw.Bin {
                 }
 
                 // Sorted like on Spotify; only the view, remembered per
-                // playlist.
+                // playlist (else Preferences' default).
                 Gtk.MenuButton {
                   icon-name: "view-sort-descending-symbolic";
                   tooltip-text: _("Sort");
@@ -324,6 +324,13 @@ menu sort_menu {
     item {
       label: _("_Reverse Order");
       action: "sort.reversed";
+    }
+  }
+
+  section {
+    item {
+      label: _("Use _Default Sort");
+      action: "sort.default";
     }
   }
 }

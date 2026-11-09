@@ -35,7 +35,7 @@ pub use cover_image::CoverImage;
 pub use lyrics_view::LyricsView;
 pub use mini_player::MiniPlayer;
 pub use player_view::PlayerView;
-pub use playlist_panel::PlaylistPanel;
+pub use playlist_panel::{DEFAULT_SORTS as DEFAULT_PLAYLIST_SORTS, PlaylistPanel};
 pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;

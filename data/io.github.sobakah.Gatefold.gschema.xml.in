@@ -49,6 +49,34 @@
       <summary>Cover size in the grids</summary>
       <description>The width of a cover in the album, artist and playlist grids, in pixels. Covers keep it when the window or a panel changes width; the grids then fit more or fewer columns.</description>
     </key>
+    <key name="playlist-sort" type="s">
+      <choices>
+        <choice value="custom"/>
+        <choice value="title"/>
+        <choice value="artist"/>
+        <choice value="album"/>
+        <choice value="added"/>
+        <choice value="added-reversed"/>
+        <choice value="duration"/>
+      </choices>
+      <default>"custom"</default>
+      <summary>Default sort of Gatefold's playlists</summary>
+      <description>How the songs of a playlist made in Gatefold are listed while no sort was chosen for it: “custom” is its own order; “added-reversed” the newest first.</description>
+    </key>
+    <key name="spotify-playlist-sort" type="s">
+      <choices>
+        <choice value="custom"/>
+        <choice value="title"/>
+        <choice value="artist"/>
+        <choice value="album"/>
+        <choice value="added"/>
+        <choice value="added-reversed"/>
+        <choice value="duration"/>
+      </choices>
+      <default>"custom"</default>
+      <summary>Default sort of Spotify playlists</summary>
+      <description>Like playlist-sort, for playlists from Spotify (“custom”: Spotify's order).</description>
+    </key>
     <key name="lyrics-pane" type="s">
       <choices>
         <choice value="remember"/>

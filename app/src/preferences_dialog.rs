@@ -54,6 +54,10 @@ mod imp {
         #[template_child]
         pub style_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub playlist_sort_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
+        pub spotify_playlist_sort_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
         pub tile_size_scale: TemplateChild<gtk::Scale>,
         #[template_child]
         pub lyrics_pane_row: TemplateChild<adw::ComboRow>,
@@ -161,6 +165,14 @@ mod imp {
             ));
             bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
             bind_choice(&settings, "style", &self.style_row, &crate::style::STYLES);
+            let sorts = &crate::widgets::DEFAULT_PLAYLIST_SORTS;
+            bind_choice(&settings, "playlist-sort", &self.playlist_sort_row, sorts);
+            bind_choice(
+                &settings,
+                "spotify-playlist-sort",
+                &self.spotify_playlist_sort_row,
+                sorts,
+            );
             settings
                 .bind("tile-size", &self.tile_size_scale.adjustment(), "value")
                 .mapping(|value, _| Some(f64::from(value.get::<i32>()?).to_value()))

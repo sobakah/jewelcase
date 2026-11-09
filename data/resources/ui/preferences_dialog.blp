@@ -93,6 +93,48 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    // The sort of playlists that have none of their own (CONCEPT.md
+    // §4.1), in the order of playlist_panel.rs: DEFAULT_SORTS.
+    Adw.PreferencesGroup {
+      title: _("Playlists");
+      description: _("How songs are listed in playlists whose sort you haven’t changed. A sort chosen in a playlist stays until you choose “Use Default Sort” there.");
+
+      Adw.ComboRow playlist_sort_row {
+        title: _("_Gatefold Playlists");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Custom Order"),
+            _("Title"),
+            _("Artist"),
+            _("Album"),
+            _("Date Added, Oldest First"),
+            _("Date Added, Newest First"),
+            _("Duration"),
+          ]
+        };
+      }
+
+      Adw.ComboRow spotify_playlist_sort_row {
+        title: _("S_potify Playlists");
+        subtitle: _("Custom order: as on Spotify");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Custom Order"),
+            _("Title"),
+            _("Artist"),
+            _("Album"),
+            _("Date Added, Oldest First"),
+            _("Date Added, Newest First"),
+            _("Duration"),
+          ]
+        };
+      }
+    }
+
     // Smart shuffle's analysis (CONCEPT.md §7), filled in from
     // preferences_dialog.rs.
     Adw.PreferencesGroup {
