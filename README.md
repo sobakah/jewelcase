@@ -2,7 +2,7 @@
 
 A local-first music player for GNOME, built for people who listen to **albums**, follow **artists** and curate **playlists**. Cover art is the main way around your library; lyrics, the queue and details open when you want them. Spotify is optional and stays in its own sections.
 
-**Status:** 0.3.0 is the current pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
+**Status:** 0.4.0 is the current pre-release, for Fedora 45. What changed in each version is in [CHANGELOG.md](CHANGELOG.md); the design and roadmap are in [CONCEPT.md](CONCEPT.md).
 
 ## Features
 
@@ -19,8 +19,8 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 **Companion tools.** Gatefold never writes to your music files itself; it starts these separately installed tools and picks up their changes. Preferences → Integrations shows whether they're found and, if not, the steps to install and set them up:
 
 - **lyrembed** finds lyrics automatically, or opens its page to check and edit them, and romanizes lyrics for display. With its D-Bus service set up (`lyrembed --install-dbus-service`), the Flatpak can use it too.
-- **cdport** (formerly cdimport) imports CDs; a banner offers it when you insert one. With its D-Bus service set up (`cdport --install-dbus-service`), imports keep running when Gatefold closes, and the Flatpak can use it.
-- [Ear Tag](https://flathub.org/apps/app.drey.EarTag) (or Kid3, Picard, or a command of your own) edits tags and covers.
+- **cdport** (formerly cdimport) imports CDs; a banner offers it when you insert one. With its D-Bus service set up (`cdport --install-dbus-service`), imports keep running when Gatefold closes, and the Flatpak can use it. Its tag editor (cdport 1.4.0 or newer) is what *Edit Tags* opens, one album at a time.
+- [Ear Tag](https://flathub.org/apps/app.drey.EarTag) (or Kid3, Picard, or a command of your own) can edit tags instead, chosen in Preferences.
 
 **Spotify (optional).** With Spotify Premium and a developer app of your own (see [Spotify](#spotify-optional) below):
 
@@ -35,7 +35,7 @@ A local-first music player for GNOME, built for people who listen to **albums**,
 Fedora 45: download the RPM from the [releases page](https://github.com/sobakah/gatefold/releases) and install it with
 
 ```sh
-sudo dnf install ./gatefold-0.3.0-1.fc45.x86_64.rpm
+sudo dnf install ./gatefold-0.4.0-1.fc45.x86_64.rpm
 ```
 
 To build the RPM yourself, install the build dependencies (`sudo dnf builddep gatefold.spec`) and run `make rpm`; the packages end up in `rpmbuild/RPMS/`.

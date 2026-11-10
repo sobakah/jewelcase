@@ -48,6 +48,17 @@
   </branding>
 
   <releases>
+    <release version="0.4.0" date="2026-11-10" type="development">
+      <description>
+        <p>Tags edited in cdport's editor, quieter tooltips, and many fixes.</p>
+        <ul>
+          <li>Edit Tags opens cdport's own tag editor, also in the Flatpak</li>
+          <li>Tooltips wait for the pointer to rest, and common buttons have none</li>
+          <li>Cover size and a default sort for playlists, set in Preferences</li>
+          <li>Fixes from a review of the whole program</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-09" type="development">
       <description>
         <p>A new icon, sliding panels, and the companion tools over D-Bus.</p>

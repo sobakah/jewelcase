@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -98,6 +98,13 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Tue Nov 10 2026 sobakah - 0.4.0-1
+- Edit Tags opens cdport's tag editor by default (cdport 1.4.0), also
+  in the Flatpak; Ear Tag and others stay choices
+- Tooltips wait for the pointer to rest; none on common buttons
+- Cover size and a default playlist sort in Preferences
+- Fixes from a review of the whole program
+
 * Mon Nov 09 2026 sobakah - 0.3.0-1
 - New icon; side panels slide like a record sleeve
 - cdimport is now cdport; cdport and lyrembed over D-Bus, with setup

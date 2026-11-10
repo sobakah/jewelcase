@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (pre-release)
+
+cdport's own tag editor for *Edit Tags*, also in the Flatpak, and quieter tooltips; covers that keep their size and a default sort for playlists, both set in Preferences; and 43 fixes from a review of the whole program. *Edit Tags* needs cdport 1.4.0 (`pipx upgrade cdport`); Ear Tag and the other editors can still be chosen in Preferences. On the first start Gatefold changes its database slightly (a removed album's number isn't reused), and 0.3.0 can still open it afterwards. 0.3.0 offers this update itself (its banner, then Install).
 
 - *Edit Tags* opens cdport's own tag editor (cdport 1.4.0 or newer) in the browser by default, one album at a time, like a CD import's page (FLAC, MP3, Ogg Vorbis, Opus and M4A); it works in the Flatpak too, over cdport's D-Bus service. Ear Tag, Kid3, Picard or a custom command can still be chosen in Preferences → Integrations → Tag Editor (not in the Flatpak, which can't start them).
 - Tooltips wait until the pointer has rested on a button for a second, also when moving from one to the next. Common buttons (play and pause, previous, next, shuffle, repeat, volume, close, ⋮) have none any more; less common ones keep theirs, and those with a key combination say it (Search: Ctrl+F). Cover tiles show their full title only when it's cut off.
@@ -8,6 +10,9 @@
 - Preferences → Library → Playlists: how songs are listed in playlists whose sort you haven't changed, separately for Gatefold's and Spotify's playlists (for example newest first). A sort chosen in a playlist stays; its sort menu's *Use Default Sort* goes back to the default.
 - Development builds (`make run`, the test Flatpak) show their commit in the version, with "-dirty" for uncommitted changes; clicking the version in About copies it.
 - The test Flatpak streams through its own Soloist: the one soloistd keeps up to date, run inside the sandbox with the Flatpak's own Soloist API key and data, as the Spotify device "Gatefold Devel". soloistd itself stays with the installed app (Preferences no longer shows its controls in a Flatpak).
+
+### Fixes from a review of the whole program
+
 - A Spotify version you accepted for a song in a published playlist, or ticked under *Probably the Same Song* when creating one on Spotify, now stays with your library song; reading the playlist from Spotify again turned it back into a Spotify-only entry. The same song in other playlists gets that version too instead of being asked about again.
 - Statistics count bands whose name contains "&", "," or "and" (Mumford & Sons, Earth, Wind & Fire) as one artist when they're in your library or among your Spotify artists, and an artist credited twice on a song counts once.
 - An album split into two releases on MusicBrainz, with a disc missing in one part, no longer shows two parts' discs under one number.
@@ -51,6 +56,14 @@
 - Artist information: a wrong or deleted MusicBrainz release ID in the tags no longer stops the lookup (the next release or the name search is tried); Wikidata is asked once per artist instead of twice; portrait credits show "&" and spaces instead of "&amp;" and "&#160;".
 - The song analysis reads bpmdetect's last tempo report, which comes with the end of the song.
 - XSPF playlists from other players with relative paths like `01%20Song.flac` find their songs.
+
+### Install
+
+Download `gatefold-0.4.0-1.fc45.x86_64.rpm` below and install it, or use the update notice in Gatefold 0.3.0:
+
+```sh
+sudo dnf install ./gatefold-0.4.0-1.fc45.x86_64.rpm
+```
 
 ## 0.3.0 (pre-release)
 
