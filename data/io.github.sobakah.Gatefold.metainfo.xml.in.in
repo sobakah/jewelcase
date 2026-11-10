@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.4.1" date="2026-11-10" type="development">
+      <description>
+        <p>Search in playlists, fresher artist pages, and where lyrics come from.</p>
+        <ul>
+          <li>Search a playlist's songs, or add songs from the library and Spotify</li>
+          <li>Artist pages can ask Spotify again for new releases</li>
+          <li>The lyrics say whether they're in the file, a file next to it, or from LRCLIB</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-11-10" type="development">
       <description>
         <p>Tags edited in cdport's editor, quieter tooltips, and many fixes.</p>

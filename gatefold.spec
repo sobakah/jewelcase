@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Gatefold
 
 Name:           gatefold
-Version:        0.4.0
+Version:        0.4.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -98,6 +98,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Tue Nov 10 2026 sobakah - 0.4.1-1
+- Search in a playlist; add library or Spotify songs from there
+- Artist pages: ask Spotify again for an artist's releases
+- Lyrics say where they come from
+- The player's arrow is gone (its grip does the same)
+
 * Tue Nov 10 2026 sobakah - 0.4.0-1
 - Edit Tags opens cdport's tag editor by default (cdport 1.4.0), also
   in the Flatpak; Ear Tag and others stay choices

@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (pre-release)
+
+Search inside a playlist and add songs from your library or Spotify right there, artist pages that can ask Spotify again for new releases, and lyrics that say where they come from. The database doesn't change. 0.4.0 offers this update itself (its banner, then Install).
 
 - Playlists: the search above the songs now searches the playlist itself (title, artist, album). Its **+** button switches to adding songs from your library and, with the Spotify button beside it, Spotify's songs too; that's off by default for Gatefold's playlists and on for Spotify's.
 - Artist pages say when their Spotify releases were read (they're kept a week, as Spotify limits requests about artists), with a button to ask Spotify again now.
 - The lyrics show where they come from in a small tag in the corner: in the file's tags, an LRC or text file next to it, or LRCLIB.
 - The player no longer has an arrow at the top left: its grip on top does the same (as do Escape and a click beside the player).
+
+### Install
+
+Download `gatefold-0.4.1-1.fc45.x86_64.rpm` below and install it, or use the update notice in Gatefold 0.4.0:
+
+```sh
+sudo dnf install ./gatefold-0.4.1-1.fc45.x86_64.rpm
+```
 
 ## 0.4.0 (pre-release)
 
