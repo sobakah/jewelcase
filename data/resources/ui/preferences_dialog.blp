@@ -494,9 +494,9 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
-    Adw.PreferencesGroup {
+    Adw.PreferencesGroup tag_editor_group {
       title: _("Tag Editor");
-      description: _("Gatefold never changes your files. Editing opens them in a tag editor.");
+      description: _("Gatefold never changes your files. Editing opens them in a tag editor: cdport’s opens in your browser, one album at a time (cdport 1.4.0 or newer).");
 
       Adw.ComboRow tag_editor_row {
         title: _("_Editor");
@@ -504,7 +504,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
         model: Gtk.StringList {
           strings [
-            _("Automatic (as in cdport)"),
+            "cdport",
             _("Ear Tag"),
             _("Kid3"),
             _("MusicBrainz Picard"),

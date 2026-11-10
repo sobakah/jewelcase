@@ -16,7 +16,7 @@
 | Album editions | Not part of the title. Shown only as a subtitle in the album panel; same-tracklist editions merged (§3.4) |
 | Grids | Library album grid: cover, album, artist. Artist page: cover, album (§4.1, §4.2) |
 | "Appears on" | Yes, collapsed, only for artists with their own album-artist entry (§4.2) |
-| Tag editing | Not in the player; delegated to **Ear Tag** (§10.3) |
+| Tag editing | Not in the player; delegated to **cdport's tag editor** by default, Ear Tag and others selectable in the RPM (§10.3) |
 | Scrobbling | No |
 | Packaging | RPM on GitHub releases (§12); Flatpak and distribution are phase 9 (§13) |
 | Symlinks | Not allowed for now (§3.1). The rclone-synced Google Drive copy is not part of the library. |
@@ -32,7 +32,7 @@ A local-first music player for people who listen to **albums**, follow **artists
 - **Clean artist list.** Only album artists get entries. Featured or collaborating track artists don't create clutter.
 - **Built, not reinvented.** Every subsystem uses an established, maintained library or protocol.
 
-Non-goals for v1: tag editing inside the player (delegated to Ear Tag), online lyrics, scrobbling, podcasts, a "Songs" mega-list as a primary view, Flatpak/Flathub distribution, and Windows/macOS support.
+Non-goals for v1: tag editing inside the player (delegated to cdport's editor or Ear Tag), online lyrics, scrobbling, podcasts, a "Songs" mega-list as a primary view, Flatpak/Flathub distribution, and Windows/macOS support.
 
 ---
 
@@ -108,7 +108,7 @@ queue_state(...) / queue_item(...)                -- see §6
    1. **`ALBUMARTISTS`** (multi-valued, Picard convention: `ALBUMARTIST` holds the credit line, `ALBUMARTISTS` the single names) or **`MUSICBRAINZ_ALBUMARTISTID`** present → one artist per value, and the album is listed under each of them. cdimport's tag editor writes `ALBUMARTISTS`, and Ear Tag or Picard can set it too.
    2. Otherwise the `ALBUMARTIST` string is **one artist entry, exactly as tagged**. "Get Well Soon & Kat Frankie" stays one entry, and "Simon & Garfunkel" can never break.
    3. **Linking without splitting**: if a part of a joint credit (split on ` & `, `, `, ` × `, ` / `, ` and `, ` und `. Deliberately not on a plain "x", because of "TOMORROW X TOGETHER") **exactly matches another existing album artist**, the joint album also shows up on that artist's page in a *Collaborations* section. No new artist entries are created from parts. This is a display link only.
-   4. To really split an entry, fix the tag (set `ALBUMARTISTS`). The artist page offers *"Edit album artist tags…"*, which opens that artist's albums in the configured tag editor (Ear Tag by default, §10.3).
+   4. To really split an entry, fix the tag (set `ALBUMARTISTS`). The artist page offers *"Edit album artist tags…"*, which opens that artist's albums in the configured tag editor (cdport's by default, one album at a time, §10.3).
 4. **Identity is case- and alias-insensitive**: "YEONJUN" (album artist) and "Yeonjun" (track artist on TXT albums) are the same artist. Spellings in the same lyrembed alias group (§10.1, e.g. "TXT" = "TOMORROW X TOGETHER" = "투모로우바이투게더") are merged. The **display name is the most frequent album-artist spelling**. MBIDs take precedence when present.
 5. "Various Artists" (MBID `89ad4ac3-39f7-470e-963a-56509c546377`) or the `COMPILATION=1` flag → shown under a **Compilations** filter instead of as an artist entry.
 6. Featured and track artists are stored in `track_artist` but never create an artist entry. Track-artist strings in the reference library are messy ("RM (feat. eAeon)", "Alligatoah, Battleboi Basti", "Bang Chan, Changbin, HAN", "RM  (prod. HONNE)"). They're shown as tagged and only parsed for "Appears on" links to **existing** album artists, using the same exact-match rule as 3.3.
@@ -519,7 +519,7 @@ Spotify's albums and artists are shown **apart from the library**, never mixed i
 
 ## 10. Companion Tools: lyrembed, cdport & Ear Tag
 
-lyrembed and cdport (called cdimport before 1.3.0) are separate Python programs installed with pipx, each with a CLI and a local browser page (127.0.0.1 with a secret token). Ear Tag (Flatpak `app.drey.EarTag`) is the tag editor (§10.3). The player doesn't duplicate what they do. It **starts them**, **opens their pages in the default browser**, and **reads what they write to the files**. A GTK port of the tools isn't planned.
+lyrembed and cdport (called cdimport before 1.3.0) are separate Python programs installed with pipx, each with a CLI and a local browser page (127.0.0.1 with a secret token). Tags are edited in cdport's tag editor, or in Ear Tag (Flatpak `app.drey.EarTag`) when chosen (§10.3). The player doesn't duplicate what they do. It **starts them**, **opens their pages in the default browser**, and **reads what they write to the files**. A GTK port of the tools isn't planned.
 
 **Contract:** the **command line is the stable interface** (cdport 1.3.0 and newer also has a D-Bus interface, below): arguments, exit codes, `--version`, and the printed line "`<tool> is running at <url>`". Their page JSON APIs (`/api/library`, `/api/jobs`, …) are internal and are **not** called by the player. The player gets results by reading the files afterwards, which it does anyway through inotify. Where the CLI is missing something, §10.4 lists small additions to the tools themselves.
 
@@ -573,22 +573,28 @@ lyrembed and cdport (called cdimport before 1.3.0) are separate Python programs 
 - **Covers**: cdport writes `cover.jpg` and an embedded front cover, which the cover pipeline (§4.3) uses without extra work.
 - cdport already chains lyrembed for the lyrics step, so the player adds nothing there.
 
-### 10.3 Ear Tag: tag and cover editing
-The player never writes tags itself (Q8). Every editing action opens the files in **Ear Tag**, GNOME's tag editor (installed here as Flatpak `app.drey.EarTag`). It's the same editor cdimport uses by default.
+### 10.3 Tag editing: cdport's editor, or Ear Tag
+The player never writes tags itself (Q8). Every editing action opens the album in a tag editor: by default **cdport's own** (cdport 1.4.0 on), a page in the browser like its imports; in the RPM build **Ear Tag** (Flatpak `app.drey.EarTag`), Kid3, MusicBrainz Picard or a custom command can be chosen instead (Preferences → Integrations → *Tag Editor*). The Flatpak always uses cdport's: it can't start the others, and reaches cdport over D-Bus (decided 2026-11-10; before, Ear Tag was the default and the Flatpak couldn't edit tags at all).
 
 | Where in the player | Action | Files passed |
 |---|---|---|
-| Album panel ⋮ | **Edit tags in Ear Tag…** | all tracks of the album (of the chosen edition) |
+| Album panel ⋮ | **Edit Tags…** | all tracks of the album (of the chosen edition) |
 | Track row ⋮ (expanded song details) | **Edit tags…** | that track |
-| Album panel cover ⋮ | **Change cover…** (Ear Tag edits embedded covers) | all tracks of the album |
-| Artist page ⋮ | **Edit album artist tags…** (e.g. to set `ALBUMARTISTS` for a real split, §3.3) | all tracks of that artist's albums |
+| Artist page | **Edit Album Artist Tags…** (e.g. to set `ALBUMARTISTS` for a real split, §3.3) | all tracks of that artist's albums |
 | Lyrics pane ⋮ | — (lyrics stay with lyrembed, §10.1) | — |
 
-- **Command**: `flatpak run --file-forwarding app.drey.EarTag @@ <files> @@`, the same template cdimport uses. File forwarding hands the files over through the document portal, so Ear Tag can write them even outside its sandbox permissions.
-- **Detection**: `flatpak info app.drey.EarTag` (user or system installation). If it's missing, the menu entries show *"Install Ear Tag…"* with a link to `appstream://app.drey.EarTag`, which opens GNOME Software.
-- **Other editors**: Preferences → Integrations → *Tag editor* offers Ear Tag (default), Kid3 and MusicBrainz Picard, plus a custom command. These use the same command-template format as cdimport's `editors` config (`{files}`, `{dir}`). If cdimport's config names an editor, that's preselected, so both programs use the same one. Picard is the fallback for fields Ear Tag may not show, such as multi-valued `ALBUMARTISTS`. Verify this with the installed Ear Tag version.
-- **No waiting**: Ear Tag returns at once, especially when its window is already open, so the player doesn't wait for the process. Saved changes arrive through inotify, and the affected tracks/albums are re-read and re-grouped (album artist, editions, release type). An album can move to another artist live.
-- **During playback**: same as lyrembed's writes (§10.0). The current track keeps playing, and the new metadata shows when the re-read finishes.
+**cdport's editor**
+- **Over D-Bus**: `EditTags(s folder, a{sv} options) → (s run, s url)`, a page run like `Import` (§10.2): Gatefold opens the address, the status bar says *Editing tags with cdport* with *Show Page* and *Stop*, and it's one page at a time with lyrembed's and imports. Without the service: `cdport FOLDER --edit-tags --web --no-browser`, started by Gatefold.
+- **One album folder**: the files' folder (the first, when they're in several: an artist's albums, disc folders; a notice says so). Which formats it edits is cdport's to say (1.4.0: FLAC, MP3, Ogg Vorbis, Opus and M4A, also mixed in one album), as is where: its service only accepts folders inside its library, its working folder or the music folder. A refusal shows with cdport's reason ("cdport couldn't start: …"); without the service, the program says so on its page. So a cdport that takes more formats needs no change here.
+- **Not an import**: no "New album" notices follow (a run that survived a Gatefold restart can't be told apart and still counts as one).
+- Older cdport: a notice asks for 1.4.0 (`pipx upgrade cdport`).
+
+**Ear Tag and the others (RPM)**
+- **Command**: `flatpak run --file-forwarding app.drey.EarTag @@ <files> @@`, the same template as cdport's `editors` config (`{files}`, `{dir}`). File forwarding hands the files over through the document portal, so Ear Tag can write them even outside its sandbox permissions.
+- **Detection**: `flatpak info app.drey.EarTag` (user or system installation). If it's missing, *Edit Tags* opens GNOME Software (`appstream://app.drey.EarTag`).
+- **No waiting**: Ear Tag returns at once, especially when its window is already open, so the player doesn't wait for the process.
+
+**Both**: saved changes arrive through inotify, and the affected tracks/albums are re-read and re-grouped (album artist, editions, release type); an album can move to another artist live. During playback the current track keeps playing, and the new metadata shows when the re-read finishes (as with lyrembed's writes, §10.0).
 
 ### 10.4 Proposed additions to the tools
 
@@ -721,19 +727,14 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
 
-- **A simple tag editor in Gatefold** (idea, 2026-11-10): instead of handing files to Ear Tag. Prompted by the test Flatpak, where *Edit Tags* can't work: Gatefold looks for Ear Tag with `flatpak info` and starts it with `flatpak run`, and neither exists inside the sandbox (asking the host would need `org.freedesktop.Flatpak`, a sandbox escape). The portal's "Open With" chooser would work, but takes one file at a time. Until then, *Edit Tags* in the Flatpak always offers to install Ear Tag. Building it changes two decisions: the player never writes tags (Q8, §10.3), and the Flatpak's music folder is read-only (`xdg-music:ro`).
-
 ### Known issues (code reviews, November 2026)
 A review of the whole program (six areas, read in full) found about 85 problems; all but the Soloist key below are fixed (the last ones on 2026-11-08: scans now write only what changed, and the reload after a scan runs on a worker thread).
 
-A second one on 2026-11-10 (six rounds by risk, every file read in full: database and scanner, playback and queue, Spotify and streaming, companion tools and lyrics, the app and its widgets, metadata and matching) found 87 more; 84 are fixed, these three are left:
+A second one on 2026-11-10 (six rounds by risk, every file read in full: database and scanner, playback and queue, Spotify and streaming, companion tools and lyrics, the app and its widgets, metadata and matching) found 87 more; 85 are fixed (*Edit Tags* in the Flatpak by cdport's tag editor, §10.3), these two are left:
 
 **Slow with large libraries (left for later)**
 - **Search reads every match** for one- and two-letter queries (an unindexed `LIKE` over the whole index) and only then keeps the first few of each kind, on every keystroke. Where: `core/src/db.rs`, `search`.
 - **Tags are read twice per file** while scanning: once by lofty in general, once more by the format's reader just for `RELEASECOMMENT`. Doubles the tag reading of a first scan (felt most on network and USB drives). Where: `core/src/library/tags.rs`, `read_release_comment`.
-
-**Flatpak**
-- ***Edit Tags* always offers to install Ear Tag** in the Flatpak: `flatpak info` and `flatpak run` don't exist in the sandbox. Waits for the built-in tag editor idea (see *Optional future features*).
 
 **Security**
 - **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Ready:* when `soloist --help` lists `--api-key-file`, Gatefold writes the key to a 0600 file next to its Soloist data folder, passes that, and removes the file once Soloist listens (chosen over an environment variable, which child processes inherit and crash reports may contain). soloistd would need the same change (or systemd's `LoadCredential=`). Where: `soloist/src/lib.rs`, `Soloist::start`.

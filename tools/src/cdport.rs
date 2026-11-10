@@ -26,6 +26,9 @@ pub const PROGRAMS: [&str; 2] = ["cdport", "cdimport"];
 
 /// The first version with the D-Bus interface.
 pub const DBUS_VERSION: crate::Version = crate::Version(1, 3, 0);
+/// The first version whose tag editor opens on its own (`--edit-tags`,
+/// D-Bus `EditTags`).
+pub const EDIT_TAGS_VERSION: crate::Version = crate::Version(1, 4, 0);
 
 /// cdport's D-Bus interface (`cdport/dbus_service.py`).
 pub const BUS_NAME: &str = "io.github.sobakah.cdport";
@@ -95,6 +98,18 @@ pub fn continue_args(program: &Path, album_dir: &Path, library: Option<&Path>) -
     let mut args = import_args(program, library);
     args.insert(1, album_dir.into());
     args
+}
+
+/// `cdport <album dir> --edit-tags --web --no-browser`: only its tag
+/// editor, on one album folder.
+pub fn edit_tags_args(program: &Path, album_dir: &Path) -> Vec<OsString> {
+    vec![
+        program.into(),
+        album_dir.into(),
+        "--edit-tags".into(),
+        "--web".into(),
+        "--no-browser".into(),
+    ]
 }
 
 pub fn version_args(program: &Path) -> Vec<OsString> {

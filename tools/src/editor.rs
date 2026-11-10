@@ -1,5 +1,6 @@
-//! The tag editor (CONCEPT.md §10.3): Ear Tag by default, or Kid3, Picard
-//! or a custom command. Commands use cdimport's template format:
+//! The tag editor (CONCEPT.md §10.3): cdport's own by default (a page in
+//! the browser, started through cdport, not a command), or Ear Tag, Kid3,
+//! Picard or a custom command. Commands use cdport's template format:
 //! `{files}` becomes the files, `{dir}` their folder, `@@` marks flatpak's
 //! file forwarding.
 
@@ -10,6 +11,8 @@ pub const EAR_TAG_INSTALL_URI: &str = "appstream://app.drey.EarTag";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Editor {
+    /// cdport's tag editor (cdport 1.4.0 on), one album folder at a time.
+    Cdport,
     EarTag,
     Kid3,
     Picard,
@@ -18,18 +21,21 @@ pub enum Editor {
 }
 
 impl Editor {
-    /// From the `tag-editor` setting (or cdimport's `editor`).
+    /// From the `tag-editor` setting ("auto", from before cdport had its
+    /// own editor, and anything unknown: cdport's).
     pub fn from_name(name: &str, custom: &str) -> Self {
         match name {
+            "eartag" => Self::EarTag,
             "kid3" => Self::Kid3,
             "picard" => Self::Picard,
             "custom" if !custom.trim().is_empty() => Self::Custom(custom.to_owned()),
-            _ => Self::EarTag,
+            _ => Self::Cdport,
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
+            Self::Cdport => "cdport",
             Self::EarTag => "Ear Tag",
             Self::Kid3 => "Kid3",
             Self::Picard => "MusicBrainz Picard",
@@ -38,10 +44,11 @@ impl Editor {
     }
 
     /// Command templates to try in order (native first, then Flatpak),
-    /// the same as cdimport's defaults.
+    /// the same as cdport's defaults. None for cdport's own editor.
     pub fn templates(&self) -> Vec<Vec<String>> {
         let t = |parts: &[&str]| parts.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
         match self {
+            Self::Cdport => Vec::new(),
             Self::EarTag => vec![t(&[
                 "flatpak",
                 "run",
@@ -157,7 +164,9 @@ mod tests {
             expand(&custom.templates()[0], &files[..1]),
             ["my-editor", "--open", "/m/A/CD1/01.flac"]
         );
-        assert_eq!(Editor::from_name("custom", " "), Editor::EarTag);
+        assert_eq!(Editor::from_name("custom", " "), Editor::Cdport);
+        assert_eq!(Editor::from_name("auto", ""), Editor::Cdport);
+        assert_eq!(Editor::from_name("eartag", ""), Editor::EarTag);
         assert_eq!(Editor::flatpak_id(&custom.templates()[0]), None);
     }
 }

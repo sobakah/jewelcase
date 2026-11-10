@@ -188,6 +188,15 @@ pub enum PageRun {
     Service(String),
 }
 
+/// What a page is for: the tool's main one (cdport's import, after which
+/// "New album" notices follow; lyrembed's album page), or only cdport's
+/// tag editor on one album folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageJob {
+    Main,
+    EditTags,
+}
+
 /// A page to open (now, or once the running one has closed).
 #[derive(Debug, Clone)]
 pub enum PageStart {
@@ -195,12 +204,14 @@ pub enum PageStart {
         tool: PageTool,
         argv: Vec<OsString>,
         status: String,
+        job: PageJob,
     },
-    /// Over D-Bus: cdport (`folder` continues an unfinished import) or
-    /// lyrembed (`folder`'s page).
+    /// Over D-Bus: cdport (`folder` continues an unfinished import, or is
+    /// the album whose tags to edit) or lyrembed (`folder`'s page).
     Service {
         tool: PageTool,
         folder: Option<PathBuf>,
+        job: PageJob,
     },
 }
 
@@ -451,12 +462,17 @@ impl Tools {
             return;
         }
         match start {
-            PageStart::Command { tool, argv, status } => self.run_page_command(tool, &argv, status),
-            PageStart::Service { tool, folder } => self.start_service_run(tool, folder),
+            PageStart::Command {
+                tool,
+                argv,
+                status,
+                job,
+            } => self.run_page_command(tool, &argv, status, job),
+            PageStart::Service { tool, folder, job } => self.start_service_run(tool, folder, job),
         }
     }
 
-    fn run_page_command(&self, tool: PageTool, argv: &[OsString], status: String) {
+    fn run_page_command(&self, tool: PageTool, argv: &[OsString], status: String, job: PageJob) {
         let process = self.spawn(
             argv,
             glib::clone!(
@@ -478,16 +494,23 @@ impl Tools {
             ),
         );
         let Some(process) = process else { return };
-        self.page_opened(tool, PageRun::Process(process), None, status);
+        self.page_opened(tool, PageRun::Process(process), None, status, job);
         if tool == PageTool::Lyrembed {
             // lyrembed's editor plays the track in the page (§10.0).
             GatefoldApplication::get().player().pause();
         }
     }
 
-    fn page_opened(&self, tool: PageTool, run: PageRun, url: Option<String>, status: String) {
+    fn page_opened(
+        &self,
+        tool: PageTool,
+        run: PageRun,
+        url: Option<String>,
+        status: String,
+        job: PageJob,
+    ) {
         let imp = self.imp();
-        if tool == PageTool::Cdport {
+        if tool == PageTool::Cdport && job == PageJob::Main {
             // Only now, not when asked: the replace dialog may be
             // cancelled, or cdport not start.
             imp.import_started.set(Some(crate::metadata::now()));
@@ -641,6 +664,7 @@ impl Tools {
             self.open_page(PageStart::Service {
                 tool: PageTool::Lyrembed,
                 folder: Some(album_dir.to_path_buf()),
+                job: PageJob::Main,
             });
             return;
         }
@@ -652,6 +676,7 @@ impl Tools {
             tool: PageTool::Lyrembed,
             argv: lyrembed::page_args(&program, album_dir),
             status: PageTool::Lyrembed.status(),
+            job: PageJob::Main,
         });
     }
 
@@ -832,6 +857,7 @@ impl Tools {
             self.open_page(PageStart::Service {
                 tool: PageTool::Cdport,
                 folder,
+                job: PageJob::Main,
             });
             return;
         }
@@ -848,6 +874,7 @@ impl Tools {
             tool: PageTool::Cdport,
             argv,
             status: PageTool::Cdport.status(),
+            job: PageJob::Main,
         });
     }
 
@@ -995,10 +1022,15 @@ impl Tools {
             && matches!(&*imp.page_run.borrow(), Some(PageRun::Service(id)) if id == run)
     }
 
-    /// cdport's `Import` (the page's address comes back, Gatefold opens
-    /// it) or lyrembed's `OpenPage` (it opens the page itself).
-    fn start_service_run(&self, tool: PageTool, folder: Option<PathBuf>) {
-        self.page_opened(tool, PageRun::Service(String::new()), None, tool.status());
+    /// cdport's `Import` or `EditTags` (the page's address comes back,
+    /// Gatefold opens it) or lyrembed's `OpenPage` (it opens the page
+    /// itself).
+    fn start_service_run(&self, tool: PageTool, folder: Option<PathBuf>, job: PageJob) {
+        let status = match job {
+            PageJob::EditTags => edit_tags_status(),
+            PageJob::Main => tool.status(),
+        };
+        self.page_opened(tool, PageRun::Service(String::new()), None, status, job);
         if tool == PageTool::Lyrembed {
             // lyrembed's editor plays the track in the page (§10.0).
             GatefoldApplication::get().player().pause();
@@ -1009,6 +1041,14 @@ impl Tools {
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_default();
         let (method, args, reply) = match tool {
+            PageTool::Cdport if job == PageJob::EditTags => (
+                "EditTags",
+                glib::Variant::tuple_from_iter([
+                    folder_text.to_variant(),
+                    glib::VariantDict::new(None).end(),
+                ]),
+                "(ss)",
+            ),
             PageTool::Cdport => {
                 let options = glib::VariantDict::new(None);
                 if let Some(library) = self.cdport_library(&self.cdport().config) {
@@ -1188,7 +1228,15 @@ impl Tools {
                     PageTool::Lyrembed => None,
                 };
                 tracing::info!("{} run {run} is still going", tool.name());
-                tools.page_opened(tool, PageRun::Service(run), url, tool.status());
+                // An import or a tag edit: can't be told apart; taken
+                // for an import, as before cdport could edit tags alone.
+                tools.page_opened(
+                    tool,
+                    PageRun::Service(run),
+                    url,
+                    tool.status(),
+                    PageJob::Main,
+                );
             }
         ));
     }
@@ -1271,18 +1319,17 @@ impl Tools {
 
     // Tag editor (§10.3) -----------------------------------------------------
 
+    /// The chosen tag editor; cdport's by default, and always in a Flatpak
+    /// (it can't start the others, cdport it reaches over D-Bus).
     pub fn editor(&self) -> Editor {
-        let settings = self.settings();
-        let mut name = settings.string("tag-editor").to_string();
-        if name == "auto" {
-            // Use cdport's choice, so both programs open the same editor.
-            name = self
-                .cdport()
-                .config
-                .editor
-                .unwrap_or_else(|| "eartag".into());
+        if crate::config::is_flatpak() {
+            return Editor::Cdport;
         }
-        Editor::from_name(&name, &settings.string("tag-editor-command"))
+        let settings = self.settings();
+        Editor::from_name(
+            &settings.string("tag-editor"),
+            &settings.string("tag-editor-command"),
+        )
     }
 
     /// Opens files in the tag editor; saved changes arrive via inotify.
@@ -1291,6 +1338,10 @@ impl Tools {
             return;
         }
         let editor = self.editor();
+        if editor == Editor::Cdport {
+            self.edit_tags_in_cdport(&files);
+            return;
+        }
         let ear_tag_known = self.imp().detected.borrow().ear_tag;
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = tools)]
@@ -1351,6 +1402,63 @@ impl Tools {
         ));
     }
 
+    /// cdport's tag editor on the files' album folder, a page like an
+    /// import's (one page at a time), one folder at a time. Which files it
+    /// can edit is cdport's to say (its service refuses with a reason,
+    /// shown here; the program says so on its page), so a cdport that
+    /// takes more formats needs nothing here.
+    fn edit_tags_in_cdport(&self, files: &[PathBuf]) {
+        let mut folders: Vec<&Path> = Vec::new();
+        for folder in files.iter().filter_map(|f| f.parent()) {
+            if !folders.contains(&folder) {
+                folders.push(folder);
+            }
+        }
+        let Some(folder) = folders.first().map(|f| f.to_path_buf()) else {
+            return;
+        };
+        let cdport = self.cdport();
+        if !cdport.usable() {
+            self.missing_tool("cdport");
+            return;
+        }
+        if cdport.version.is_none_or(|v| v < cdport::EDIT_TAGS_VERSION) {
+            self.message(&gettext(
+                "Editing tags needs cdport 1.4.0 or newer (update it with “pipx upgrade cdport”)",
+            ));
+            return;
+        }
+        if folders.len() > 1 {
+            // An artist's albums, or an album in disc folders.
+            let name = folder
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Translators: {} is a folder name.
+            self.message(
+                &gettext("cdport's tag editor opens one folder at a time: “{}” first")
+                    .replace("{}", &name),
+            );
+        }
+        if cdport.dbus {
+            self.open_page(PageStart::Service {
+                tool: PageTool::Cdport,
+                folder: Some(folder),
+                job: PageJob::EditTags,
+            });
+            return;
+        }
+        let Some(program) = cdport.program.map(|p| p.path) else {
+            return;
+        };
+        self.open_page(PageStart::Command {
+            tool: PageTool::Cdport,
+            argv: cdport::edit_tags_args(&program, &folder),
+            status: edit_tags_status(),
+            job: PageJob::EditTags,
+        });
+    }
+
     /// The window offers the instructions (Preferences › Integrations).
     fn missing_tool(&self, name: &str) {
         self.emit_by_name::<()>("missing", &[&name]);
@@ -1363,6 +1471,11 @@ impl Default for Tools {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The status bar while cdport's tag editor is open.
+fn edit_tags_status() -> String {
+    gettext("Editing tags with cdport")
 }
 
 /// cdimport's settings (0.2.x) carried over to cdport's keys, once: the old

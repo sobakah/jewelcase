@@ -13,7 +13,7 @@ use crate::library_folders;
 /// The `replaygain` setting values, in the order of the combo row.
 const REPLAYGAIN_MODES: [&str; 4] = ["off", "auto", "track", "album"];
 /// The `tag-editor` setting values, in the order of the combo row.
-const TAG_EDITORS: [&str; 5] = ["auto", "eartag", "kid3", "picard", "custom"];
+const TAG_EDITORS: [&str; 5] = ["cdport", "eartag", "kid3", "picard", "custom"];
 /// The `lyrics-layout` setting values, in the order of the combo row.
 /// "analysis-mode" values, in the order of the Analyze Songs row.
 const ANALYSIS_MODES: [&str; 3] = ["off", "background", "full"];
@@ -93,6 +93,8 @@ mod imp {
         pub tag_editor_command_row: TemplateChild<adw::EntryRow>,
         #[template_child]
         pub ear_tag_status: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub tag_editor_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
         pub wikidata_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -373,6 +375,13 @@ mod imp {
                 .bind("tag-editor", &*self.tag_editor_row, "selected")
                 .mapping(|value, _| {
                     let editor = value.get::<String>()?;
+                    // "auto" (cdport's choice of editor, before it had its
+                    // own) is cdport's now.
+                    let editor = if editor == "auto" {
+                        "cdport".into()
+                    } else {
+                        editor
+                    };
                     let index = TAG_EDITORS.iter().position(|e| *e == editor)?;
                     Some((index as u32).to_value())
                 })
@@ -411,6 +420,8 @@ mod imp {
             let flatpak = crate::config::is_flatpak();
             self.lyrembed_path_row.set_visible(!flatpak);
             self.cdport_path_row.set_visible(!flatpak);
+            // There only cdport's tag editor works (over D-Bus).
+            self.tag_editor_group.set_visible(!flatpak);
         }
     }
 

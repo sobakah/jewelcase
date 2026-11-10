@@ -237,15 +237,16 @@
     </key>
     <key name="tag-editor" type="s">
       <choices>
+        <choice value="cdport"/>
         <choice value="auto"/>
         <choice value="eartag"/>
         <choice value="kid3"/>
         <choice value="picard"/>
         <choice value="custom"/>
       </choices>
-      <default>"auto"</default>
+      <default>"cdport"</default>
       <summary>Tag editor</summary>
-      <description>“auto” uses cdport’s editor setting, else Ear Tag.</description>
+      <description>“cdport”: cdport’s own tag editor (cdport 1.4.0 or newer), in the browser. “auto”, from before it had one, counts as “cdport”. A Flatpak always uses cdport’s.</description>
     </key>
     <key name="tag-editor-command" type="s">
       <default>""</default>
