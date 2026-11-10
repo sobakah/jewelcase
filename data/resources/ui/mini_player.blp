@@ -89,7 +89,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
         Gtk.ToggleButton shuffle_button {
           visible: bind template.compact inverted;
           icon-name: "media-playlist-shuffle-symbolic";
-          tooltip-text: _("Shuffle");
+          accessibility {
+            label: _("Shuffle");
+          }
+
           action-name: "player.shuffle";
           valign: center;
 
@@ -101,7 +104,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
         Gtk.Button {
           icon-name: "media-skip-backward-symbolic";
-          tooltip-text: _("Previous");
+          accessibility {
+            label: _("Previous");
+          }
+
           action-name: "player.previous";
           valign: center;
 
@@ -113,7 +119,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
         Gtk.Button play_button {
           icon-name: "media-playback-start-symbolic";
-          tooltip-text: _("Play");
+          accessibility {
+            label: _("Play");
+          }
+
           action-name: "player.play-pause";
           valign: center;
 
@@ -126,7 +135,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
         Gtk.Button {
           icon-name: "media-skip-forward-symbolic";
-          tooltip-text: _("Next");
+          accessibility {
+            label: _("Next");
+          }
+
           action-name: "player.next";
           valign: center;
 
@@ -139,7 +151,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
         Gtk.Button repeat_button {
           visible: bind template.compact inverted;
           icon-name: "media-playlist-consecutive-symbolic";
-          tooltip-text: _("Repeat: Off");
+          accessibility {
+            label: _("Repeat: Off");
+          }
+
           action-name: "player.repeat";
           valign: center;
 
@@ -175,7 +190,10 @@ template $GatefoldMiniPlayer: Adw.Bin {
 
         Gtk.Button {
           icon-name: "pan-up-symbolic";
-          tooltip-text: _("Show Player");
+          accessibility {
+            label: _("Show Player");
+          }
+
           action-name: "win.open-player";
 
           styles [

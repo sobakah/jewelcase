@@ -104,10 +104,10 @@ pub fn page() -> adw::PreferencesPage {
     ));
     let copy = gtk::Button::builder()
         .icon_name("edit-copy-symbolic")
-        .tooltip_text(gettext("Copy"))
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
+    crate::widgets::set_accessible_label(&copy, &gettext("Copy"));
     copy.connect_clicked(|button| {
         button.clipboard().set_text(REDIRECT_URI);
         button.set_icon_name("object-select-symbolic");

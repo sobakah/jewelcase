@@ -735,14 +735,14 @@ fn tile(
     // Only in the statistics (not in the library): nothing to open.
     let Some((name, id)) = action else {
         column.add_css_class("grid-tile");
-        column.set_tooltip_text(Some(title));
+        super::tooltip_when_cut(&column);
         return column.upcast();
     };
     let button = gtk::Button::builder()
         .child(&column)
-        .tooltip_text(title)
         .css_classes(["flat", "grid-tile"])
         .build();
+    super::tooltip_when_cut(&button);
     {
         button.connect_clicked(glib::clone!(
             #[weak]
@@ -844,7 +844,6 @@ fn song_list(songs: &[Ranked], since: &str) -> gtk::Widget {
             }))
             .activatable(track.is_some())
             .build();
-        row.set_tooltip_text(Some(&gettext("Play the Song")));
         let rank = gtk::Label::builder()
             .label((place + 1).to_string())
             .width_chars(2)

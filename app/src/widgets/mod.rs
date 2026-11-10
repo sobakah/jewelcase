@@ -22,6 +22,7 @@ mod shuffle_options;
 mod slide_view;
 mod spotify_tile;
 pub mod statistics;
+pub mod tooltips;
 mod track_info;
 mod track_row;
 mod visualizer;
@@ -92,6 +93,50 @@ pub fn tile_cover() -> CoverImage {
         .get()
         .build();
     cover
+}
+
+/// The name an icon-only button is announced by (what its tooltip said
+/// before tooltips were kept for less common icons).
+pub fn set_accessible_label(widget: &impl gtk::prelude::IsA<gtk::Accessible>, label: &str) {
+    use gtk::prelude::AccessibleExtManual;
+    widget.update_property(&[gtk::accessible::Property::Label(label)]);
+}
+
+/// A tile's tooltip: its texts in full, only while one is cut off ("…").
+/// Taken from the labels that can shorten, when asked, so a reused tile
+/// needs nothing more.
+pub fn tooltip_when_cut(widget: &impl gtk::prelude::IsA<gtk::Widget>) {
+    use gtk::prelude::*;
+    fn collect(widget: &gtk::Widget, texts: &mut Vec<String>, cut: &mut bool) {
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            if current.is_visible() {
+                match current.downcast_ref::<gtk::Label>() {
+                    Some(label) => {
+                        if label.ellipsize() != gtk::pango::EllipsizeMode::None
+                            && !label.text().is_empty()
+                        {
+                            *cut |= label.layout().is_ellipsized();
+                            texts.push(label.text().to_string());
+                        }
+                    }
+                    None => collect(&current, texts, cut),
+                }
+            }
+            child = current.next_sibling();
+        }
+    }
+    widget.set_has_tooltip(true);
+    widget.connect_query_tooltip(|widget, _, _, _, tooltip| {
+        let mut texts = Vec::new();
+        let mut cut = false;
+        collect(widget.upcast_ref(), &mut texts, &mut cut);
+        if !cut {
+            return false;
+        }
+        tooltip.set_text(Some(&texts.join(" — ")));
+        true
+    });
 }
 
 /// Disconnects a handler `owner` put on a long-lived `source` (the

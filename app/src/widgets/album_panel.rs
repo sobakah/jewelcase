@@ -401,7 +401,6 @@ impl AlbumPanel {
                     .label(&name)
                     .action_name(action)
                     .action_target(&target)
-                    .tooltip_text(gettext("Go to {}").replace("{}", &name))
                     .css_classes(["flat", "artist-link", "heading"])
                     .build(),
             );
@@ -511,8 +510,6 @@ impl AlbumPanel {
                 .label(&name)
                 .action_name("win.show-artist")
                 .action_target(&id.to_variant())
-                // Translators: tooltip of an artist link; {} is the name.
-                .tooltip_text(gettext("Go to {}").replace("{}", &name))
                 .css_classes(["flat", "artist-link", "heading"])
                 .build();
             imp.artists.append(&button);
@@ -566,7 +563,6 @@ impl AlbumPanel {
                 list = Some(new_list);
             }
             let row = TrackRow::new(track, album_artist);
-            row.set_tooltip_text(Some(&gettext("Double-click to play")));
             if let Some(list) = &list {
                 list.append(&row);
             }

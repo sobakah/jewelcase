@@ -107,11 +107,11 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
         .build();
     let volume_apply = gtk::Button::builder()
         .icon_name("object-select-symbolic")
-        .tooltip_text(gettext("Apply"))
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular"])
         .visible(false)
         .build();
+    crate::widgets::set_accessible_label(&volume_apply, &gettext("Apply"));
     volume.add_suffix(&volume_apply);
     group.add(&volume);
     let key = adw::PasswordEntryRow::builder()
@@ -207,11 +207,14 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
                 } else {
                     "media-playback-start-symbolic"
                 });
-                start_stop.set_tooltip_text(Some(&if running {
-                    gettext("Stop")
-                } else {
-                    gettext("Start")
-                }));
+                crate::widgets::set_accessible_label(
+                    &start_stop,
+                    &if running {
+                        gettext("Stop")
+                    } else {
+                        gettext("Start")
+                    },
+                );
                 build.set_subtitle(
                     &state
                         .soloist

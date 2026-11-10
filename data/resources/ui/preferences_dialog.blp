@@ -169,7 +169,9 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
         Gtk.Button analysis_pause {
           valign: center;
           icon-name: "media-playback-pause-symbolic";
-          tooltip-text: _("Pause");
+          accessibility {
+            label: _("Pause");
+          }
 
           styles [
             "flat",

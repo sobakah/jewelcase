@@ -861,10 +861,10 @@ impl PlaylistPanel {
         if editable {
             let remove = gtk::Button::builder()
                 .icon_name("list-remove-symbolic")
-                .tooltip_text(gettext("Remove from Playlist"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat", "circular"])
                 .build();
+            super::set_accessible_label(&remove, &gettext("Remove from Playlist"));
             remove.connect_clicked(move |_| {
                 GatefoldApplication::get()
                     .library()
@@ -1722,10 +1722,10 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
     let menu = gio::Menu::new();
     let button = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
-        .tooltip_text(gettext("More"))
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular"])
         .build();
+    super::set_accessible_label(&button, &gettext("More"));
 
     if has_song(entry) {
         let queue = gio::Menu::new();

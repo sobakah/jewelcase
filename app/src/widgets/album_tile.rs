@@ -50,6 +50,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            // The names in full, only when cut off.
+            super::super::tooltip_when_cut(&*obj);
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
             // The cover's size, also in a wider cell.
@@ -87,7 +89,6 @@ impl AlbumTile {
         // Translators: accessible label of an album cover; {} is the album title.
         imp.cover
             .set_label(&gettext("Cover of {}").replace("{}", &info.title));
-        self.set_tooltip_text(Some(&format!("{} — {artist}", info.title)));
     }
 }
 
@@ -102,7 +103,6 @@ impl AlbumTile {
     pub fn bind_title_only(&self, album: &AlbumObject) {
         self.bind(album);
         self.imp().artist.set_visible(false);
-        self.set_tooltip_text(Some(&album.album().title));
     }
 }
 

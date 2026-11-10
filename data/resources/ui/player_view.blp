@@ -61,7 +61,10 @@ template $GatefoldPlayerView: Adw.Bin {
           [start]
           Gtk.Button {
             icon-name: "pan-down-symbolic";
-            tooltip-text: _("Hide Player");
+            accessibility {
+              label: _("Hide Player");
+            }
+
             action-name: "win.close-player";
           }
 
@@ -279,7 +282,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
               end-widget: Gtk.MenuButton volume_button {
                 icon-name: "audio-volume-high-symbolic";
-                tooltip-text: _("Volume");
+                accessibility {
+                  label: _("Volume");
+                }
+
                 direction: up;
 
                 popover: Gtk.Popover {
@@ -368,7 +374,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
                   Gtk.ToggleButton shuffle_button {
                     icon-name: "media-playlist-shuffle-symbolic";
-                    tooltip-text: _("Shuffle");
+                    accessibility {
+                      label: _("Shuffle");
+                    }
+
                     action-name: "player.shuffle";
                     valign: center;
 
@@ -393,7 +402,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
                 Gtk.Button {
                   icon-name: "media-skip-backward-symbolic";
-                  tooltip-text: _("Previous");
+                  accessibility {
+                    label: _("Previous");
+                  }
+
                   action-name: "player.previous";
                   valign: center;
 
@@ -405,7 +417,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
                 Gtk.Button play_button {
                   icon-name: "media-playback-start-symbolic";
-                  tooltip-text: _("Play");
+                  accessibility {
+                    label: _("Play");
+                  }
+
                   action-name: "player.play-pause";
 
                   styles [
@@ -417,7 +432,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
                 Gtk.Button {
                   icon-name: "media-skip-forward-symbolic";
-                  tooltip-text: _("Next");
+                  accessibility {
+                    label: _("Next");
+                  }
+
                   action-name: "player.next";
                   valign: center;
 
@@ -433,7 +451,10 @@ template $GatefoldPlayerView: Adw.Bin {
 
                   Gtk.Button repeat_button {
                     icon-name: "media-playlist-consecutive-symbolic";
-                    tooltip-text: _("Repeat: Off");
+                    accessibility {
+                      label: _("Repeat: Off");
+                    }
+
                     action-name: "player.repeat";
                     valign: center;
 
@@ -484,7 +505,6 @@ template $GatefoldPlayerView: Adw.Bin {
       // handle can't be clicked).
       [overlay]
       Gtk.Button {
-        tooltip-text: _("Hide Player");
         action-name: "win.close-player";
         halign: center;
         valign: start;

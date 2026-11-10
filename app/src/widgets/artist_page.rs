@@ -814,7 +814,7 @@ impl ArtistPage {
                 artist: false,
             };
             let (tile, cover) = super::tile_content(&item);
-            tile.set_tooltip_text(Some(&album.name));
+            super::tooltip_when_cut(&tile);
             if let Some(url) = album.image_url.clone() {
                 covers.push((url.clone(), cover, album.cover_key()));
                 urls.push(url);
@@ -1097,6 +1097,9 @@ fn appears_on_actions(track: &TrackObject) -> gtk::Box {
             .build()
     };
     let play = button("media-playback-start-symbolic", gettext("Play"));
+    // A common symbol: announced, no tooltip.
+    play.set_tooltip_text(None);
+    super::set_accessible_label(&play, &gettext("Play"));
     play.connect_clicked(glib::clone!(
         #[strong]
         track,

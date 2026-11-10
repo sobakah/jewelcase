@@ -46,6 +46,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            // The names in full, only when cut off.
+            super::super::tooltip_when_cut(&*obj);
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
             // The portrait's size, also in a wider cell.
@@ -84,7 +86,6 @@ impl ArtistTile {
             .and_then(|key| covers::portrait(key, CoverSize::Grid));
         imp.portrait.set_texture(portrait.as_ref());
         imp.portrait.set_label(&info.name);
-        self.set_tooltip_text(Some(&info.name));
     }
 }
 

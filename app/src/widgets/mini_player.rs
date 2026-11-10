@@ -116,6 +116,7 @@ mod imp {
                     glib::Propagation::Proceed
                 }
             ));
+            crate::widgets::tooltips::wait_for_rest(&*self.queue_popover);
             // The queue card is built when first opened.
             self.queue_popover.connect_show(|popover| {
                 if popover.child().is_none() {
@@ -266,7 +267,8 @@ pub(super) fn update_repeat_button(button: &gtk::Button, player: &Player) {
         ),
     };
     button.set_icon_name(icon);
-    button.set_tooltip_text(Some(&tooltip));
+    // A common symbol: announced, no tooltip.
+    super::set_accessible_label(button, &tooltip);
 }
 
 /// Smart shuffle (mixing in similar songs, §7) shows on the shuffle
@@ -278,13 +280,17 @@ pub(super) fn show_mixing(button: &gtk::ToggleButton) {
         button,
         move |settings: &gtk::gio::Settings| {
             let mixing = settings.boolean("mix-similar");
+            // Only Gatefold's own icon for mixing gets a tooltip.
             if mixing {
+                let text = gettext("Shuffle (Mixing In Similar Songs)");
                 button.set_icon_name("gatefold-smart-shuffle-symbolic");
-                button.set_tooltip_text(Some(&gettext("Shuffle (Mixing In Similar Songs)")));
+                button.set_tooltip_text(Some(&text));
+                super::set_accessible_label(&button, &text);
                 button.add_css_class("smart-shuffle");
             } else {
                 button.set_icon_name("media-playlist-shuffle-symbolic");
-                button.set_tooltip_text(Some(&gettext("Shuffle")));
+                button.set_tooltip_text(None);
+                super::set_accessible_label(&button, &gettext("Shuffle"));
                 button.remove_css_class("smart-shuffle");
             }
         }
@@ -296,9 +302,9 @@ pub(super) fn show_mixing(button: &gtk::ToggleButton) {
 pub(super) fn update_play_button(button: &gtk::Button, playing: bool) {
     if playing {
         button.set_icon_name("media-playback-pause-symbolic");
-        button.set_tooltip_text(Some(&gettext("Pause")));
+        super::set_accessible_label(button, &gettext("Pause"));
     } else {
         button.set_icon_name("media-playback-start-symbolic");
-        button.set_tooltip_text(Some(&gettext("Play")));
+        super::set_accessible_label(button, &gettext("Play"));
     }
 }

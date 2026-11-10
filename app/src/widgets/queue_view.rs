@@ -446,14 +446,13 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
     );
     let more = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
-        .tooltip_text(gettext("More"))
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular"])
         .build();
+    super::set_accessible_label(&more, &gettext("More"));
     line.append(&more);
     let row = gtk::ListBoxRow::builder().child(&line).build();
     row.add_css_class("history-row");
-    row.set_tooltip_text(Some(&gettext("Play Now")));
     song_menu(&row, track, SongRow::Played, Some(&more));
     row
 }
@@ -733,10 +732,10 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
 
     let remove = gtk::Button::builder()
         .icon_name("list-remove-symbolic")
-        .tooltip_text(gettext("Remove from Queue"))
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular"])
         .build();
+    super::set_accessible_label(&remove, &gettext("Remove from Queue"));
     remove.connect_clicked(glib::clone!(
         #[weak]
         player,

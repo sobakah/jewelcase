@@ -3,6 +3,7 @@
 ## Unreleased
 
 - *Edit Tags* opens cdport's own tag editor (cdport 1.4.0 or newer) in the browser by default, one album at a time, like a CD import's page (FLAC, MP3, Ogg Vorbis, Opus and M4A); it works in the Flatpak too, over cdport's D-Bus service. Ear Tag, Kid3, Picard or a custom command can still be chosen in Preferences → Integrations → Tag Editor (not in the Flatpak, which can't start them).
+- Tooltips wait until the pointer has rested on a button for a second, also when moving from one to the next. Common buttons (play and pause, previous, next, shuffle, repeat, volume, close, ⋮) have none any more; less common ones keep theirs, and those with a key combination say it (Search: Ctrl+F). Cover tiles show their full title only when it's cut off.
 - Covers in the album, artist and playlist grids and on artist pages keep their size when the window or a panel changes width; only the number of columns changes. Their size is set in Preferences → Library → Appearance → Cover Size (120–280 px).
 - Preferences → Library → Playlists: how songs are listed in playlists whose sort you haven't changed, separately for Gatefold's and Spotify's playlists (for example newest first). A sort chosen in a playlist stays; its sort menu's *Use Default Sort* goes back to the default.
 - Development builds (`make run`, the test Flatpak) show their commit in the version, with "-dirty" for uncommitted changes; clicking the version in About copies it.

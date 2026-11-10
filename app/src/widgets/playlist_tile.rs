@@ -52,6 +52,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            // The names in full, only when cut off.
+            super::super::tooltip_when_cut(&*obj);
             obj.set_orientation(gtk::Orientation::Vertical);
             obj.set_spacing(3);
             // The cover's size, also in a wider cell.
@@ -93,7 +95,6 @@ impl PlaylistTile {
                 (true, false) => gettext("Spotify · Followed"),
                 _ => format::song_count(info.item_count),
             });
-        self.set_tooltip_text(Some(&info.name));
     }
 }
 

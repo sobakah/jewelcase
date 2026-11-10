@@ -324,11 +324,14 @@ mod imp {
                     } else {
                         "media-playback-pause-symbolic"
                     });
-                    pause.set_tooltip_text(Some(&if paused {
-                        gettext("Resume")
-                    } else {
-                        gettext("Pause")
-                    }));
+                    crate::widgets::set_accessible_label(
+                        &pause,
+                        &if paused {
+                            gettext("Resume")
+                        } else {
+                            gettext("Pause")
+                        },
+                    );
                     pause.set_visible(done < total && settings.string("analysis-mode") != "off");
                 }
             );
@@ -530,10 +533,10 @@ impl PreferencesDialog {
 
         let remove = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
-            .tooltip_text(gettext("Remove"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
+        crate::widgets::set_accessible_label(&remove, &gettext("Remove"));
         let folder = folder.to_path_buf();
         remove.connect_clicked(glib::clone!(
             #[weak(rename_to = dialog)]
@@ -674,10 +677,10 @@ impl PreferencesDialog {
                 row.set_subtitle(&format!("<tt>{}</tt>", glib::markup_escape_text(&command)));
                 let copy = gtk::Button::builder()
                     .icon_name("edit-copy-symbolic")
-                    .tooltip_text(gettext("Copy"))
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .build();
+                crate::widgets::set_accessible_label(&copy, &gettext("Copy"));
                 copy.connect_clicked(glib::clone!(
                     #[weak(rename_to = dialog)]
                     self,

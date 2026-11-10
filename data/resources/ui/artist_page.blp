@@ -133,7 +133,10 @@ template $GatefoldArtistPage: Adw.Bin {
 
                       Gtk.Button {
                         icon-name: "media-playlist-shuffle-symbolic";
-                        tooltip-text: _("Shuffle");
+                        accessibility {
+                          label: _("Shuffle");
+                        }
+
                         action-name: "artist.shuffle";
                         valign: center;
 
@@ -240,7 +243,6 @@ template $GatefoldArtistPage: Adw.Bin {
 
       [overlay]
       Gtk.Button {
-        tooltip-text: _("Close");
         action-name: "artist.close";
         halign: start;
         valign: center;

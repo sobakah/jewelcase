@@ -278,6 +278,9 @@ mod imp {
             if config::is_development() {
                 obj.add_css_class("devel");
             }
+            // Tooltips wait for the pointer to rest (dialogs are inside
+            // the window; popovers do the same themselves).
+            crate::widgets::tooltips::wait_for_rest(&*obj);
 
             let settings = gio::Settings::new(APP_ID);
             settings

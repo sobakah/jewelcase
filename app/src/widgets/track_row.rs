@@ -68,14 +68,14 @@ impl TrackRow {
         imp.playing_icon
             .set_icon_name(Some("media-playback-start-symbolic"));
         imp.playing_icon.add_css_class("accent");
-        imp.playing_icon.set_tooltip_text(Some(&gettext("Playing")));
+        super::set_accessible_label(&imp.playing_icon, &gettext("Playing"));
         let play = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
-            .tooltip_text(gettext("Play"))
             .valign(gtk::Align::Center)
             .halign(gtk::Align::End)
             .css_classes(["flat", "circular", "row-play"])
             .build();
+        super::set_accessible_label(&play, &gettext("Play"));
         play.connect_clicked(glib::clone!(
             #[weak]
             row,

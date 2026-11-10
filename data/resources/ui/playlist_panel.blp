@@ -148,7 +148,10 @@ template $GatefoldPlaylistPanel: Adw.Bin {
 
                 Gtk.Button {
                   icon-name: "media-playlist-shuffle-symbolic";
-                  tooltip-text: _("Shuffle");
+                  accessibility {
+                    label: _("Shuffle");
+                  }
+
                   action-name: "playlist.shuffle";
                   valign: center;
 
@@ -172,7 +175,10 @@ template $GatefoldPlaylistPanel: Adw.Bin {
 
                 Gtk.MenuButton {
                   icon-name: "view-more-symbolic";
-                  tooltip-text: _("More");
+                  accessibility {
+                    label: _("More");
+                  }
+
                   menu-model: playlist_menu;
                   valign: center;
 
@@ -256,7 +262,6 @@ template $GatefoldPlaylistPanel: Adw.Bin {
 
     [overlay]
     Gtk.Button {
-      tooltip-text: _("Close");
       action-name: "playlist.close";
       halign: start;
       valign: center;

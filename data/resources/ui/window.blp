@@ -67,14 +67,17 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           Gtk.MenuButton {
             primary: true;
             icon-name: "open-menu-symbolic";
-            tooltip-text: _("Main Menu");
+            accessibility {
+              label: _("Main Menu");
+            }
+
             menu-model: primary_menu;
           }
 
           [end]
           Gtk.ToggleButton search_button {
             icon-name: "system-search-symbolic";
-            tooltip-text: _("Search");
+            tooltip-text: _("Search (Ctrl+F)");
           }
         }
 

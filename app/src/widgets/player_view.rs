@@ -378,6 +378,8 @@ impl PlayerView {
                 true
             });
 
+        super::tooltips::wait_for_rest(&*imp.info_popover);
+        super::tooltips::wait_for_rest(&*imp.devices_popover);
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {
             let player = GatefoldApplication::get().player();
@@ -594,9 +596,10 @@ impl PlayerView {
         let button = &self.imp().volume_button;
         button.set_icon_name(icon);
         // Translators: {} is the volume in percent.
-        button.set_tooltip_text(Some(
+        super::set_accessible_label(
+            &**button,
             &gettext("Volume: {} %").replace("{}", &format!("{:.0}", volume * 100.0)),
-        ));
+        );
     }
 
     /// "Artist — Album" under the title; both open their page: the

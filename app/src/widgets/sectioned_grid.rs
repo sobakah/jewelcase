@@ -587,6 +587,9 @@ impl GridRow {
             if let Some(create) = create {
                 button.set_child(Some(&create()));
             }
+            // Spotify's tiles: their names in full, only when cut off
+            // (library tiles have their own).
+            super::tooltip_when_cut(&button);
             button.connect_clicked(glib::clone!(
                 #[weak(rename_to = row)]
                 self,
@@ -648,7 +651,6 @@ impl GridRow {
             match item {
                 Some(item) => {
                     button.set_child(Some(&tile_content(item).0));
-                    button.set_tooltip_text(Some(&item.title));
                 }
                 None => button.set_child(None::<&gtk::Widget>),
             }
