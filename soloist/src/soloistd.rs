@@ -25,7 +25,19 @@ pub fn config_path() -> PathBuf {
     if let Some(path) = std::env::var_os("GATEFOLD_SOLOISTD_CONFIG") {
         return PathBuf::from(path);
     }
-    xdg("XDG_CONFIG_HOME", ".config").join("soloistd/config.json")
+    host_xdg("XDG_CONFIG_HOME", ".config").join("soloistd/config.json")
+}
+
+/// The host's XDG folder: in a Flatpak, `XDG_*` points into the sandbox's
+/// own folders (Flatpak hands the host's over as `HOST_XDG_*` when set).
+fn host_xdg(var: &str, fallback: &str) -> PathBuf {
+    if std::path::Path::new("/.flatpak-info").exists() {
+        return std::env::var_os(format!("HOST_{var}"))
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(fallback)))
+            .unwrap_or_default();
+    }
+    xdg(var, fallback)
 }
 
 fn xdg(var: &str, fallback: &str) -> PathBuf {
@@ -48,9 +60,15 @@ pub fn binary() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// The Soloist binary soloistd downloads and keeps up to date (the
+/// Flatpak sees it read-only).
+pub fn soloist_binary() -> PathBuf {
+    host_xdg("XDG_DATA_HOME", ".local/share").join("soloistd/bin/soloist")
+}
+
 /// The Soloist binary soloistd manages, and its version.
 pub fn soloist_version() -> Option<String> {
-    let binary = xdg("XDG_DATA_HOME", ".local/share").join("soloistd/bin/soloist");
+    let binary = soloist_binary();
     binary.is_file().then(|| crate::version(&binary)).flatten()
 }
 

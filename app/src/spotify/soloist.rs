@@ -21,8 +21,15 @@ use super::{Spotify, keyring};
 use crate::application::GatefoldApplication;
 use crate::config::APP_ID;
 
-/// The device name of a Soloist Gatefold starts.
-pub const DEVICE_NAME: &str = "Gatefold";
+/// The device name of a Soloist Gatefold starts; development builds
+/// (the test Flatpak) get their own, next to the installed app's.
+pub fn own_device_name() -> &'static str {
+    if crate::config::is_development() {
+        "Gatefold Devel"
+    } else {
+        "Gatefold"
+    }
+}
 /// Quiet reconnects to a running Soloist, and the wait before each.
 const RECONNECTS: u32 = 5;
 const RECONNECT_DELAY_S: u32 = 3;
@@ -236,7 +243,7 @@ impl Spotify {
                 let config = Config {
                     binary,
                     api_key: key,
-                    device_name: DEVICE_NAME.into(),
+                    device_name: own_device_name().into(),
                     data_dir: glib::user_data_dir().join(APP_ID).join("soloist"),
                     cache_dir: glib::user_cache_dir().join(APP_ID).join("soloist"),
                     initial_volume: (GatefoldApplication::get().player().volume() * 100.0).round()
@@ -372,7 +379,7 @@ impl Spotify {
                             &gettext(
                                 "To link Soloist, choose “{}” in the Spotify app’s device list",
                             )
-                            .replace("{}", device_name.as_deref().unwrap_or(DEVICE_NAME)),
+                            .replace("{}", device_name.as_deref().unwrap_or(own_device_name())),
                         );
                     }
                 }
@@ -1207,7 +1214,7 @@ impl Spotify {
         state
             .device_name
             .clone()
-            .or_else(|| (state.source == Some("gatefold")).then(|| DEVICE_NAME.to_owned()))
+            .or_else(|| (state.source == Some("gatefold")).then(|| own_device_name().to_owned()))
     }
 
     // The receiver (§9.4) ---------------------------------------------------
@@ -1251,7 +1258,7 @@ impl Spotify {
                 .soloist
                 .device_name
                 .clone()
-                .unwrap_or_else(|| DEVICE_NAME.to_owned())
+                .unwrap_or_else(|| own_device_name().to_owned())
         };
         tracing::info!("Soloist plays for someone else: showing it");
         let weak = self.downgrade();

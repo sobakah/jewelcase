@@ -5,6 +5,7 @@ project(
   meson_version: '>= 1.4.0',
 )
 
+fs = import('fs')
 i18n = import('i18n')
 gnome = import('gnome')
 
@@ -32,7 +33,13 @@ gettext_package = meson.project_name()
 # installed RPM with separate settings and its own striped header bar.
 if get_option('profile') == 'development'
   application_id = base_id + '.Devel'
-  git_rev = run_command('git', 'rev-parse', '--short', 'HEAD', check: false).stdout().strip()
+  # The commit, "-dirty" with uncommitted changes. The Flatpak builds
+  # without .git: `make flatpak` hands it over in .vcs-revision.
+  git_rev = run_command('git', 'describe', '--always', '--dirty', '--exclude=*',
+    check: false).stdout().strip()
+  if git_rev == '' and fs.is_file('.vcs-revision')
+    git_rev = fs.read('.vcs-revision').strip()
+  endif
   version_suffix = git_rev != '' ? '-' + git_rev : '-devel'
   # Installed next to the RPM: its own program and menu entry.
   program_name = meson.project_name() + '-devel'

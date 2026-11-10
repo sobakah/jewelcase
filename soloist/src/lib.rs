@@ -56,7 +56,9 @@ pub struct Config {
 }
 
 /// Soloist on `PATH`, in `~/.local/bin` or `/usr/local/bin`, or the given
-/// path.
+/// path. In a Flatpak also soloistd's (kept up to date by soloistd), which
+/// the sandbox then runs with its own data folder and API key; outside, a
+/// set-up soloistd runs it itself.
 pub fn find_binary(configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = configured {
         return path.is_file().then(|| path.to_path_buf());
@@ -72,6 +74,9 @@ pub fn find_binary(configured: Option<&Path>) -> Option<PathBuf> {
         candidates.push(PathBuf::from(home).join(".local/bin/soloist"));
     }
     candidates.push(PathBuf::from("/usr/local/bin/soloist"));
+    if Path::new("/.flatpak-info").exists() {
+        candidates.push(soloistd::soloist_binary());
+    }
     candidates.into_iter().find(|p| p.is_file())
 }
 

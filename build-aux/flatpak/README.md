@@ -40,10 +40,14 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Gatefold.Devel`
   (`cdport --install-dbus-service`, `lyrembed --install-dbus-service`;
   `--talk-name=io.github.sobakah.cdport`, `…lyrembed`). Preferences ›
   Integrations shows the steps when they aren't set up.
-- **Doesn't work yet**: Ear Tag (`flatpak run` from inside the sandbox) and
-  soloistd's controls. Gatefold shows them as not installed.
-  Soloist, which Gatefold downloads and runs itself, should work inside the
-  sandbox (untested).
+- **Soloist** runs inside the sandbox as the Flatpak's own: the binary
+  soloistd downloads and updates on the host (`~/.local/share/soloistd/bin`,
+  read-only), with the API key entered in the Flatpak's Preferences, its own
+  data folder (linked once in the Spotify app) and the device name
+  "Gatefold Devel". soloistd manages only one Soloist, so it stays with the
+  installed app; the Flatpak doesn't show its controls.
+- **Doesn't work yet**: Ear Tag (`flatpak run` from inside the sandbox).
+  Gatefold shows it as not installed.
 - **No update check**: Flatpaks update through their repository.
 
 ## Tested (2026-11-09, headless)

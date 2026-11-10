@@ -27,6 +27,10 @@ finish-args:
   # The library. Read-only: Gatefold never writes there (tags are Ear Tag's
   # job, playlist exports go where the file chooser says).
   - --filesystem=xdg-music:ro
+  # The Soloist that soloistd downloads and updates on the host, run here
+  # as Gatefold's own Soloist (own data folder, API key and device).
+  # soloistd itself stays outside: it manages only one Soloist.
+  - --filesystem=xdg-data/soloistd/bin:ro
   # Media keys and GNOME Shell's media controls.
   - --own-name=org.mpris.MediaPlayer2.Gatefold.Devel
   # cdport (CD imports) and lyrembed (lyrics) through their D-Bus services
@@ -107,3 +111,7 @@ modules:
           - .cargo
           - .git
           - .flatpak-builder
+      # The commit for the version, written by `make flatpak`.
+      - type: file
+        path: ../../_build/flatpak/vcs-revision
+        dest-filename: .vcs-revision

@@ -64,7 +64,11 @@ FLATPAK_BUILDER ?= $(shell command -v flatpak-builder 2>/dev/null || echo flatpa
 FLATPAK_MANIFEST := build-aux/flatpak/io.github.sobakah.Gatefold.Devel.yml
 FLATPAK_DIR := $(BUILDDIR)/flatpak
 
+# The build has no .git: the commit for the version goes in a file
+# (meson.build reads it as .vcs-revision).
 flatpak:
+	mkdir -p $(FLATPAK_DIR)
+	git describe --always --dirty --exclude='*' > $(FLATPAK_DIR)/vcs-revision
 	$(FLATPAK_BUILDER) --user --install --force-clean \
 	    --install-deps-from=flathub \
 	    --state-dir=$(FLATPAK_DIR)/state --repo=$(FLATPAK_DIR)/repo \

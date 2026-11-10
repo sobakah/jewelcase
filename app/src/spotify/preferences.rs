@@ -160,13 +160,17 @@ pub fn page() -> adw::PreferencesPage {
     playlists.add(&sync);
     page.add(&playlists);
     page.add(&streaming_group(&spotify));
-    // soloistd: only with Soloist as the way to stream.
+    // soloistd: only with Soloist as the way to stream. Not in a Flatpak,
+    // which can't control it and runs its own Soloist.
     let soloistd = super::soloistd_prefs::group(&spotify);
     let show_soloistd = glib::clone!(
         #[weak]
         soloistd,
         move |spotify: &Spotify| {
-            soloistd.set_visible(spotify.stream_backend() == super::stream::Backend::Soloist);
+            soloistd.set_visible(
+                spotify.stream_backend() == super::stream::Backend::Soloist
+                    && !crate::config::is_flatpak(),
+            );
         }
     );
     show_soloistd(&spotify);

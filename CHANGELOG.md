@@ -4,6 +4,8 @@
 
 - Covers in the album, artist and playlist grids and on artist pages keep their size when the window or a panel changes width; only the number of columns changes. Their size is set in Preferences → Library → Appearance → Cover Size (120–280 px).
 - Preferences → Library → Playlists: how songs are listed in playlists whose sort you haven't changed, separately for Gatefold's and Spotify's playlists (for example newest first). A sort chosen in a playlist stays; its sort menu's *Use Default Sort* goes back to the default.
+- Development builds (`make run`, the test Flatpak) show their commit in the version, with "-dirty" for uncommitted changes; clicking the version in About copies it.
+- The test Flatpak streams through its own Soloist: the one soloistd keeps up to date, run inside the sandbox with the Flatpak's own Soloist API key and data, as the Spotify device "Gatefold Devel". soloistd itself stays with the installed app (Preferences no longer shows its controls in a Flatpak).
 
 ## 0.3.0 (pre-release)
 
