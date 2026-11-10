@@ -159,10 +159,16 @@ fn load_from(path: &Path, title: Option<&str>, embedded: &sources::Embedded) -> 
         return LyricsState::Lyrics(synced(&main.text, romanized, Source::Embedded));
     }
 
-    if let Some(raw) = embedded
-        .texts
-        .iter()
-        .find(|raw| !raw.text.trim().is_empty())
+    // The original before a romanization, as for synced lyrics.
+    let plain_texts = || {
+        embedded
+            .texts
+            .iter()
+            .filter(|raw| !raw.text.trim().is_empty())
+    };
+    if let Some(raw) = plain_texts()
+        .find(|raw| !raw.romanized)
+        .or_else(|| plain_texts().next())
     {
         return LyricsState::Lyrics(unsynced(&raw.text, Source::Embedded));
     }
@@ -267,6 +273,44 @@ mod tests {
         assert_eq!(lyrics.source, Source::Sidecar);
         assert!(lyrics.synced && lyrics.dual);
         assert_eq!(lyrics.lines[1].secondary.as_deref(), Some("Yoru"));
+    }
+
+    #[test]
+    fn a_romanization_frame_first_isnt_taken_for_the_lyrics() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let song = dir.path().join("Song.mp3");
+        fs::write(&song, b"").unwrap();
+        let embedded = sources::Embedded {
+            texts: vec![
+                sources::RawLyrics {
+                    text: "Yoru ni kakeru".into(),
+                    romanized: true,
+                },
+                sources::RawLyrics {
+                    text: "夜に駆ける".into(),
+                    romanized: false,
+                },
+            ],
+            language: None,
+        };
+        let LyricsState::Lyrics(lyrics) = load_from(&song, None, &embedded) else {
+            panic!("expected lyrics");
+        };
+        assert_eq!(lyrics.lines[0].primary, "夜に駆ける");
+    }
+
+    #[test]
+    fn another_songs_romanization_sidecar_isnt_taken() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let song = dir.path().join("01.flac");
+        fs::write(&song, b"").unwrap();
+        fs::write(dir.path().join("01. Intro.ja-Latn.lrc"), "[00:01.00]Intro").unwrap();
+        assert_eq!(sources::romanized_sidecar(&song), None);
+        fs::write(dir.path().join("01.ja-Latn.lrc"), "[00:01.00]Mine").unwrap();
+        assert_eq!(
+            sources::romanized_sidecar(&song).as_deref(),
+            Some("[00:01.00]Mine")
+        );
     }
 
     #[test]

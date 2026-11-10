@@ -269,6 +269,7 @@ fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>, bool), String> {
     let mut bpm = None;
     let mut error = None;
     let mut idle = 0;
+    let mut ended = false;
     loop {
         match sink.try_pull_sample(gst::ClockTime::from_mseconds(100)) {
             Some(sample) => {
@@ -285,7 +286,9 @@ fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>, bool), String> {
                     );
                 }
             }
-            None if sink.is_eos() => break,
+            // The bus is read once more first: bpmdetect posts its final
+            // tempo with the end of the stream.
+            None if sink.is_eos() => ended = true,
             // Samples arrive much faster than real time; give up when
             // nothing comes for a while.
             None => {
@@ -306,7 +309,7 @@ fn decode(path: &Path) -> Result<(Vec<f32>, Option<f64>, bool), String> {
                 _ => {}
             }
         }
-        if error.is_some() || samples.len() > MAX_SAMPLES {
+        if ended || error.is_some() || samples.len() > MAX_SAMPLES {
             break;
         }
     }

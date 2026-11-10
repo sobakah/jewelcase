@@ -102,7 +102,7 @@ pub fn parse_m3u(text: &str, base: &Path) -> Vec<Entry> {
         if line.starts_with('#') {
             continue;
         }
-        pending.location = resolve_location(line, base);
+        pending.location = resolve_location(line, base, false);
         entries.push(std::mem::take(&mut pending));
     }
     entries
@@ -147,7 +147,7 @@ pub fn parse_xspf(
                         }
                     }
                     (Some(entry), b"location") if entry.location.is_none() => {
-                        entry.location = resolve_location(text, base);
+                        entry.location = resolve_location(text, base, true);
                     }
                     (Some(entry), b"title") => entry.title = non_empty(text),
                     (Some(entry), b"creator") => entry.artist = non_empty(text),
@@ -245,8 +245,10 @@ fn non_empty(text: &str) -> Option<String> {
 }
 
 /// A playlist line or `<location>` as a local path: `file://` URIs,
-/// absolute and relative paths. Remote URLs are ignored.
-fn resolve_location(location: &str, base: &Path) -> Option<PathBuf> {
+/// absolute and relative paths. Remote URLs are ignored. `uri`: the text
+/// is a URI reference (XSPF), so a relative one is percent-decoded too
+/// ("01%20Song.flac"); M3U lines are taken as they are.
+fn resolve_location(location: &str, base: &Path, uri: bool) -> Option<PathBuf> {
     let location = location.trim();
     let path = if let Some(rest) = location.strip_prefix("file://") {
         // file:///path or file://localhost/path
@@ -255,7 +257,12 @@ fn resolve_location(location: &str, base: &Path) -> Option<PathBuf> {
     } else if location.contains("://") {
         return None;
     } else {
-        let decoded = location.replace('\\', "/");
+        let decoded = if uri {
+            percent_decode(location).unwrap_or_else(|| location.to_owned())
+        } else {
+            location.to_owned()
+        };
+        let decoded = decoded.replace('\\', "/");
         let path = PathBuf::from(decoded);
         if path.is_absolute() {
             path
@@ -357,6 +364,18 @@ mod tests {
         let (title, parsed) = parse_xspf(&xml, Path::new("/")).unwrap();
         assert_eq!(title.as_deref(), Some("Mix & Match"));
         assert_eq!(parsed, entries);
+        // A relative location from another player is a URI too; an M3U
+        // line is a plain path ("%20" may be in a file name).
+        let xml = "<playlist><trackList><track><location>Artist/01%20Song.flac</location></track></trackList></playlist>";
+        let (_, parsed) = parse_xspf(xml, Path::new("/m")).unwrap();
+        assert_eq!(
+            parsed[0].location,
+            Some(PathBuf::from("/m/Artist/01 Song.flac"))
+        );
+        assert_eq!(
+            resolve_location("Artist/100%20Sure.flac", Path::new("/m"), false),
+            Some(PathBuf::from("/m/Artist/100%20Sure.flac"))
+        );
     }
 
     #[test]

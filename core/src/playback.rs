@@ -23,6 +23,7 @@
 //! Bus messages are forwarded from GStreamer's threads through a channel,
 //! so this module doesn't need a GLib main loop.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use gst::prelude::*;
@@ -36,8 +37,9 @@ pub const PREAMP_DB: f64 = 4.0;
 pub enum PlayerEvent {
     /// A new stream started playing (after `load` or a gapless switch).
     StreamStarted,
-    /// The next item was handed to playbin for gapless playback.
-    NextQueued(u64),
+    /// The next item was handed to playbin for gapless playback: its uid
+    /// and the load it followed ([`Player::is_stale`]).
+    NextQueued(u64, u64),
     /// A state change or seek finished; the position is valid now.
     AsyncDone,
     /// The stream's length is known now, or estimated anew.
@@ -64,6 +66,10 @@ struct GaplessState {
     current_is_mp4: bool,
     /// The current MP4 stream was seeked (see the module docs).
     seeked_mp4: bool,
+    /// Whether the song handed over in about-to-finish is an MP4; it
+    /// becomes `current_is_mp4` when its stream starts, since a seek in
+    /// the current song's last seconds is still a seek in that song.
+    next_is_mp4: Option<bool>,
 }
 
 fn is_mp4(uri: &str) -> bool {
@@ -112,7 +118,13 @@ pub struct Player {
     gapless: Arc<Mutex<GaplessState>>,
     /// The gapless next song's gain, until its stream starts.
     pending_gain: Arc<Mutex<Option<f64>>>,
+    /// Where a song loaded with a start position goes once it's ready.
     pending_seek_ms: Mutex<Option<u64>>,
+    /// Play once there (it waits paused, so its start isn't heard).
+    play_after_seek: Mutex<bool>,
+    /// Counts loads, so a hand-over meant for a song replaced meanwhile
+    /// can be told apart ([`Player::is_stale`]).
+    loads: Arc<AtomicU64>,
     replaygain: Mutex<bool>,
 }
 
@@ -163,8 +175,12 @@ impl Player {
         rgvolume.set_property("headroom", 6.0f64);
         playbin.set_property("audio-filter", &filter);
 
+        let next: Arc<Mutex<NextTrack>> = Arc::default();
+        let gapless: Arc<Mutex<GaplessState>> = Arc::default();
+        let loads: Arc<AtomicU64> = Arc::default();
         let (tx, rx) = async_channel::unbounded();
         let bus = playbin.bus().expect("playbin has a bus");
+        let started_state = gapless.clone();
         let bus_tx = tx.clone();
         let spectrum: Arc<Mutex<SpectrumQueue>> = Arc::default();
         let spectrum_queue = spectrum.clone();
@@ -184,6 +200,12 @@ impl Player {
                 }
                 return gst::BusSyncReply::Drop;
             }
+            if let MessageView::StreamStart(_) = message.view()
+                && let Ok(mut state) = started_state.lock()
+                && let Some(mp4) = state.next_is_mp4.take()
+            {
+                state.current_is_mp4 = mp4;
+            }
             let event = match message.view() {
                 MessageView::StreamStart(_) => Some(PlayerEvent::StreamStarted),
                 MessageView::AsyncDone(_) => Some(PlayerEvent::AsyncDone),
@@ -198,9 +220,8 @@ impl Player {
             gst::BusSyncReply::Drop
         });
 
-        let next: Arc<Mutex<NextTrack>> = Arc::default();
-        let gapless: Arc<Mutex<GaplessState>> = Arc::default();
         let next_slot = next.clone();
+        let load_count = loads.clone();
         let gapless_state = gapless.clone();
         let next_gain = pending_gain.clone();
         playbin.connect("about-to-finish", false, move |values| {
@@ -212,13 +233,14 @@ impl Player {
             }
             let next = next_slot.lock().ok()?.take();
             if let Some((uri, uid, gain)) = next {
-                state.current_is_mp4 = is_mp4(&uri);
+                state.next_is_mp4 = Some(is_mp4(&uri));
                 // Set when its stream starts (see set_gain_at_stream_start).
                 if let Ok(mut pending) = next_gain.lock() {
                     *pending = gain;
                 }
                 playbin.set_property("uri", &uri);
-                let _ = tx.send_blocking(PlayerEvent::NextQueued(uid));
+                let load = load_count.load(Ordering::SeqCst);
+                let _ = tx.send_blocking(PlayerEvent::NextQueued(uid, load));
             }
             None
         });
@@ -235,6 +257,8 @@ impl Player {
             gapless,
             pending_gain,
             pending_seek_ms: Mutex::new(None),
+            play_after_seek: Mutex::new(false),
+            loads,
             replaygain: Mutex::new(true),
         };
         Ok((player, rx))
@@ -257,11 +281,28 @@ impl Player {
             && let Some(ms) = self.pending_seek_ms.lock().ok().and_then(|mut s| s.take())
         {
             self.seek(ms);
+            let play = self
+                .play_after_seek
+                .lock()
+                .is_ok_and(|mut p| std::mem::take(&mut *p));
+            if play {
+                self.set_state(gst::State::Playing);
+            }
         }
     }
 
-    /// Starts `uri` from `start_ms`, playing or paused.
+    /// A hand-over ([`PlayerEvent::NextQueued`]) that followed a song
+    /// replaced since by another `load`: GStreamer dropped it with that
+    /// song, so it must be ignored.
+    pub fn is_stale(&self, event: &PlayerEvent) -> bool {
+        matches!(event, PlayerEvent::NextQueued(_, load) if *load != self.loads.load(Ordering::SeqCst))
+    }
+
+    /// Starts `uri` from `start_ms`, playing or paused. From a later
+    /// position it waits paused until it's there, then plays, so its
+    /// start isn't heard first.
     pub fn load(&self, uri: &str, start_ms: u64, play: bool) {
+        self.loads.fetch_add(1, Ordering::SeqCst);
         self.set_next(None);
         if let Ok(mut pending) = self.pending_gain.lock() {
             *pending = None;
@@ -280,28 +321,54 @@ impl Player {
             *gapless = GaplessState {
                 current_is_mp4: is_mp4(uri),
                 seeked_mp4: false,
+                next_is_mp4: None,
             };
         }
+        let seek_first = start_ms > 0;
         if let Ok(mut pending) = self.pending_seek_ms.lock() {
-            *pending = (start_ms > 0).then_some(start_ms);
+            *pending = seek_first.then_some(start_ms);
         }
-        self.set_state(if play {
+        if let Ok(mut after) = self.play_after_seek.lock() {
+            *after = seek_first && play;
+        }
+        self.set_state(if play && !seek_first {
             gst::State::Playing
         } else {
             gst::State::Paused
         });
     }
 
+    /// Whether a load is still waiting to seek to its start position.
+    fn seek_pending(&self) -> bool {
+        self.pending_seek_ms.lock().is_ok_and(|p| p.is_some())
+    }
+
     pub fn play(&self) {
+        if self.seek_pending() {
+            // Plays once at its start position.
+            if let Ok(mut after) = self.play_after_seek.lock() {
+                *after = true;
+            }
+            return;
+        }
         self.set_state(gst::State::Playing);
     }
 
     pub fn pause(&self) {
+        if let Ok(mut after) = self.play_after_seek.lock() {
+            *after = false;
+        }
         self.set_state(gst::State::Paused);
     }
 
     pub fn stop(&self) {
         self.set_next(None);
+        if let Ok(mut pending) = self.pending_seek_ms.lock() {
+            *pending = None;
+        }
+        if let Ok(mut after) = self.play_after_seek.lock() {
+            *after = false;
+        }
         self.set_state(gst::State::Ready);
     }
 
@@ -312,6 +379,13 @@ impl Player {
     }
 
     pub fn seek(&self, ms: u64) {
+        // Still loading: the newer position replaces the start position.
+        if let Ok(mut pending) = self.pending_seek_ms.lock()
+            && pending.is_some()
+        {
+            *pending = Some(ms);
+            return;
+        }
         if let Ok(mut gapless) = self.gapless.lock()
             && gapless.current_is_mp4
         {

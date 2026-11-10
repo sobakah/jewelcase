@@ -634,7 +634,7 @@ impl Spotify {
                 continue;
             }
             let cover_key = track.image_url.as_deref().and_then(|url| {
-                let key = remote_cover_key(url);
+                let key = super::stream::image_cover_key(url);
                 if cover_cache().has(&key) {
                     Some(key)
                 } else {
@@ -758,7 +758,7 @@ impl Spotify {
                 async move {
                     let job_url = url.clone();
                     let made = gtk::gio::spawn_blocking(move || {
-                        let key = remote_cover_key(&job_url);
+                        let key = super::stream::image_cover_key(&job_url);
                         let covers = cover_cache();
                         covers.has(&key)
                             || gatefold_spotify::download_image(&job_url)
@@ -814,10 +814,6 @@ fn repeat_mode(repeat: &str) -> RepeatMode {
         "track" => RepeatMode::One,
         _ => RepeatMode::Off,
     }
-}
-
-fn remote_cover_key(url: &str) -> String {
-    gatefold_core::library::covers::cover_key('s', url.as_bytes())
 }
 
 fn cover_cache() -> gatefold_core::library::covers::CoverCache {

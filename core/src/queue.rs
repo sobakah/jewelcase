@@ -4,6 +4,8 @@
 //! kept as its context. Items added with "Play next" / "Add to queue" form a
 //! "Next up" block right after the current track.
 
+use std::collections::HashMap;
+
 use rand::Rng;
 use rand::seq::SliceRandom;
 
@@ -200,21 +202,6 @@ impl Queue {
         self.insert(tracks, position, unshuffled_position);
     }
 
-    /// Mixes a suggested song in: next after the "Next up" block.
-    pub fn mix_in(&mut self, track_id: i64) {
-        let position = match self.current {
-            Some(current) => user_block_end(&self.items, current + 1),
-            None => self.items.len(),
-        };
-        let unshuffled_position = self.unshuffled_position_after_current(true);
-        self.insert_as(
-            &[track_id],
-            Origin::Suggested,
-            position,
-            unshuffled_position,
-        );
-    }
-
     /// Takes out the upcoming suggested songs (mixing off, or redone).
     pub fn remove_upcoming_suggestions(&mut self) {
         let first_upcoming = self.current.map_or(0, |c| c + 1);
@@ -231,7 +218,8 @@ impl Queue {
 
     /// Mixes suggestions into the whole upcoming queue: one after every
     /// `every` album songs (the current one counts), from `pick(seed)` for
-    /// the song before it. Returns how many were added.
+    /// the song before it, never inside the "Next up" block (one due there
+    /// comes after it). Returns how many were added.
     pub fn mix_throughout(
         &mut self,
         every: usize,
@@ -251,7 +239,12 @@ impl Queue {
                 Origin::Context => count += 1,
                 Origin::User => {}
             }
-            if count >= every {
+            let inside_block = item.origin == Origin::User
+                && self
+                    .items
+                    .get(index + 1)
+                    .is_some_and(|i| i.origin == Origin::User);
+            if count >= every && !inside_block {
                 count = 0;
                 if let Some(track_id) = pick(item.track_id) {
                     let new = self.new_item(track_id, Origin::Suggested);
@@ -375,15 +368,44 @@ impl Queue {
         self.current().copied()
     }
 
-    /// Makes the item with `uid` current; false if it's no longer queued.
-    pub fn jump_to_uid(&mut self, uid: u64) -> bool {
-        match self.items.iter().position(|i| i.uid == uid) {
-            Some(index) => {
-                self.current = Some(index);
-                true
-            }
-            None => false,
+    /// The item with `uid`, handed to GStreamer for gapless playback, is
+    /// audible now: it becomes current. When the queue changed since the
+    /// hand-over ("Play next", shuffle, a move, repeat one), it plays now
+    /// all the same, so it moves to right after the current one instead of
+    /// the queue jumping there and skipping what lies between. False if
+    /// it's no longer queued.
+    pub fn start_handed_over(&mut self, uid: u64) -> bool {
+        let Some(index) = self.items.iter().position(|i| i.uid == uid) else {
+            return false;
+        };
+        let Some(current) = self.current else {
+            self.current = Some(index);
+            return true;
+        };
+        if index == current || self.peek_next(false) == Some(index) {
+            self.current = Some(index);
+            return true;
         }
+        let item = self.items.remove(index);
+        let current = if index < current {
+            current - 1
+        } else {
+            current
+        };
+        let at = current + 1;
+        self.items.insert(at, item);
+        self.current = Some(at);
+        if let Some(order) = self.unshuffled.as_mut() {
+            // Follow the item before it, as for a move.
+            order.retain(|&u| u != uid);
+            let before = self.items[current].uid;
+            let at = order
+                .iter()
+                .position(|&u| u == before)
+                .map_or(order.len(), |p| p + 1);
+            order.insert(at, uid);
+        }
+        true
     }
 
     /// Shuffles the tracks after the current one (keeping the "Next up"
@@ -437,17 +459,16 @@ impl Queue {
             }
         } else if let Some(order) = self.unshuffled.take() {
             let current_uid = self.current().map(|i| i.uid);
+            let mut by_uid: HashMap<u64, QueueItem> =
+                self.items.iter().map(|i| (i.uid, *i)).collect();
             let mut items = Vec::with_capacity(self.items.len());
             for uid in order {
-                if let Some(item) = self.items.iter().find(|i| i.uid == uid) {
-                    items.push(*item);
+                if let Some(item) = by_uid.remove(&uid) {
+                    items.push(item);
                 }
             }
-            for item in &self.items {
-                if !items.iter().any(|i| i.uid == item.uid) {
-                    items.push(*item);
-                }
-            }
+            // Not in the order (shouldn't happen): at the end, as they were.
+            items.extend(self.items.iter().filter(|i| by_uid.contains_key(&i.uid)));
             self.items = items;
             self.current = current_uid.and_then(|uid| self.items.iter().position(|i| i.uid == uid));
         }
@@ -519,11 +540,14 @@ impl Queue {
     }
 
     pub fn snapshot(&self, position_ms: u64) -> QueueSnapshot {
-        let unshuffled_position = |uid: u64| {
-            self.unshuffled
-                .as_ref()
-                .and_then(|order| order.iter().position(|&u| u == uid))
-        };
+        let positions: HashMap<u64, usize> = self
+            .unshuffled
+            .iter()
+            .flatten()
+            .enumerate()
+            .map(|(position, &uid)| (uid, position))
+            .collect();
+        let unshuffled_position = |uid: u64| positions.get(&uid).copied();
         QueueSnapshot {
             items: self
                 .items
@@ -729,16 +753,55 @@ mod tests {
     #[test]
     fn suggestions_mix_in_after_next_up_and_at_the_end() {
         let mut queue = album(Some(0));
-        queue.add(&[10]);
-        queue.mix_in(99);
-        // [1*, 10u, 99s, 2, 3, 4, 5]
-        assert_eq!(ids(&queue), [1, 10, 99, 2, 3, 4, 5]);
-        assert_eq!(queue.items()[2].origin, Origin::Suggested);
+        queue.add(&[10, 11]);
+        // Due right after the current song, but "Next up" stays together.
+        let mut picks = vec![99];
+        queue.mix_throughout(1, |_| picks.pop());
+        assert_eq!(ids(&queue), [1, 10, 11, 99, 2, 3, 4, 5]);
+        assert_eq!(queue.items()[3].origin, Origin::Suggested);
         queue.append_suggestion(98);
         assert_eq!(*ids(&queue).last().unwrap(), 98);
         // Suggestions move like album songs, never into "Next up".
-        assert!(!queue.move_item(2, 1));
-        assert_eq!(ids(&queue)[1..3], [10, 99]);
+        assert!(!queue.move_item(3, 1));
+        assert_eq!(ids(&queue)[1..4], [10, 11, 99]);
+        // A new "Add to queue" song still joins the block.
+        queue.add(&[12]);
+        assert_eq!(ids(&queue)[1..5], [10, 11, 12, 99]);
+    }
+
+    #[test]
+    fn a_song_handed_over_after_the_queue_changed_plays_without_skipping() {
+        // [1*, 2, 3, 4, 5]: 2 was handed over, then "Play next" 10.
+        let mut queue = album(Some(0));
+        let handed = queue.items()[1].uid;
+        queue.play_next(&[10]);
+        assert!(queue.start_handed_over(handed));
+        assert_eq!(ids(&queue), [1, 2, 10, 3, 4, 5]);
+        assert_eq!(queue.current_index(), Some(1));
+
+        // Shuffle turned on meanwhile: the handed-over song plays next
+        // and the rest stays upcoming.
+        let mut queue = album(Some(0));
+        let handed = queue.items()[1].uid;
+        queue.set_shuffle(true, &mut rng());
+        assert!(queue.start_handed_over(handed));
+        assert_eq!(queue.current_index(), Some(1));
+        assert_eq!(queue.current().unwrap().track_id, 2);
+        let mut upcoming = ids(&queue)[2..].to_vec();
+        upcoming.sort();
+        assert_eq!(upcoming, [3, 4, 5]);
+        queue.set_shuffle(false, &mut rng());
+        assert_eq!(ids(&queue), [1, 2, 3, 4, 5]);
+        assert_eq!(queue.current_index(), Some(1));
+
+        // Unchanged, and with repeat all from the end: the usual next one.
+        let mut queue = album(Some(4));
+        queue.set_repeat(RepeatMode::All);
+        let first = queue.items()[0].uid;
+        assert!(queue.start_handed_over(first));
+        assert_eq!(ids(&queue), [1, 2, 3, 4, 5]);
+        assert_eq!(queue.current_index(), Some(0));
+        assert!(!queue.start_handed_over(12345));
     }
 
     #[test]

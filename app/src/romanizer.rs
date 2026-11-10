@@ -22,6 +22,11 @@ use crate::metadata::now;
 
 /// The helper stops after this long without requests.
 const IDLE: Duration = Duration::from_secs(5 * 60);
+/// "Nothing to romanize" is asked again after this long: it can also mean
+/// a backend wasn't installed then (lyrembed doesn't say which).
+const MISS_AGAIN_S: i64 = 30 * 24 * 3600;
+/// Request IDs: an answer is taken only for its own request.
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 /// An answer takes this long at most (a long song in Japanese, the first
 /// request with Python starting: a few seconds).
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -72,7 +77,7 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
     let library = GatefoldApplication::get().library();
     if let Some(cached) = library
         .db()
-        .and_then(|db| db.romanized(&key).ok().flatten())
+        .and_then(|db| db.romanized(&key, now() - MISS_AGAIN_S).ok().flatten())
     {
         return cached.map(|text| lyrics.with_romanization(&text));
     }
@@ -116,8 +121,8 @@ fn ask(
     }
     let helper = guard.as_mut().expect("started above");
     helper.last_used = Instant::now();
-    let request = json!({"id": 1, "lyrics": lyrics, "han_hint": hint});
-    let mut answer = String::new();
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let request = json!({"id": id, "lyrics": lyrics, "han_hint": hint});
     // A helper that doesn't answer is stopped, so reading ends and the lock
     // is free again (otherwise every later request would wait for good).
     let answered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -146,13 +151,13 @@ fn ask(
     };
     let result = writeln!(helper.stdin, "{request}")
         .and_then(|()| helper.stdin.flush())
-        .and_then(|()| helper.stdout.read_line(&mut answer));
+        .and_then(|()| read_answer(&mut helper.stdout, id));
     answered.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = watchdog.join();
-    match result {
-        Ok(read) if read > 0 => {}
+    let value = match result {
+        Ok(Some(value)) => value,
         // Gone (crashed, killed): started again next time.
-        Ok(_) => {
+        Ok(None) => {
             *guard = None;
             return Err("lyrembed stopped".into());
         }
@@ -160,8 +165,7 @@ fn ask(
             *guard = None;
             return Err(err.to_string());
         }
-    }
-    let value: Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+    };
     if let Some(error) = value["error"].as_str() {
         return Err(error.to_owned());
     }
@@ -173,6 +177,22 @@ fn ask(
                 value["reason"].as_str().unwrap_or_default()
             );
             Ok(None)
+        }
+    }
+}
+
+/// The answer to request `id`. Other lines (a warning on stdout, an
+/// earlier request's late answer) are skipped, so answers can't slip
+/// behind their requests. `None`: the helper ended.
+fn read_answer(stdout: &mut impl BufRead, id: u64) -> std::io::Result<Option<Value>> {
+    loop {
+        let mut line = String::new();
+        if stdout.read_line(&mut line)? == 0 {
+            return Ok(None);
+        }
+        match serde_json::from_str::<Value>(&line) {
+            Ok(value) if value["id"].as_u64() == Some(id) => return Ok(Some(value)),
+            _ => tracing::debug!("lyrembed said something else: {}", line.trim()),
         }
     }
 }
@@ -249,9 +269,15 @@ mod tests {
             "the stuck helper is gone, the next request starts a new one"
         );
         // One that answers works afterwards (the lock is free).
+        // A stray line first, then answers with the request's ID.
         let answering = fake_lyrembed(
             "answering",
-            r#"while read line; do echo '{"id":1,"lyrics":"x\ny","language":"ko","reason":""}'; done"#,
+            r#"echo 'lyrembed: a warning'
+while read line; do
+  id=$(echo "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
+  echo '{"id":0,"lyrics":"stale"}'
+  echo "{\"id\":$id,\"lyrics\":\"x\\ny\",\"language\":\"ko\",\"reason\":\"\"}"
+done"#,
         );
         let result = ask(&answering, "사랑해", None, Duration::from_secs(5));
         assert_eq!(result, Ok(Some("x\ny".to_owned())));

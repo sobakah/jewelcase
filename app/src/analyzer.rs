@@ -299,7 +299,14 @@ fn worker(
             }
             continue;
         }
-        if !work_through_batch(&mut db, control, updates) {
+        let batch = work_through_batch(&mut db, control, updates);
+        if batch == Batch::Busy {
+            // The rest is with the extra threads of a full run: done only
+            // once they are.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            continue;
+        }
+        if batch == Batch::Empty {
             progress(&db, updates);
             if control.fast.load(Ordering::SeqCst) {
                 let _ = updates.send_blocking(Update::FullDone);
@@ -320,23 +327,37 @@ fn extra_lane(control: &Control, updates: &async_channel::Sender<Update>) {
     set_priority(5);
     let Some(mut db) = open_db() else { return };
     while control.fast.load(Ordering::SeqCst) && !control.hold.load(Ordering::SeqCst) {
-        if !work_through_batch(&mut db, control, updates) {
+        if work_through_batch(&mut db, control, updates) != Batch::Worked {
             return;
         }
     }
 }
 
-/// Analyzes one batch of songs; false if there was nothing to do.
+/// What a batch came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Batch {
+    /// Songs analyzed (or held: asked again after the hold).
+    Worked,
+    /// Songs left, but other threads are on all of them.
+    Busy,
+    /// Nothing left.
+    Empty,
+}
+
+/// Analyzes one batch of songs.
 fn work_through_batch(
     db: &mut Database,
     control: &Control,
     updates: &async_channel::Sender<Update>,
-) -> bool {
+) -> Batch {
     let batch = db.tracks_to_analyze(BATCH * 4).unwrap_or_default();
+    if batch.is_empty() {
+        return Batch::Empty;
+    }
     let mut did_any = false;
     for (track_id, path) in batch {
         if control.hold.load(Ordering::SeqCst) {
-            return true;
+            return Batch::Worked;
         }
         // Another thread may be on it already.
         if !control.claimed.lock().is_ok_and(|mut c| c.insert(track_id)) {
@@ -353,7 +374,7 @@ fn work_through_batch(
             std::thread::sleep(analysis::PAUSE_BETWEEN);
         }
     }
-    did_any
+    if did_any { Batch::Worked } else { Batch::Busy }
 }
 
 fn open_db() -> Option<Database> {

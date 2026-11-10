@@ -2,8 +2,22 @@
 //! the row under the pointer opens a gap where the dragged one would land,
 //! and the dragged row fades while it's carried (styles in style.css).
 
+use std::cell::RefCell;
+
 use adw::prelude::*;
 use gtk::{gdk, glib};
+
+thread_local! {
+    /// The list a row is being dragged from: a drop only counts in that
+    /// list (an index means nothing in another, the queue's in a playlist).
+    static DRAGGED_FROM: RefCell<glib::WeakRef<gtk::Widget>> = RefCell::default();
+}
+
+/// Whether the drag in progress came from `row`'s list.
+fn from_same_list(row: &gtk::ListBoxRow) -> bool {
+    let from = DRAGGED_FROM.with_borrow(glib::WeakRef::upgrade);
+    from.is_some() && from == row.parent()
+}
 
 /// Makes `row` draggable and a drop target; `index()` is its place (asked
 /// each time: rows may be kept when others come and go). `on_move(from,
@@ -33,6 +47,8 @@ pub fn attach(
             let paintable = gtk::WidgetPaintable::new(Some(&row));
             source.set_icon(Some(&paintable), 24, 24);
             row.add_css_class("dragging");
+            let list = row.parent();
+            DRAGGED_FROM.with_borrow_mut(|from| from.set(list.as_ref()));
         }
     ));
     drag.connect_drag_end(glib::clone!(
@@ -41,6 +57,7 @@ pub fn attach(
         move |_, _, _| {
             row.remove_css_class("dragging");
             hold_sheet(&row, false);
+            DRAGGED_FROM.with_borrow_mut(|from| from.set(None));
         }
     ));
     row.add_controller(drag);
@@ -58,6 +75,9 @@ pub fn attach(
         #[upgrade_or]
         gdk::DragAction::empty(),
         move |y: f64| {
+            if !from_same_list(&row) {
+                return gdk::DragAction::empty();
+            }
             set_gap(&row, Some(!after(&row, y)));
             gdk::DragAction::MOVE
         }
@@ -78,6 +98,9 @@ pub fn attach(
         move |_, value, _, y| {
             let place_after = after(&row, y);
             set_gap(&row, None);
+            if !from_same_list(&row) {
+                return false;
+            }
             let Ok(from) = value.get::<u32>() else {
                 return false;
             };

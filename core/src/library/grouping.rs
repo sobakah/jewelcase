@@ -176,7 +176,12 @@ fn merge_split_releases(by_key: &mut HashMap<String, Vec<&TrackRecord>>) -> Hash
                 };
                 discs.insert(track.id, disc);
             }
-            offset += set.len() as u32;
+            // The span, not the count: a part with discs 1 and 3 (2 is
+            // missing) takes up three, or the next part's first disc
+            // would land on its 3.
+            if let (Some(first), Some(last)) = (set.first(), set.last()) {
+                offset += last - first + 1;
+            }
             merged.extend(part);
         }
         by_key.insert(keys[0].clone(), merged);
@@ -533,6 +538,14 @@ mod tests {
         assert_eq!(albums.len(), 1);
         assert_eq!(albums[0].track_ids, vec![1, 3, 2, 4]);
         assert_eq!(albums[0].track_discs, vec![1, 1, 2, 2]);
+
+        // A part with a disc missing (1 and 3): the next part comes after
+        // its last disc, not onto it.
+        tracks[2].tags.disc = Some(3);
+        let albums = group_albums(&tracks);
+        assert_eq!(albums[0].track_ids, vec![1, 3, 2, 4]);
+        assert_eq!(albums[0].track_discs, vec![1, 3, 4, 4]);
+        tracks[2].tags.disc = Some(1);
 
         // A different barcode keeps them apart.
         tracks[1].tags.barcode = Some("123".into());

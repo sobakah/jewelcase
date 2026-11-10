@@ -370,11 +370,15 @@ fn split_homonyms(identity: &str, occurrences: Vec<Occurrence>) -> Vec<ArtistInf
                 (true, Some(mbid)) if Some(mbid) != main_mbid => format!("name:{identity}#{mbid}"),
                 _ => format!("name:{identity}"),
             };
-            let mut albums: Vec<(String, AlbumRole, usize)> = occurrences
+            // Once per album, at the first place in the credit: an album
+            // can list one artist twice under two aliases ("TXT",
+            // "TOMORROW X TOGETHER"), but album_artist stores one link.
+            let mut seen = HashSet::new();
+            let albums: Vec<(String, AlbumRole, usize)> = occurrences
                 .iter()
+                .filter(|o| seen.insert(o.album.key.as_str()))
                 .map(|o| (o.album.key.clone(), AlbumRole::Credit, o.position))
                 .collect();
-            albums.dedup();
             ArtistInfo {
                 key,
                 sort_name: titles::sort_key(&name),
@@ -427,6 +431,16 @@ pub fn split_credit(credit: &str) -> Vec<String> {
 /// "RM (feat. eAeon)" → [RM, eAeon], "RM  (prod. HONNE)" → [RM],
 /// "Bang Chan, Changbin, HAN" → [Bang Chan, Changbin, HAN].
 pub fn track_artist_names(artist: &str) -> Vec<String> {
+    track_artist_names_keeping(artist, |_| false)
+}
+
+/// Like [`track_artist_names`], but a credit or part of one that `known`
+/// accepts stays whole: a band called "Mumford & Sons" is one artist, not
+/// "Mumford" and "Sons".
+pub fn track_artist_names_keeping(artist: &str, known: impl Fn(&str) -> bool) -> Vec<String> {
+    if known(artist.trim()) {
+        return vec![artist.trim().to_owned()];
+    }
     let mut segments = Vec::new();
     let mut rest = artist.to_owned();
     // Bracketed credits first: "(feat. X)", "[prod. Y]".
@@ -458,6 +472,10 @@ pub fn track_artist_names(artist: &str) -> Vec<String> {
         }
         for piece in pieces {
             let piece = piece.trim();
+            if !piece.is_empty() && known(piece) {
+                names.push(piece.to_owned());
+                continue;
+            }
             let parts = split_credit(piece);
             if parts.is_empty() {
                 if !piece.is_empty() {
@@ -472,11 +490,16 @@ pub fn track_artist_names(artist: &str) -> Vec<String> {
 }
 
 fn split_ignore_case(text: &str, separator: &str) -> Vec<String> {
-    let lower = text.to_lowercase();
-    // Lowercasing can change byte lengths; only split when it doesn't.
-    if lower.len() != text.len() {
+    // Lowercasing can change a character's byte length ("İ" grows, the
+    // Kelvin sign "K" shrinks), and then offsets in `lower` don't fit
+    // `text`. The totals can still match, so check every character.
+    let same_offsets = text
+        .chars()
+        .all(|c| c.to_lowercase().map(char::len_utf8).sum::<usize>() == c.len_utf8());
+    if !same_offsets {
         return text.split(separator).map(str::to_owned).collect();
     }
+    let lower = text.to_lowercase();
     let mut parts = Vec::new();
     let mut start = 0;
     let sep = separator.to_lowercase();
@@ -587,6 +610,25 @@ mod tests {
         let txt = by_name(&artists, "TOMORROW X TOGETHER");
         assert_eq!(txt.albums.len(), 3);
         assert_eq!(txt.key, "name:tomorrow x together");
+    }
+
+    #[test]
+    fn lowercasing_that_moves_offsets_doesnt_split_inside_a_character() {
+        // "İ" lowercases to 3 bytes, the Kelvin sign to 1: the same total.
+        let text = "\u{130}\u{130} & \u{212a}";
+        assert_eq!(text.len(), text.to_lowercase().len());
+        assert_eq!(split_credit(text), ["\u{130}\u{130}", "\u{212a}"]);
+    }
+
+    #[test]
+    fn an_artist_credited_twice_on_an_album_is_linked_once() {
+        let mut tracks = vec![track(1, "/m/TXT/A", "A", "TXT", "TXT")];
+        tracks[0].tags.album_artists = vec!["TXT".into(), "TOMORROW X TOGETHER".into()];
+        let albums = group_albums(&tracks);
+        let artists = build_artists(&albums, &tracks, &aliases());
+        assert_eq!(artists.len(), 1);
+        assert_eq!(artists[0].albums.len(), 1);
+        assert_eq!(artists[0].albums[0].2, 0);
     }
 
     #[test]

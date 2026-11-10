@@ -187,6 +187,7 @@ mod imp {
                     None,
                     move |_| {
                         obj.refresh();
+                        obj.refresh_album_panel();
                         None
                     }
                 ),
@@ -985,6 +986,25 @@ impl ArtistPage {
         );
         section.append(&list);
         self.imp().sections.append(&section);
+    }
+
+    /// After a reload: the open album's new version (tags edited, songs
+    /// added), or the panel closes when it's gone, as in the window.
+    fn refresh_album_panel(&self) {
+        let imp = self.imp();
+        // A Spotify album isn't in the library: nothing to reload.
+        let Some(open) = imp.album_panel.album() else {
+            return;
+        };
+        let library = GatefoldApplication::get().library();
+        let albums = library.albums();
+        let reloaded = (0..albums.n_items())
+            .filter_map(|i| albums.item(i).and_downcast::<AlbumObject>())
+            .find(|a| a.group_key() == open.group_key());
+        match reloaded {
+            Some(album) => imp.album_panel.set_album(&album),
+            None => imp.split_view.set_show_sidebar(false),
+        }
     }
 
     fn show_album(&self, album: &AlbumObject) {

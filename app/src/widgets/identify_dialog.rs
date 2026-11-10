@@ -73,6 +73,8 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
         return;
     }
 
+    // Only the latest search shows (an earlier answer can come later).
+    let searches = std::rc::Rc::new(std::cell::Cell::new(0u64));
     let search = glib::clone!(
         #[weak]
         list,
@@ -84,9 +86,15 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
         dialog,
         move |name: String| {
             stack.set_visible_child_name("loading");
+            searches.set(searches.get() + 1);
+            let this = searches.get();
+            let searches = searches.clone();
             glib::spawn_future_local(async move {
                 let library = GatefoldApplication::get().library();
                 let candidates = library.search_artists(&name).await;
+                if searches.get() != this {
+                    return;
+                }
                 list.remove_all();
                 match candidates {
                     Ok(candidates) if !candidates.is_empty() => {

@@ -107,6 +107,23 @@ thread_local! {
     static PENDING: RefCell<Vec<Update>> = const { RefCell::new(Vec::new()) };
     /// Put off with "Later" (this session).
     static LATER: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Being installed: not offered again meanwhile (a second download
+    /// would write the file the first install is using).
+    static INSTALLING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The first update to offer: not put off, not being installed.
+fn first_offered() -> Option<Update> {
+    PENDING.with_borrow(|pending| {
+        LATER.with_borrow(|later| {
+            INSTALLING.with_borrow(|installing| {
+                pending
+                    .iter()
+                    .find(|u| !later.contains(&u.key()) && !installing.contains(&u.key()))
+                    .cloned()
+            })
+        })
+    })
 }
 
 /// Starts the checks for `window` (when it opens, then twice a day).
@@ -220,23 +237,13 @@ fn test_version() -> Option<&'static str> {
 }
 
 fn refresh_banner(window: &GatefoldWindow) {
-    let first = PENDING.with_borrow(|pending| {
-        LATER.with_borrow(|later| {
-            pending
-                .iter()
-                .find(|u| !later.contains(&u.key()))
-                .map(Update::title)
-        })
-    });
+    let first = first_offered().map(|u| u.title());
     window.set_update_banner(first.as_deref());
 }
 
 /// The banner's button: the first update's dialog.
 pub fn show_dialog(window: &GatefoldWindow) {
-    let update = PENDING.with_borrow(|pending| {
-        LATER.with_borrow(|later| pending.iter().find(|u| !later.contains(&u.key())).cloned())
-    });
-    let Some(update) = update else {
+    let Some(update) = first_offered() else {
         window.set_update_banner(None);
         return;
     };
@@ -357,6 +364,16 @@ fn install(window: &GatefoldWindow, update: Update) {
         Update::Soloistd(_) => gettext("Downloading the update…"),
     });
     let key = update.key();
+    let started = INSTALLING.with_borrow_mut(|installing| {
+        if installing.contains(&key) {
+            return false;
+        }
+        installing.push(key.clone());
+        true
+    });
+    if !started {
+        return;
+    }
     glib::spawn_future_local(glib::clone!(
         #[weak]
         window,
@@ -376,6 +393,9 @@ fn install(window: &GatefoldWindow, update: Update) {
             })
             .await
             .unwrap_or_else(|_| Err("the update stopped unexpectedly".to_owned()));
+            INSTALLING.with_borrow_mut(|installing| installing.retain(|k| *k != key));
+            // A failed or cancelled one is offered again.
+            refresh_banner(&window);
             match result {
                 Ok(()) => {
                     forget(&key);

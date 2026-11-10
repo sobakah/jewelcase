@@ -1,10 +1,13 @@
 //! The Spotify page in Preferences (CONCEPT.md §9.1, §9.3): the client ID
 //! with a guided setup, connecting, and the playlist options.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use adw::prelude::*;
 use gatefold_spotify::auth::REDIRECT_URI;
 use gettextrs::gettext;
-use gtk::glib;
+use gtk::{gio, glib};
 
 use super::Spotify;
 use crate::application::GatefoldApplication;
@@ -174,7 +177,7 @@ pub fn page() -> adw::PreferencesPage {
         }
     );
     show_soloistd(&spotify);
-    settings.connect_changed(
+    let id = settings.connect_changed(
         Some("spotify-stream-backend"),
         glib::clone!(
             #[weak]
@@ -182,6 +185,7 @@ pub fn page() -> adw::PreferencesPage {
             move |_, _| show_soloistd(&spotify)
         ),
     );
+    crate::widgets::disconnect_with(&page, &settings, id);
     page.add(&soloistd);
 
     let update = glib::clone!(
@@ -237,7 +241,8 @@ pub fn page() -> adw::PreferencesPage {
     update(&spotify);
     for property in ["status", "account-name", "syncing"] {
         let update = update.clone();
-        spotify.connect_notify_local(Some(property), move |spotify, _| update(spotify));
+        let id = spotify.connect_notify_local(Some(property), move |spotify, _| update(spotify));
+        crate::widgets::disconnect_with(&page, &spotify, id);
     }
     button.connect_clicked(glib::clone!(
         #[weak]
@@ -418,6 +423,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     };
     group.add(&status);
 
+    let probes: Rc<Cell<u64>> = Rc::default();
     let update = glib::clone!(
         #[weak]
         about,
@@ -453,35 +459,62 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             key.set_visible(soloist);
             offset.set_visible(soloist);
             if soloist {
-                let running = gatefold_soloist::find_running();
                 let configured = spotify.settings().string("soloist-path");
                 let configured = (!configured.trim().is_empty())
                     .then(|| std::path::PathBuf::from(configured.trim()));
-                let binary = gatefold_soloist::find_binary(configured.as_deref());
-                let (text, missing) = match (&running, &binary) {
-                    (Some(running), _) => (
-                        // Translators: {} is "soloistd" or "soloist".
-                        gettext("Running ({}); Gatefold uses it, no API key needed here")
-                            .replace("{}", running.source),
-                        false,
-                    ),
-                    (None, Some(binary)) => (
-                        gatefold_soloist::version(binary)
-                            .unwrap_or_else(|| binary.display().to_string()),
-                        false,
-                    ),
-                    (None, None) if gatefold_soloist::soloistd_installed() => (
-                        gettext(
-                            "soloistd is set up but its WebSocket API is off: add \"websocket\": \"127.0.0.1:9090\" to its config.json and restart it",
-                        ),
-                        false,
-                    ),
-                    (None, None) => (gettext("Not installed"), true),
-                };
-                program.set_subtitle(&text);
-                download.set_visible(missing);
-                // Only needed when Gatefold starts Soloist itself.
-                key.set_sensitive(running.is_none());
+                // Looking starts the program and connects to soloistd: not
+                // on the main thread. Only the latest look shows.
+                probes.set(probes.get() + 1);
+                let this = probes.get();
+                glib::spawn_future_local(glib::clone!(
+                    #[weak]
+                    program,
+                    #[weak]
+                    download,
+                    #[weak]
+                    key,
+                    #[strong]
+                    probes,
+                    async move {
+                        let found = gio::spawn_blocking(move || {
+                            let running = gatefold_soloist::find_running().map(|r| r.source);
+                            let version = gatefold_soloist::find_binary(configured.as_deref()).map(
+                                |binary| {
+                                    gatefold_soloist::version(&binary)
+                                        .unwrap_or_else(|| binary.display().to_string())
+                                },
+                            );
+                            (running, version, gatefold_soloist::soloistd_installed())
+                        })
+                        .await;
+                        let Ok((running, version, soloistd)) = found else {
+                            return;
+                        };
+                        if probes.get() != this {
+                            return;
+                        }
+                        let (text, missing) = match (running, version) {
+                            (Some(source), _) => (
+                                // Translators: {} is "soloistd" or "soloist".
+                                gettext("Running ({}); Gatefold uses it, no API key needed here")
+                                    .replace("{}", source),
+                                false,
+                            ),
+                            (None, Some(version)) => (version, false),
+                            (None, None) if soloistd => (
+                                gettext(
+                                    "soloistd is set up but its WebSocket API is off: add \"websocket\": \"127.0.0.1:9090\" to its config.json and restart it",
+                                ),
+                                false,
+                            ),
+                            (None, None) => (gettext("Not installed"), true),
+                        };
+                        program.set_subtitle(&text);
+                        download.set_visible(missing);
+                        // Only needed when Gatefold starts Soloist itself.
+                        key.set_sensitive(running.is_none());
+                    }
+                ));
             }
             status.set_subtitle(&match spotify.stream_status().as_str() {
                 "ready" => gettext("Ready: songs that aren’t in your library play from Spotify"),
@@ -500,12 +533,13 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         }
     );
     update(spotify);
-    spotify.connect_stream_status_notify(glib::clone!(
+    let id = spotify.connect_stream_status_notify(glib::clone!(
         #[strong]
         update,
         move |spotify| update(spotify)
     ));
-    settings.connect_changed(
+    crate::widgets::disconnect_with(&group, spotify, id);
+    let id = settings.connect_changed(
         Some("spotify-stream-backend"),
         glib::clone!(
             #[weak]
@@ -513,6 +547,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             move |_, _| update(&spotify)
         ),
     );
+    crate::widgets::disconnect_with(&group, &settings, id);
     group
 }
 

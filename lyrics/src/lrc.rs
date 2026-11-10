@@ -150,10 +150,13 @@ pub fn pair(lines: Vec<TimedLine>) -> Vec<Line> {
 pub fn merge_romanization(mut lines: Vec<Line>, romanized: &[TimedLine]) -> Vec<Line> {
     for line in lines.iter_mut().filter(|l| l.secondary.is_none()) {
         let Some(time) = line.time_ms else { continue };
+        // The nearest one, skipping the original itself (a romanized file
+        // can hold both lines at the same time).
         if let Some(r) = romanized
             .iter()
-            .find(|r| r.time_ms.abs_diff(time) <= PAIR_TOLERANCE_MS)
+            .filter(|r| r.time_ms.abs_diff(time) <= PAIR_TOLERANCE_MS)
             .filter(|r| !r.text.is_empty() && r.text != line.primary)
+            .min_by_key(|r| r.time_ms.abs_diff(time))
         {
             line.secondary = Some(r.text.clone());
         }
@@ -263,6 +266,17 @@ mod tests {
             merged[1].secondary, None,
             "identical text isn't a romanization"
         );
+        // Close lines get their own, the nearest one (Kyō is within reach
+        // of 東 too, Higashi of 京).
+        let lines = pair(parse("[00:01.00]東\n[00:01.06]京"));
+        let merged = merge_romanization(lines, &parse("[00:01.02]Higashi\n[00:01.06]Kyō"));
+        assert_eq!(merged[0].secondary.as_deref(), Some("Higashi"));
+        assert_eq!(merged[1].secondary.as_deref(), Some("Kyō"));
+        // A file with the original and the romanization at the same time:
+        // the original is skipped, not taken and dropped.
+        let lines = pair(parse("[00:01.00]東京"));
+        let merged = merge_romanization(lines, &parse("[00:01.00]東京\n[00:01.00]Tōkyō"));
+        assert_eq!(merged[0].secondary.as_deref(), Some("Tōkyō"));
     }
 
     #[test]

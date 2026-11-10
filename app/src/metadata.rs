@@ -139,7 +139,9 @@ impl MetadataService {
                 // seconds with MusicBrainz' rate limit).
                 let mut urgent = std::collections::VecDeque::new();
                 let mut background = std::collections::VecDeque::new();
-                let mut looked_up = std::collections::HashSet::new();
+                // Artists looked up this session, and whether online.
+                let mut looked_up: std::collections::HashMap<i64, bool> =
+                    std::collections::HashMap::new();
                 loop {
                     if urgent.is_empty() && background.is_empty() {
                         match queue.recv_blocking() {
@@ -153,14 +155,28 @@ impl MetadataService {
                     let Some(job) = urgent.pop_front().or_else(|| background.pop_front()) else {
                         continue;
                     };
+                    // Done already (an urgent one before this queued one).
+                    // One looked up offline is looked up again once online
+                    // metadata is on.
                     if let Job::Lookup {
-                        artist_id, again, ..
+                        artist_id,
+                        online,
+                        again,
+                        ..
                     } = &job
-                        && !looked_up.insert(*artist_id)
                         && !again
+                        && looked_up
+                            .get(artist_id)
+                            .is_some_and(|was_online| *was_online || !online)
                     {
-                        // Done already (an urgent one before this queued one).
                         continue;
+                    }
+                    if let Job::Lookup {
+                        artist_id, online, ..
+                    } = &job
+                    {
+                        let was_online = looked_up.get(artist_id).copied().unwrap_or(false);
+                        looked_up.insert(*artist_id, was_online || *online);
                     }
                     worker.run(job);
                 }

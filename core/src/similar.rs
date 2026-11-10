@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rand::Rng;
+use rand::seq::SliceRandom;
 
 /// What similarity looks at for one song.
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +116,10 @@ pub fn suggest(
             (score, candidate.track_id)
         })
         .collect();
+    // Equal scores in random order (the sort keeps it): otherwise the best
+    // of many equally good songs (one genre, say) are always the same few,
+    // in database order.
+    scored.shuffle(rng);
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
     // Prefer real matches; with none, any song keeps the music going.
     let best: Vec<i64> = scored
@@ -244,6 +249,29 @@ mod tests {
             }
         }
         assert!(threes > 15);
+    }
+
+    #[test]
+    fn equally_good_songs_all_get_their_turn() {
+        let seed = song(1, &["k-pop"], None, None);
+        let mut pool = vec![seed.clone()];
+        pool.extend((2..22).map(|id| song(id, &["k-pop"], None, None)));
+        let mut rng = StdRng::seed_from_u64(3);
+        let none = HashSet::new();
+        let picked: HashSet<i64> = (0..200)
+            .filter_map(|_| {
+                suggest(
+                    &seed,
+                    &pool,
+                    &none,
+                    &criteria(true, false, false, false),
+                    &RelatedArtists::default(),
+                    &mut rng,
+                )
+            })
+            .collect();
+        // Not just the first TOP_K of the pool.
+        assert!(picked.len() > TOP_K, "{picked:?}");
     }
 
     #[test]

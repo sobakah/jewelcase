@@ -721,8 +721,19 @@ The tool additions in §10.4 can be done in lyrembed/cdimport at any time. Phase
 ### Optional future features (not scheduled)
 Ideas that came up along the way, to pick from once the roadmap is done:
 
-### Known issues (code review, November 2026)
-A review of the whole program (six areas, read in full) found about 85 problems; all but this one are fixed (the last ones on 2026-11-08: scans now write only what changed, and the reload after a scan runs on a worker thread).
+- **A simple tag editor in Gatefold** (idea, 2026-11-10): instead of handing files to Ear Tag. Prompted by the test Flatpak, where *Edit Tags* can't work: Gatefold looks for Ear Tag with `flatpak info` and starts it with `flatpak run`, and neither exists inside the sandbox (asking the host would need `org.freedesktop.Flatpak`, a sandbox escape). The portal's "Open With" chooser would work, but takes one file at a time. Until then, *Edit Tags* in the Flatpak always offers to install Ear Tag. Building it changes two decisions: the player never writes tags (Q8, §10.3), and the Flatpak's music folder is read-only (`xdg-music:ro`).
+
+### Known issues (code reviews, November 2026)
+A review of the whole program (six areas, read in full) found about 85 problems; all but the Soloist key below are fixed (the last ones on 2026-11-08: scans now write only what changed, and the reload after a scan runs on a worker thread).
+
+A second one on 2026-11-10 (six rounds by risk, every file read in full: database and scanner, playback and queue, Spotify and streaming, companion tools and lyrics, the app and its widgets, metadata and matching) found 87 more; 84 are fixed, these three are left:
+
+**Slow with large libraries (left for later)**
+- **Search reads every match** for one- and two-letter queries (an unindexed `LIKE` over the whole index) and only then keeps the first few of each kind, on every keystroke. Where: `core/src/db.rs`, `search`.
+- **Tags are read twice per file** while scanning: once by lofty in general, once more by the format's reader just for `RELEASECOMMENT`. Doubles the tag reading of a first scan (felt most on network and USB drives). Where: `core/src/library/tags.rs`, `read_release_comment`.
+
+**Flatpak**
+- ***Edit Tags* always offers to install Ear Tag** in the Flatpak: `flatpak info` and `flatpak run` don't exist in the sandbox. Waits for the built-in tag editor idea (see *Optional future features*).
 
 **Security**
 - **Soloist's API key is on its command line** (`soloist --api-key …`), which other local users can read (`ps`, `/proc/<pid>/cmdline`). Soloist (build of 2026-11-06) has no other way: no environment variable, key file or stdin; spotify/soloist issues #12 and #24 ask for one. soloistd passes it the same way. Small risk on a single-user machine. *Ready:* when `soloist --help` lists `--api-key-file`, Gatefold writes the key to a 0600 file next to its Soloist data folder, passes that, and removes the file once Soloist listens (chosen over an environment variable, which child processes inherit and crash reports may contain). soloistd would need the same change (or systemd's `LoadCredential=`). Where: `soloist/src/lib.rs`, `Soloist::start`.

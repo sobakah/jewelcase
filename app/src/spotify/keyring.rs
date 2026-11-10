@@ -74,8 +74,13 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
     if uses_file().await {
         return file_store::load(kind);
     }
-    // Saved there while no keyring was running.
-    let in_file = || file_store::load(kind).ok().flatten();
+    // Saved there while no keyring was running. Saving to the keyring
+    // removes the file's copy, so one that's there is newer than the
+    // keyring's (whose refresh token Spotify has replaced since), and it
+    // works also when the keyring can't be unlocked.
+    if let Some(text) = file_store::load(kind).ok().flatten() {
+        return Ok(Some(text));
+    }
     let found = run(move || async move {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
@@ -106,7 +111,7 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
         Ok(Some(text))
     })
     .await?;
-    Ok(found.or_else(in_file))
+    Ok(found)
 }
 
 async fn save_text(kind: &'static str, label: &'static str, text: String) -> Result<(), String> {

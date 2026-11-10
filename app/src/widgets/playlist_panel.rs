@@ -91,6 +91,9 @@ mod imp {
         /// Rows are built a batch per idle moment (playlists can have
         /// thousands of songs); a newer refresh stops an older fill.
         pub fill_generation: std::cell::Cell<u64>,
+        /// The playlist the rows are of (`playlist` is already the next
+        /// one when another opens).
+        pub shown: std::cell::Cell<Option<i64>>,
         /// Covers of Spotify-only songs, by image URL, filled in as they
         /// download.
         pub spotify_covers:
@@ -347,7 +350,6 @@ impl PlaylistPanel {
             GatefoldApplication::get()
                 .spotify()
                 .refresh_playlist(playlist.id());
-            self.fetch_spotify_covers();
         }
         // A new, empty playlist: go straight to finding songs.
         if changed && playlist.playlist().item_count == 0 && playlist.playlist().editable {
@@ -566,7 +568,7 @@ impl PlaylistPanel {
         self.action_set_enabled("playlist.unlink", linked && !mirror);
         self.action_set_enabled("playlist.remove-spotify", linked && connected);
         self.action_set_enabled("playlist.delete", !mirror);
-        let same_playlist = imp.playlist.borrow().as_ref().map(|p| p.id()) == Some(id);
+        let same_playlist = imp.shown.get() == Some(id);
         // What every row shows (remove buttons, "only in Gatefold").
         let kind = |p: &gatefold_core::db::Playlist| (p.editable, p.spotify_id.is_some());
         let kind_changed = imp
@@ -608,8 +610,12 @@ impl PlaylistPanel {
             .items
             .row_at_index(imp.entries.borrow().len() as i32 - 1)
             .is_some();
+        let linked = info.spotify_id.is_some();
         if same_playlist && !sort_changed && !rebuild && filled && !entries.is_empty() {
             self.update_rows(&playlist, entries);
+            if linked {
+                self.fetch_spotify_covers();
+            }
             return;
         }
         // The same playlist changed (a song removed or moved): it stays
@@ -627,11 +633,16 @@ impl PlaylistPanel {
         imp.items.remove_all();
         imp.spotify_covers.borrow_mut().clear();
         imp.entries.replace(entries.clone());
+        imp.shown.set(Some(id));
         let generation = imp.fill_generation.get() + 1;
         imp.fill_generation.set(generation);
         // Enough rows at once to reach the old place (rows are about 50 px).
         let first = keep_at.map_or(0, |(value, page)| ((value + page) / 40.0) as usize + 20);
         self.fill_rows(playlist, entries, 0, generation, first);
+        // Also for entries a sync brought in after the playlist opened.
+        if linked {
+            self.fetch_spotify_covers();
+        }
         if let (Some((value, _)), Some(scroller)) = (keep_at, scroller) {
             glib::idle_add_local_once(move || {
                 let adjustment = scroller.vadjustment();
@@ -1776,7 +1787,10 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
             });
             actions.add_action(&auto);
             versions.append(Some(&gettext("_Match Automatically")), Some("entry.auto"));
-        } else if track.is_some() {
+        }
+        // Also for a library song whose Spotify version the user chose
+        // (an accepted suggestion keeps both).
+        if entry.match_state != "user_pinned_spotify" && track.is_some() {
             let pin = gio::SimpleAction::new("pin", None);
             pin.connect_activate(move |_, _| {
                 GatefoldApplication::get().library().pin_spotify(item)

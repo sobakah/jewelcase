@@ -47,6 +47,11 @@ pub fn romanized_sidecar(path: &Path) -> Option<String> {
         else {
             continue;
         };
+        // Only a language or romanization tag between the song's name and
+        // ".lrc": "01. Intro.ja-Latn.lrc" belongs to "01. Intro", not "01".
+        if middle.contains('.') {
+            continue;
+        }
         let lower = middle.to_lowercase();
         if lower.ends_with("-latn") || ROMANIZED_SUFFIXES.contains(&lower.as_str()) {
             return read_text(&entry.path());
@@ -103,8 +108,16 @@ fn read_embedded(path: &Path) -> Result<Embedded, lofty::error::FileParseError> 
                     vorbis_lyrics(|key| comments.get_all(key).map(str::to_owned).collect());
             }
         }
-        FileType::Opus | FileType::Vorbis => {
+        FileType::Vorbis => {
             if let Ok(ogg) = lofty::ogg::VorbisFile::read_from(&mut file, options) {
+                let comments = ogg.vorbis_comments();
+                embedded.texts =
+                    vorbis_lyrics(|key| comments.get_all(key).map(str::to_owned).collect());
+            }
+        }
+        // The same comments, after an Opus header (VorbisFile refuses it).
+        FileType::Opus => {
+            if let Ok(ogg) = lofty::ogg::OpusFile::read_from(&mut file, options) {
                 let comments = ogg.vorbis_comments();
                 embedded.texts =
                     vorbis_lyrics(|key| comments.get_all(key).map(str::to_owned).collect());

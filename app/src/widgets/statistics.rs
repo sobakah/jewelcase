@@ -3,7 +3,7 @@
 //! each entry moved against the period before.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -203,17 +203,19 @@ pub fn show(parent: Option<&gtk::Window>) {
         generation,
         move || {
             let period = Period::from_name(periods.active_name().as_deref().unwrap_or("month"));
-            let loaded = match load(period) {
-                Ok(loaded) => loaded,
+            // First, so a count still running for another period is
+            // dropped also when this one shows a status page.
+            let this = generation.get() + 1;
+            generation.set(this);
+            let span = match span(period) {
+                Ok(span) => span,
                 Err(status) => {
                     content.set_child(Some(&status));
                     return;
                 }
             };
-            // Counting takes a moment with years of plays: on a worker
-            // thread, the page waits with a spinner.
-            let this = generation.get() + 1;
-            generation.set(this);
+            // Reading and counting take a moment with years of plays: on
+            // a worker thread, the page waits with a spinner.
             let spinner = adw::Spinner::builder()
                 .width_request(32)
                 .height_request(32)
@@ -230,23 +232,25 @@ pub fn show(parent: Option<&gtk::Window>) {
                 #[strong]
                 generation,
                 async move {
-                    let Loaded {
-                        buckets,
-                        current,
-                        previous,
-                    } = loaded;
+                    let Span { buckets, from, to } = span;
                     let counted = gio::spawn_blocking(move || {
-                        let summary = Summary::new(&current, &previous);
-                        (current, summary)
+                        let loaded = load(period, from, to)?;
+                        let summary =
+                            Summary::new(&loaded.current, &loaded.previous, &loaded.known);
+                        Some((loaded.current, summary))
                     })
                     .await;
-                    let Ok((current, summary)) = counted else {
+                    let Ok(counted) = counted else {
                         return;
                     };
                     // Another period was chosen meanwhile.
                     if generation.get() != this {
                         return;
                     }
+                    let Some((current, summary)) = counted else {
+                        content.set_child(Some(&nothing_played()));
+                        return;
+                    };
                     content.set_child(Some(&build(&dialog, period, &buckets, &current, &summary)));
                 }
             ));
@@ -263,14 +267,21 @@ pub fn show(parent: Option<&gtk::Window>) {
 
 /// A period's plays, ready to count.
 struct Loaded {
-    buckets: Vec<Bucket>,
     current: Vec<PlayEntry>,
     previous: Vec<PlayEntry>,
+    /// Artist names that stay whole ("Mumford & Sons").
+    known: HashSet<String>,
 }
 
-/// The plays of one period (and the one before), or the page saying
-/// there are none.
-fn load(period: Period) -> Result<Loaded, gtk::Widget> {
+/// The stretch of time a period covers.
+struct Span {
+    buckets: Vec<Bucket>,
+    from: i64,
+    to: i64,
+}
+
+/// The period's time, or the page saying there's nothing logged yet.
+fn span(period: Period) -> Result<Span, gtk::Widget> {
     let app = GatefoldApplication::get();
     let library = app.library();
     let now = glib::DateTime::now_local().unwrap_or_else(|_| glib::DateTime::now_utc().unwrap());
@@ -294,32 +305,44 @@ fn load(period: Period) -> Result<Loaded, gtk::Widget> {
     let buckets = buckets(period, &now, Some(first_play));
     let from = buckets.first().map_or(0, |b| b.start);
     let to = buckets.last().map_or(i64::MAX, |b| b.end);
-    let (current, previous) = library
-        .db()
-        .map(|db| {
-            let current = db.play_log(from, to).unwrap_or_default();
-            let previous = if period == Period::All {
-                Vec::new()
-            } else {
-                db.play_log(from - (to - from), from).unwrap_or_default()
-            };
-            (current, previous)
-        })
-        .unwrap_or_default();
+    Ok(Span { buckets, from, to })
+}
+
+/// The plays from `from` to `to` (and as long before), on a worker
+/// thread with its own connection; `None` when there are none.
+fn load(period: Period, from: i64, to: i64) -> Option<Loaded> {
+    let db = match gatefold_core::db::Database::open(&crate::config::database_path()) {
+        Ok(db) => db,
+        Err(err) => {
+            tracing::warn!("Cannot read the play log: {err}");
+            return None;
+        }
+    };
+    let current = db.play_log(from, to).unwrap_or_default();
     if current.is_empty() {
-        let status = adw::StatusPage::builder()
-            .icon_name("audio-x-generic-symbolic")
-            .title(gettext("Nothing Played in This Time"))
-            .description(gettext("Choose a longer time above"))
-            .vexpand(true)
-            .build();
-        return Err(status.upcast());
+        return None;
     }
-    Ok(Loaded {
-        buckets,
+    let previous = if period == Period::All {
+        Vec::new()
+    } else {
+        db.play_log(from - (to - from), from).unwrap_or_default()
+    };
+    let known = db.known_artist_names().unwrap_or_default();
+    Some(Loaded {
         current,
         previous,
+        known,
     })
+}
+
+fn nothing_played() -> gtk::Widget {
+    adw::StatusPage::builder()
+        .icon_name("audio-x-generic-symbolic")
+        .title(gettext("Nothing Played in This Time"))
+        .description(gettext("Choose a longer time above"))
+        .vexpand(true)
+        .build()
+        .upcast()
 }
 
 /// The page for one period, once counted.
@@ -832,7 +855,12 @@ fn song_list(songs: &[Ranked], since: &str) -> gtk::Widget {
             .property("min-size", 40)
             .property("natural-size", 40)
             .build();
-        cover.set_cover(track.as_ref().and_then(|t| t.record.cover_key.as_deref()));
+        // As everywhere: the album's chosen cover first, else the file's.
+        cover.set_cover(track.as_ref().and_then(|t| {
+            t.album_cover_key
+                .as_deref()
+                .or(t.record.cover_key.as_deref())
+        }));
         cover.set_valign(gtk::Align::Center);
         // Prefixes are packed from the start: the rank first.
         row.add_prefix(&rank);

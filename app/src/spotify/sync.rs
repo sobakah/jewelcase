@@ -72,8 +72,9 @@ pub struct SyncState {
 struct Creation {
     id: i64,
     name: String,
-    /// Entries and the Spotify songs found for them.
-    found: Vec<(i64, String)>,
+    /// Entry, Spotify URI, and whether the user chose it (a likely match
+    /// ticked in the dialog), so a re-read keeps the library song.
+    found: Vec<(i64, String, bool)>,
 }
 
 /// How long to wait before trying again: what Spotify asked for (it can be
@@ -1223,11 +1224,19 @@ impl Spotify {
             let Some(db) = library.db() else {
                 return Ok(not_found());
             };
-            if let Some(version) = db.spotify_version(track_id).ok().flatten()
-                && (version.uri.is_some() || now() - version.checked < NOT_FOUND_TTL_S)
-            {
-                return Ok(version);
-            }
+            let cached = db
+                .spotify_version(track_id)
+                .ok()
+                .flatten()
+                .filter(|v| v.uri.is_some() || now() - v.checked < NOT_FOUND_TTL_S);
+            let cached = match cached {
+                Some(version) if version.confidence == Some(Confidence::Sure) => {
+                    return Ok(version);
+                }
+                other => other,
+            };
+            // A playlist ties it to a Spotify song already, maybe by the
+            // user's choice: that beats a search's "probably".
             if let Some(uri) = db.known_uri(track_id).ok().flatten() {
                 return Ok(SpotifyVersion {
                     uri: Some(uri),
@@ -1236,6 +1245,9 @@ impl Spotify {
                     artist: None,
                     checked: now(),
                 });
+            }
+            if let Some(version) = cached {
+                return Ok(version);
             }
         }
         let Some(track) = library.tracks(&[track_id]).remove(&track_id) else {
@@ -1355,7 +1367,7 @@ impl Spotify {
             let Some(mut db) = library.db() else { break };
             match (version.uri, version.confidence) {
                 (Some(uri), Some(Confidence::Sure)) => {
-                    if db.set_item_spotify(item, &uri).is_ok()
+                    if db.set_item_spotify(item, &uri, false).is_ok()
                         && let Ok(Some(position)) = db.remote_position(item)
                     {
                         let current = db.spotify_uris(id).unwrap_or_default();
@@ -1439,7 +1451,7 @@ impl Spotify {
                     uri: Some(uri),
                     confidence: Some(Confidence::Sure),
                     ..
-                }) => sure.push((*item, uri)),
+                }) => sure.push((*item, uri, false)),
                 Ok(SpotifyVersion {
                     uri: Some(uri),
                     title,
@@ -1598,7 +1610,7 @@ impl Spotify {
         }
         for (check, (item, _, uri, _, _)) in checks.iter().zip(&likely) {
             if check.is_active() {
-                sure.push((*item, uri.clone()));
+                sure.push((*item, uri.clone(), true));
             }
         }
         // Created between the sync's other jobs: a sync that read the
@@ -1678,7 +1690,7 @@ impl Spotify {
         self.imp().sync.borrow_mut().publishing.remove(&id);
     }
 
-    async fn created_playlist(&self, id: i64, name: &str, sure: &[(i64, String)]) {
+    async fn created_playlist(&self, id: i64, name: &str, sure: &[(i64, String, bool)]) {
         let library = GatefoldApplication::get().library();
         // Linked meanwhile, or deleted.
         if library
@@ -1713,8 +1725,8 @@ impl Spotify {
                 tracing::warn!("Cannot link the playlist: {err}");
                 return;
             }
-            for (item, uri) in sure {
-                let _ = db.set_item_spotify(*item, uri);
+            for (item, uri, chosen) in sure {
+                let _ = db.set_item_spotify(*item, uri, *chosen);
             }
             let uris = db.spotify_uris(id).unwrap_or_default();
             let _ = db.queue_spotify_op(id, &Op::Replace { uris }.to_json(), now());

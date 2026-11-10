@@ -280,6 +280,10 @@ impl LyricsView {
         let Some(track) = GatefoldApplication::get().player().current_track() else {
             return;
         };
+        // A Spotify song has no file: its lyrics (LRCLIB's) stay.
+        if track.is_stand_in() {
+            return;
+        }
         let id = Some(track.id());
         let path = track.track().record.path.clone();
         let title = track.track().record.tags.title.clone();

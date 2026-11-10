@@ -15,6 +15,7 @@ mod stream;
 mod sync;
 
 use std::cell::{Cell, OnceCell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,9 +84,12 @@ mod imp {
 
         pub settings: OnceCell<gio::Settings>,
         pub client: RefCell<Option<Arc<Client>>>,
-        /// Counts logins put to use: a replaced client's refreshed tokens
-        /// don't go into the keyring any more.
+        /// The login in use (0: none): a replaced client's refreshed
+        /// tokens don't go into the keyring any more.
         pub login_generation: Cell<u64>,
+        /// Logins started so far; each gets the next number as its
+        /// generation (0: none in use).
+        pub logins_started: Cell<u64>,
         pub user_id: RefCell<Option<String>>,
         pub cancel_login: RefCell<Option<Arc<AtomicBool>>>,
         pub sync: RefCell<sync::SyncState>,
@@ -339,15 +343,22 @@ impl Spotify {
         });
         // Refreshed tokens go back into the keyring, while this login is
         // the one in use (an older client finishing a call after Connect
-        // Again would put its tokens back).
-        let generation = self.imp().login_generation.get() + 1;
+        // Again or Disconnect would put its tokens back). Until the account
+        // check below decides, they wait: a stored token that expired is
+        // refreshed by that check, and Spotify replaces the refresh token
+        // then, so the new one must be kept.
+        let generation = self.imp().logins_started.get() + 1;
+        self.imp().logins_started.set(generation);
+        let unsaved: Rc<RefCell<Option<Tokens>>> = Rc::default();
         let spotify = self.downgrade();
+        let waiting = unsaved.clone();
         glib::spawn_future_local(async move {
             while let Ok(tokens) = receiver.recv().await {
                 let current = spotify
                     .upgrade()
                     .is_some_and(|s| s.imp().login_generation.get() == generation);
                 if !current {
+                    waiting.replace(Some(tokens));
                     continue;
                 }
                 if let Err(err) = keyring::save(tokens).await {
@@ -376,7 +387,11 @@ impl Spotify {
             }
             Err(err) => {
                 tracing::warn!("Cannot reach Spotify: {err}");
-                // Offline at start: try again later with the same login.
+                // Offline at start: try again later with the same login,
+                // refreshed if it was.
+                if !fresh_login && let Some(tokens) = unsaved.take() {
+                    save_login(tokens).await;
+                }
                 self.set_status(Status::Disconnected);
                 if fresh_login {
                     self.message(&gettext("Couldn't connect to Spotify"));
@@ -393,6 +408,11 @@ impl Spotify {
         self.notify_account_name();
         self.imp().client.replace(Some(client));
         self.imp().login_generation.set(generation);
+        let refreshed = unsaved.take();
+        if !fresh_login && let Some(tokens) = refreshed.clone() {
+            save_login(tokens).await;
+        }
+        let tokens = refreshed.unwrap_or(tokens);
         let _ = self.settings().set_string("spotify-account", &name);
         self.set_status(Status::Connected);
         if fresh_login {
@@ -466,6 +486,8 @@ impl Spotify {
     /// Logs out; Spotify mirrors are removed, published playlists stay.
     pub async fn disconnect(&self) {
         self.play_here(false);
+        // A call still running refreshes no login back into the keyring.
+        self.imp().login_generation.set(0);
         self.imp().client.replace(None);
         self.imp().user_id.replace(None);
         self.imp().account_name.replace(None);
@@ -488,9 +510,19 @@ impl Spotify {
     /// The login was revoked or expired.
     fn logged_out(&self) {
         self.play_here(false);
+        self.imp().login_generation.set(0);
         self.imp().client.replace(None);
+        self.imp().user_id.replace(None);
         self.imp().account_name.replace(None);
         self.notify_account_name();
+        // The dead login isn't tried (and reported) again at every start.
+        // The playlists stay: connecting the same account again keeps them.
+        let _ = self.settings().set_string("spotify-account", "");
+        glib::spawn_future_local(async {
+            if let Err(err) = keyring::delete().await {
+                tracing::warn!("Cannot remove the expired Spotify login: {err}");
+            }
+        });
         self.set_status(Status::Disconnected);
         self.message(&gettext(
             "The Spotify login expired; connect again in Preferences",
@@ -547,6 +579,12 @@ pub(crate) fn open_in_browser(url: &str) {
 }
 
 /// Unix seconds of a time (0 before 1970).
+async fn save_login(tokens: Tokens) {
+    if let Err(err) = keyring::save(tokens).await {
+        tracing::warn!("Cannot store the Spotify login: {err}");
+    }
+}
+
 fn unix_seconds(time: std::time::SystemTime) -> i64 {
     time.duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)

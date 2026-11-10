@@ -35,7 +35,6 @@ pub fn update_check() -> bool {
     from_env!("GATEFOLD_UPDATE_CHECK", "true") == "true"
 }
 
-/// `~/.local/share/<app id>/library.sqlite` (CONCEPT.md §12).
 /// lyrembed's last alias list, for when it can't be asked.
 pub fn aliases_cache_path() -> std::path::PathBuf {
     gtk::glib::user_data_dir()
@@ -43,6 +42,7 @@ pub fn aliases_cache_path() -> std::path::PathBuf {
         .join("lyrembed-aliases.txt")
 }
 
+/// `~/.local/share/<app id>/library.sqlite` (CONCEPT.md §12).
 pub fn database_path() -> std::path::PathBuf {
     gtk::glib::user_data_dir()
         .join(APP_ID)

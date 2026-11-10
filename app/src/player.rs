@@ -307,6 +307,11 @@ impl Player {
     /// the engine that plays (one fading out has ended already).
     fn engine_event(&self, index: usize, event: PlayerEvent) {
         if let Some(engine) = self.engine_at(index) {
+            // A hand-over for a song replaced meanwhile (Next pressed in
+            // its last seconds): GStreamer dropped it.
+            if engine.is_stale(&event) {
+                return;
+            }
             engine.handle_event(&event);
         }
         if index == self.imp().active.get() {
@@ -754,7 +759,9 @@ impl Player {
     }
 
     pub fn seek(&self, ms: u64) {
-        let ms = ms.min(self.duration());
+        // 0: the length isn't known yet (GStreamer reports it later).
+        let duration = self.duration();
+        let ms = if duration > 0 { ms.min(duration) } else { ms };
         if self.forward(RemoteCommand::Seek(ms)) {
             self.imp()
                 .remote_clock
@@ -819,7 +826,10 @@ impl Player {
     }
 
     pub fn set_volume(&self, volume: f64) {
-        if self.forward(RemoteCommand::Volume(volume.clamp(0.0, 1.0))) {
+        // From anywhere (MPRIS clients too): out-of-range values don't
+        // reach GStreamer.
+        let volume = volume.clamp(0.0, 1.0);
+        if self.forward(RemoteCommand::Volume(volume)) {
             return;
         }
         // Mid-crossfade, the fade picks the new volume up.
@@ -831,7 +841,7 @@ impl Player {
         if self.imp().streaming.get() {
             self.spotify().stream_volume(volume);
         }
-        let _ = self.settings().set_double("volume", volume.clamp(0.0, 1.0));
+        let _ = self.settings().set_double("volume", volume);
     }
 
     // Remote mode (§9.3) ------------------------------------------------
@@ -1669,10 +1679,10 @@ impl Player {
     fn handle_event(&self, event: PlayerEvent) {
         let imp = self.imp();
         match event {
-            PlayerEvent::NextQueued(uid) => imp.pending_next.set(Some(uid)),
+            PlayerEvent::NextQueued(uid, _) => imp.pending_next.set(Some(uid)),
             PlayerEvent::StreamStarted => {
                 if let Some(uid) = imp.pending_next.take() {
-                    let found = imp.queue.borrow_mut().jump_to_uid(uid);
+                    let found = imp.queue.borrow_mut().start_handed_over(uid);
                     if !found {
                         // The song GStreamer took was removed meanwhile:
                         // the queue's next one plays instead.
@@ -1685,22 +1695,17 @@ impl Player {
                         self.queue_changed();
                         return;
                     }
-                    if found {
-                        let current = imp.queue.borrow().current().copied();
-                        // The gapless song's own measured gain (within an
-                        // album in order it's the album's: no change).
-                        if let (Some(engine), Some(item)) = (self.engine(), current) {
-                            self.apply_measured_gain(engine, item.track_id);
-                        }
-                        self.set_current_track_from(
-                            current.and_then(|i| self.track(i.track_id)),
-                            true,
-                        );
-                        self.set_position(0);
-                        self.emit_by_name::<()>("seeked", &[]);
-                        self.update_next();
-                        self.queue_changed();
+                    let current = imp.queue.borrow().current().copied();
+                    // The gapless song's own measured gain (within an
+                    // album in order it's the album's: no change).
+                    if let (Some(engine), Some(item)) = (self.engine(), current) {
+                        self.apply_measured_gain(engine, item.track_id);
                     }
+                    self.set_current_track_from(current.and_then(|i| self.track(i.track_id)), true);
+                    self.set_position(0);
+                    self.emit_by_name::<()>("seeked", &[]);
+                    self.update_next();
+                    self.queue_changed();
                 }
             }
             PlayerEvent::EndOfStream => {
@@ -1731,7 +1736,7 @@ impl Player {
                 let failed = imp.pending_next.take().and_then(|uid| {
                     let mut queue = imp.queue.borrow_mut();
                     queue
-                        .jump_to_uid(uid)
+                        .start_handed_over(uid)
                         .then(|| queue.current().map(|i| i.track_id))?
                 });
                 let title = failed

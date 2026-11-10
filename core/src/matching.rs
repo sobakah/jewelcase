@@ -92,8 +92,9 @@ pub struct AlbumFacts<'a> {
 /// the same year and number of songs and a word of the title in common
 /// ("樂-STAR" is "ROCK-STAR" on Spotify).
 pub fn same_album(local: &AlbumFacts, remote: &AlbumFacts, aliases: &Aliases) -> bool {
+    // A placeholder ("0000000000000", blank) is no barcode.
     if let (Some(a), Some(b)) = (local.barcode, remote.barcode)
-        && !a.is_empty()
+        && !barcode_key(a).is_empty()
         && barcode_key(a) == barcode_key(b)
     {
         return true;
@@ -149,25 +150,14 @@ pub fn barcode_key(code: &str) -> String {
 }
 
 fn artists_agree(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> bool {
-    let remote: BTreeSet<String> = remote
-        .artists
-        .iter()
-        .flat_map(|a| {
-            let mut names = track_artist_names(a);
-            names.push(a.clone());
-            names
-        })
-        .map(|name| artist_key(&name, aliases))
-        .collect();
-    [&local.artist, &local.album_artist]
+    // As for albums: names that are only punctuation ("!!!") give no key,
+    // so two of them don't count as the same artist.
+    let local: Vec<String> = [&local.artist, &local.album_artist]
         .into_iter()
         .flatten()
-        .flat_map(|a| {
-            let mut names = track_artist_names(a);
-            names.push(a.clone());
-            names
-        })
-        .any(|name| remote.contains(&artist_key(&name, aliases)))
+        .cloned()
+        .collect();
+    !artist_keys(&local, aliases).is_disjoint(&artist_keys(&remote.artists, aliases))
 }
 
 /// Alias identity, without spaces and punctuation ("TOMORROW X TOGETHER"
@@ -326,7 +316,9 @@ pub fn search_title(title: &str) -> String {
 /// What a bracket or suffix says about the version; `None` for things
 /// that don't change the recording (credits, remasters, subtitles).
 fn version_note(extra: &str) -> Option<String> {
-    let text = extra.trim().trim_end_matches('.');
+    // "Taylor’s Version" is "Taylor's Version".
+    let text = extra.replace(['’', '‘'], "'");
+    let text = text.trim().trim_end_matches('.');
     let words: Vec<&str> = text
         .split(|c: char| !c.is_alphanumeric() && c != '\'')
         .filter(|w| !w.is_empty())
@@ -351,7 +343,8 @@ fn version_note(extra: &str) -> Option<String> {
     if has("inst")
         || has("instrumental")
         || has("karaoke")
-        || has("mr")
+        // "(MR)" alone: "Mr. Fingers Remix" is a remix.
+        || words == ["mr"]
         || has("off") && has("vocal")
     {
         return Some("inst".into());
@@ -515,6 +508,38 @@ mod tests {
     }
 
     #[test]
+    fn notes_and_artists_that_could_mislead() {
+        let aliases = Aliases::default();
+        // A remix by "Mr. …" isn't an instrumental; "(MR)" is.
+        assert_ne!(
+            Title::parse("Song (Mr. Fingers Remix)").notes,
+            Title::parse("Song (Instrumental)").notes
+        );
+        assert_eq!(
+            Title::parse("Song (MR)").notes,
+            Title::parse("Song (Instrumental)").notes
+        );
+        // Typographic and plain apostrophes are the same.
+        assert_eq!(
+            Title::parse("Love Story (Taylor’s Version)"),
+            Title::parse("Love Story (Taylor's Version)")
+        );
+        // Names of punctuation only don't make artists agree.
+        assert_eq!(
+            compare(
+                &local(1, "Song", "?", 200),
+                &remote("Song", &["!!!"], 200),
+                &aliases
+            ),
+            compare(
+                &local(1, "Song", "Someone", 200),
+                &remote("Song", &["!!!"], 200),
+                &aliases
+            )
+        );
+    }
+
+    #[test]
     fn titles_are_cleaned_but_versions_kept() {
         let plain = Title::parse("Dynamite");
         assert_eq!(Title::parse("Dynamite (feat. Someone)"), plain);
@@ -623,6 +648,12 @@ mod tests {
         assert!(!same_album(
             &local,
             &facts("5-STAR", skz, 2023, 12, None),
+            &aliases
+        ));
+        // A placeholder barcode on both is no barcode.
+        assert!(!same_album(
+            &facts("Rock Star", bts, 2020, 1, Some("0000000000000")),
+            &facts("5-STAR", skz, 2023, 12, Some("000000000000")),
             &aliases
         ));
         assert!(!same_album(

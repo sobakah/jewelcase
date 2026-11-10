@@ -402,9 +402,11 @@ impl Tools {
             let on_line = on_line.clone();
             glib::spawn_future_local(async move {
                 let stream = gio::DataInputStream::new(&pipe);
-                while let Ok(Some(line)) =
-                    stream.read_line_utf8_future(glib::Priority::DEFAULT).await
-                {
+                // As bytes: a line that isn't UTF-8 (a file name in
+                // Latin-1) mustn't end the reading, or the tool stalls
+                // once the pipe is full.
+                while let Ok(Some(bytes)) = stream.read_line_future(glib::Priority::DEFAULT).await {
+                    let line = String::from_utf8_lossy(&bytes);
                     tracing::debug!("tool: {line}");
                     on_line(&line);
                 }
@@ -433,7 +435,14 @@ impl Tools {
                 #[weak(rename_to = tools)]
                 self,
                 async move {
-                    if tools.confirm_replace_page(open).await {
+                    if !tools.confirm_replace_page(open).await {
+                        return;
+                    }
+                    if tools.imp().page_run.borrow().is_none() {
+                        // It closed while the dialog was open: nothing
+                        // to stop, the new one opens now.
+                        tools.open_page(start);
+                    } else {
                         tools.imp().pending_page.replace(Some(start));
                         tools.stop_page();
                     }
@@ -478,6 +487,11 @@ impl Tools {
 
     fn page_opened(&self, tool: PageTool, run: PageRun, url: Option<String>, status: String) {
         let imp = self.imp();
+        if tool == PageTool::Cdport {
+            // Only now, not when asked: the replace dialog may be
+            // cancelled, or cdport not start.
+            imp.import_started.set(Some(crate::metadata::now()));
+        }
         imp.page_run.replace(Some(run));
         imp.page_tool.set(Some(tool));
         imp.page_url.replace(url);
@@ -814,7 +828,6 @@ impl Tools {
             self.missing_tool("cdport");
             return;
         }
-        self.imp().import_started.set(Some(crate::metadata::now()));
         if cdport.dbus {
             self.open_page(PageStart::Service {
                 tool: PageTool::Cdport,

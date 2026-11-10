@@ -204,6 +204,15 @@ enum Method {
     Delete,
 }
 
+/// What a request sends.
+#[derive(Clone, Copy)]
+enum Body<'a> {
+    Empty,
+    Json(&'a Value),
+    /// Base64 of a JPEG, as Spotify takes playlist covers.
+    Jpeg(&'a str),
+}
+
 /// A logged-in account. Refreshes its access token by itself and reports
 /// new tokens through `on_refresh`, so they can be stored.
 pub struct Client {
@@ -324,6 +333,18 @@ impl Client {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<Option<Value>> {
+        let body = body.map_or(Body::Empty, Body::Json);
+        self.call_with(method, path, query, body)
+    }
+
+    /// Like [`Client::call`], with any body.
+    fn call_with(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Body<'_>,
+    ) -> Result<Option<Value>> {
         let url = if path.starts_with("https://") || path.starts_with("http://") {
             path.to_owned()
         } else {
@@ -351,14 +372,14 @@ impl Client {
                     }
                     request.call()
                 }
-                (Method::Delete, None) => {
+                (Method::Delete, Body::Empty) => {
                     let mut request = self.agent.delete(&url).header("Authorization", &auth);
                     for (k, v) in query {
                         request = request.query(*k, v);
                     }
                     request.call()
                 }
-                (Method::Delete, Some(body)) => {
+                (Method::Delete, body) => {
                     let mut request = self
                         .agent
                         .delete(&url)
@@ -367,9 +388,13 @@ impl Client {
                     for (k, v) in query {
                         request = request.query(*k, v);
                     }
-                    request
-                        .content_type("application/json")
-                        .send(body.to_string())
+                    match body {
+                        Body::Jpeg(data) => request.content_type("image/jpeg").send(data),
+                        Body::Json(json) => request
+                            .content_type("application/json")
+                            .send(json.to_string()),
+                        Body::Empty => unreachable!("matched above"),
+                    }
                 }
                 (Method::Post | Method::Put, body) => {
                     let mut request = match method {
@@ -381,10 +406,11 @@ impl Client {
                         request = request.query(*k, v);
                     }
                     match body {
-                        Some(body) => request
+                        Body::Json(json) => request
                             .content_type("application/json")
-                            .send(body.to_string()),
-                        None => request.header("Content-Length", "0").send_empty(),
+                            .send(json.to_string()),
+                        Body::Jpeg(data) => request.content_type("image/jpeg").send(data),
+                        Body::Empty => request.header("Content-Length", "0").send_empty(),
                     }
                 }
             }?;
@@ -781,15 +807,16 @@ impl Client {
     pub fn upload_cover(&self, id: &str, jpeg: &[u8]) -> Result<()> {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(jpeg);
-        let token = self.access_token(false)?;
-        let response = self
-            .agent
-            .put(&format!("{}/playlists/{id}/images", api_base()))
-            .header("Authorization", &format!("Bearer {token}"))
-            .content_type("image/jpeg")
-            .send(encoded)?;
-        let status = response.status().as_u16();
-        read_answer(response, status).map(drop)
+        // Through call_with like every other request: a 401 refreshes the
+        // token instead of counting as logged out, rate limits are waited
+        // out or recorded.
+        self.call_with(
+            Method::Put,
+            &format!("/playlists/{id}/images"),
+            &[],
+            Body::Jpeg(&encoded),
+        )
+        .map(drop)
     }
 
     // Search -------------------------------------------------------------

@@ -130,6 +130,19 @@ fn connect_updates(server: &std::rc::Rc<mpris_server::Player>, player: &Player) 
             update_all(server.clone(), player.clone());
         });
     }
+    // The volume lives in the settings, not in a property of the player.
+    let server_ = server.clone();
+    player
+        .settings()
+        .connect_changed(Some("volume"), move |settings, key| {
+            let server = server_.clone();
+            let volume = settings.double(key);
+            glib::spawn_future_local(async move {
+                if let Err(err) = server.set_volume(volume).await {
+                    tracing::debug!("MPRIS volume update failed: {err}");
+                }
+            });
+        });
     let server_ = server.clone();
     player.connect_notify_local(Some("position"), move |player, _| {
         server_.set_position(Time::from_millis(player.position() as i64));

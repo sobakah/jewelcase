@@ -23,6 +23,11 @@ mod imp {
     pub struct GatefoldWindow {
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
+        /// Albums of the current cdport import already announced: each
+        /// reload during the import shows only the new ones.
+        pub announced: RefCell<std::collections::HashSet<i64>>,
+        /// The "album-sort" setting, kept here: the sorter compares often.
+        pub album_sort: RefCell<String>,
         #[template_child]
         pub bottom_sheet: TemplateChild<adw::BottomSheet>,
         #[template_child]
@@ -373,6 +378,8 @@ impl GatefoldWindow {
         let imp = self.imp();
         let library = GatefoldApplication::get().library();
 
+        imp.album_sort
+            .replace(self.settings().string("album-sort").into());
         let sorter = gtk::CustomSorter::new(glib::clone!(
             #[weak(rename_to = window)]
             self,
@@ -456,7 +463,8 @@ impl GatefoldWindow {
             glib::clone!(
                 #[weak(rename_to = window)]
                 self,
-                move |_, _| {
+                move |settings, key| {
+                    window.imp().album_sort.replace(settings.string(key).into());
                     if let Some(sorter) = window.imp().sorter.get() {
                         sorter.changed(gtk::SorterChange::Different);
                     }
@@ -827,21 +835,21 @@ impl GatefoldWindow {
         // Followed artists the library doesn't have (by Spotify ID from the
         // online lookup, or by name).
         let local = library.artists();
-        let local: Vec<(String, Option<String>)> = (0..local.n_items())
-            .filter_map(|i| local.item(i).and_downcast::<ArtistObject>())
-            .map(|a| {
-                let info = a.artist();
-                (info.name.to_lowercase(), info.meta.spotify_id.clone())
-            })
-            .collect();
+        let mut local_names = std::collections::HashSet::new();
+        let mut local_ids = std::collections::HashSet::new();
+        for a in (0..local.n_items()).filter_map(|i| local.item(i).and_downcast::<ArtistObject>()) {
+            let info = a.artist();
+            local_names.insert(info.name.to_lowercase());
+            if let Some(id) = info.meta.spotify_id.clone() {
+                local_ids.insert(id);
+            }
+        }
         let artists: Vec<_> = spotify
             .followed_artists()
             .into_iter()
             .filter(|artist| {
-                !local.iter().any(|(name, id)| {
-                    id.as_deref() == Some(artist.spotify_id.as_str())
-                        || *name == artist.name.to_lowercase()
-                })
+                !local_ids.contains(&artist.spotify_id)
+                    && !local_names.contains(&artist.name.to_lowercase())
             })
             .collect();
         let items = artists
@@ -1282,6 +1290,12 @@ impl GatefoldWindow {
     fn close_after_tool(&self) {
         self.imp().closing_after_tool.set(true);
         let tools = GatefoldApplication::get().tools();
+        // The tool may have finished while the question was shown: then
+        // nothing changes any more to wait for.
+        if !tools.page_needs_gatefold() {
+            self.close();
+            return;
+        }
         tools.stop_page();
         let close = glib::clone!(
             #[weak(rename_to = window)]
@@ -1346,8 +1360,13 @@ impl GatefoldWindow {
         let covered = folders
             .iter()
             .any(|f| dir.starts_with(f) || f.starts_with(&dir));
+        // Not there yet (cdport makes it on the first import): offered
+        // once it is.
+        if !covered && !dir.is_dir() {
+            return;
+        }
         let _ = settings.set_boolean("cdport-folder-offered", true);
-        if covered || !dir.is_dir() {
+        if covered {
             return;
         }
         // Translators: {} is a folder path.
@@ -1371,10 +1390,14 @@ impl GatefoldWindow {
         };
         let library = GatefoldApplication::get().library();
         let albums = library.albums();
-        let new: Vec<AlbumObject> = (0..albums.n_items())
-            .filter_map(|i| albums.item(i).and_downcast::<AlbumObject>())
-            .filter(|a| a.album().added >= since)
-            .collect();
+        let new: Vec<AlbumObject> = {
+            let mut announced = self.imp().announced.borrow_mut();
+            (0..albums.n_items())
+                .filter_map(|i| albums.item(i).and_downcast::<AlbumObject>())
+                .filter(|a| a.album().added >= since)
+                .filter(|a| announced.insert(a.album().id))
+                .collect()
+        };
         for album in &new {
             // Translators: {} is an album title.
             let toast = adw::Toast::builder()
@@ -1385,8 +1408,11 @@ impl GatefoldWindow {
                 .build();
             self.imp().toast_overlay.add_toast(toast);
         }
-        if !new.is_empty() && tools.page_status().is_empty() {
+        // The import is over: what it added is announced (also when it
+        // added nothing, so a later album isn't taken for its).
+        if tools.page_status().is_empty() {
             tools.forget_import();
+            self.imp().announced.borrow_mut().clear();
         }
     }
 
@@ -1454,7 +1480,7 @@ impl GatefoldWindow {
                 .then(a.year.cmp(&b.year))
                 .then(a.sort_title.cmp(&b.sort_title))
         };
-        match self.settings().string("album-sort").as_str() {
+        match self.imp().album_sort.borrow().as_str() {
             "title" => a.sort_title.cmp(&b.sort_title).then_with(by_artist),
             // Newest first.
             "year" => b.year.cmp(&a.year).then_with(by_artist),

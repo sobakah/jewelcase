@@ -6,6 +6,49 @@
 - Preferences → Library → Playlists: how songs are listed in playlists whose sort you haven't changed, separately for Gatefold's and Spotify's playlists (for example newest first). A sort chosen in a playlist stays; its sort menu's *Use Default Sort* goes back to the default.
 - Development builds (`make run`, the test Flatpak) show their commit in the version, with "-dirty" for uncommitted changes; clicking the version in About copies it.
 - The test Flatpak streams through its own Soloist: the one soloistd keeps up to date, run inside the sandbox with the Flatpak's own Soloist API key and data, as the Spotify device "Gatefold Devel". soloistd itself stays with the installed app (Preferences no longer shows its controls in a Flatpak).
+- A Spotify version you accepted for a song in a published playlist, or ticked under *Probably the Same Song* when creating one on Spotify, now stays with your library song; reading the playlist from Spotify again turned it back into a Spotify-only entry. The same song in other playlists gets that version too instead of being asked about again.
+- Statistics count bands whose name contains "&", "," or "and" (Mumford & Sons, Earth, Wind & Fire) as one artist when they're in your library or among your Spotify artists, and an artist credited twice on a song counts once.
+- An album split into two releases on MusicBrainz, with a disc missing in one part, no longer shows two parts' discs under one number.
+- A removed album's number isn't given to a new album any more, so "Next From" after a restart can't name the wrong album. Older versions of Gatefold still open the database.
+- Artist names with certain letters whose lowercase form is longer or shorter (such as "İ") no longer stop a library scan.
+- The first scan of a large library, or one after a drive comes back, finishes the folder covers much faster.
+- *Play Next*, shuffle, moving songs or Repeat One in a song's last seconds no longer skips songs: the song that was about to start plays, then the queue goes on as changed.
+- Pressing Next or choosing another song in a song's last seconds no longer shows the song that would have followed as playing.
+- A song that starts at a saved position (after a restart, or when ReplayGain is turned on or off) no longer plays its first moment before jumping there, and a seek while it loads is no longer undone.
+- Seeking works in songs whose length isn't known yet instead of going back to the start.
+- After a seek near the end of a song, whether the next M4A song starts without a gap is decided by the right song.
+- With suggestions mixed in after every song, a suggestion no longer lands between songs you queued with *Play Next* or *Add to Queue*.
+- Turning shuffle off and saving the queue are quicker with very long queues.
+- Spotify: a login whose access had run out while Gatefold was closed is kept after it's renewed at start. Before, the renewed login was lost, and Gatefold could be logged out at the next start.
+- Spotify: after *Disconnect*, a sync still running can no longer put the login back into the keyring; a playlist cover that couldn't be sent at the first try no longer logs you out; a login that has expired is removed instead of being tried, and reported, at every start.
+- Spotify logins saved while no keyring was running are used when the keyring is back (they're newer than the keyring's), also when the keyring can't be unlocked.
+- Preferences → Spotify no longer freezes for a moment whenever the streaming status changes; starting and stopping Gatefold's own Soloist doesn't freeze the window either.
+- Soloist: stopping or reconfiguring soloistd in Preferences now marks streaming as off, so Spotify songs aren't sent to a Soloist that's gone. Turning streaming off no longer pauses music someone else plays through soloistd's Soloist.
+- Soloist: a song picked in the Spotify app right after Gatefold's next song started keeps playing; a song asked for twice no longer counts as unplayable too early; when Soloist refuses to skip to Gatefold's next song, the song is started directly instead of after 10 s of silence.
+- Only a loopback address in soloistd's `websocket` setting is used (a name that just starts with "127." no longer counts), and `[::1]` works.
+- A CD import or a lyrembed job no longer stalls when the tool prints a line that isn't UTF-8 (a file name in Latin-1, say).
+- *Close and Open New* opens the new page also when the old one closed while the question was shown, instead of opening it unasked later. A cancelled CD import no longer leads to a "New album" notice for the next album that turns up.
+- Synced lyrics and romanizations embedded in Opus files are shown; only plain lyrics were read from them.
+- A romanization stored before the original lyrics in a file is no longer shown as the lyrics; close lines get their own romanization; a romanization file with the original lines in it works; `01. Intro.ja-Latn.lrc` no longer counts as the romanization of `01.flac`.
+- Romanization through `lyrembed romanize` can no longer show one song's romanization under another's lyrics after lyrembed printed something unexpected. Lyrics lyrembed left as they were are asked about again after 30 days (for example once a romanization backend is installed).
+- A library scan that stops unexpectedly no longer keeps the library from updating until a restart. New artist aliases from lyrembed count for Spotify matching and album versions from the scan that brings them.
+- Turning on online artist information in Preferences looks the artists up right away, also those already seen in this session.
+- CD imports: each new album is announced once, not again with every later album of the same import; an import that added nothing no longer leads to a "New album" notice later; the offer to add cdport's folder as a music folder waits until cdport has made that folder; *Stop and Quit* closes at once if the import ended while the question was shown (it waited 30 s).
+- Updates: *Install* can't start a second download of the same update while one is running.
+- Media controls (MPRIS) show volume changes made in Gatefold, and a volume below 0 from another program counts as 0.
+- A full song analysis reports itself finished only once all its threads are done.
+- Lyrics of a Spotify song (from LRCLIB) no longer give way to "No Lyrics" when the library is scanned.
+- Playlists: another playlist opens at the top instead of at the scroll position of the one before; covers of Spotify songs that a sync brings in show without opening the playlist again; a song dragged from the queue into a playlist (or back) no longer moves an unrelated song there.
+- Statistics: reading the plays no longer freezes the window; a period without plays can't be replaced by the count of the period chosen before; Top Songs shows the album's chosen cover, as Top Albums does.
+- An album opened from an artist page shows its new version after tags change, and closes when the album is gone.
+- With nothing playing, the narrow player header no longer shows the last song's title.
+- *Identify Artist*: an earlier, slower search can't replace the results of a newer one.
+- Sorting the albums and refreshing Spotify's shelves are quicker in large libraries.
+- Suggestions mixed into the queue pick among all equally good songs (all of one genre, say), not always the same few in library order.
+- Finding Spotify versions of library songs and albums: a placeholder barcode (all zeros) no longer makes two albums the same; a remix by "Mr. …" is no longer taken for an instrumental; "Taylor’s Version" and "Taylor's Version" are the same; artist names of punctuation only no longer count as the same artist.
+- Artist information: a wrong or deleted MusicBrainz release ID in the tags no longer stops the lookup (the next release or the name search is tried); Wikidata is asked once per artist instead of twice; portrait credits show "&" and spaces instead of "&amp;" and "&#160;".
+- The song analysis reads bpmdetect's last tempo report, which comes with the end of the song.
+- XSPF playlists from other players with relative paths like `01%20Song.flac` find their songs.
 
 ## 0.3.0 (pre-release)
 

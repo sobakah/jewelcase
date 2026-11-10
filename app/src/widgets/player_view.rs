@@ -696,6 +696,11 @@ impl PlayerView {
             }
             None => {
                 imp.title.set_label(&gettext("Not Playing"));
+                // The narrow header and the cover's label too: nothing of
+                // the last song stays.
+                imp.header_title.set_label(&gettext("Not Playing"));
+                imp.cover.set_label("");
+                imp.spotify_uri.replace(None);
                 imp.album_link.set(None);
                 imp.artist_link.set(None);
                 imp.subtitle.set_text(&gettext("Pick an album to start"));

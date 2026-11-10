@@ -1,12 +1,12 @@
 //! Listening statistics (CONCEPT.md §6.3): the play log and what played
 //! most in a period, with the change against the period before.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{OptionalExtension, params};
 
 use super::{Database, Result};
-use crate::library::artists::track_artist_names;
+use crate::library::artists::track_artist_names_keeping;
 
 /// One play from the log.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -132,6 +132,16 @@ impl Database {
         })
     }
 
+    /// The names of library and Spotify artists, lowercase: credits that
+    /// are one of them aren't split in the statistics.
+    pub fn known_artist_names(&self) -> Result<HashSet<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT lower(name) FROM artist UNION SELECT lower(name) FROM spotify_artist",
+        )?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// A library artist by name (any case).
     pub fn artist_named(&self, name: &str) -> Result<Option<i64>> {
         Ok(self
@@ -147,13 +157,14 @@ impl Database {
 
 impl Summary {
     /// What played most in `current`, each list compared with `previous`
-    /// (the period before; empty: no trends).
-    pub fn new(current: &[PlayEntry], previous: &[PlayEntry]) -> Self {
+    /// (the period before; empty: no trends). `known`: lowercase artist
+    /// names that stay whole ([`Database::known_artist_names`]).
+    pub fn new(current: &[PlayEntry], previous: &[PlayEntry], known: &HashSet<String>) -> Self {
         let compare = !previous.is_empty();
         let with_trend = |kind: Kind| {
-            let mut now = tally(current, kind);
+            let mut now = tally(current, kind, known);
             if compare {
-                let before: HashMap<String, usize> = tally(previous, kind)
+                let before: HashMap<String, usize> = tally(previous, kind, known)
                     .into_iter()
                     .enumerate()
                     .map(|(place, r)| (kind.key_of(&r), place))
@@ -193,6 +204,7 @@ impl Kind {
         self,
         entry: &PlayEntry,
         names: &mut HashMap<String, Vec<String>>,
+        known: &HashSet<String>,
     ) -> Vec<(String, String, Option<String>)> {
         match self {
             // The same title and artist is the same song, also when it
@@ -214,8 +226,12 @@ impl Kind {
                 names
                     .entry(credit.to_owned())
                     .or_insert_with(|| {
-                        let mut found = track_artist_names(credit);
-                        found.dedup_by_key(|n| n.to_lowercase());
+                        let mut found = track_artist_names_keeping(credit, |n| {
+                            known.contains(&n.to_lowercase())
+                        });
+                        // Once per play, also for "A & B feat. A".
+                        let mut seen = HashSet::new();
+                        found.retain(|n| seen.insert(n.to_lowercase()));
                         found
                     })
                     .iter()
@@ -261,11 +277,11 @@ impl Kind {
 }
 
 /// Plays per group, most first (then listening time, then name).
-fn tally(entries: &[PlayEntry], kind: Kind) -> Vec<Ranked> {
+fn tally(entries: &[PlayEntry], kind: Kind, known: &HashSet<String>) -> Vec<Ranked> {
     let mut groups: HashMap<String, Ranked> = HashMap::new();
     let mut names = HashMap::new();
     for entry in entries {
-        for (key, name, artist) in kind.groups(entry, &mut names) {
+        for (key, name, artist) in kind.groups(entry, &mut names, known) {
             let ranked = groups.entry(key).or_insert_with(|| Ranked {
                 name: name.clone(),
                 artist: artist.clone(),
@@ -370,7 +386,7 @@ mod tests {
             play("Wild Flower", "RM (feat. Youjeen)", "Indigo", None),
             play("Sorry", "Beyoncé", "Lemonade", None),
         ];
-        let summary = Summary::new(&current, &previous);
+        let summary = Summary::new(&current, &previous, &HashSet::new());
         assert_eq!(summary.plays, 5);
         assert_eq!(summary.ms_played, 5000);
         let songs: Vec<(&str, u32)> = summary
@@ -398,10 +414,44 @@ mod tests {
         assert_eq!(summary.genres.len(), 2);
         // Nothing before: no trends.
         assert!(
-            Summary::new(&current, &[])
+            Summary::new(&current, &[], &HashSet::new())
                 .songs
                 .iter()
                 .all(|s| s.trend.is_none())
+        );
+    }
+
+    #[test]
+    fn known_bands_stay_whole_and_each_artist_counts_once() {
+        let known: HashSet<String> = ["mumford & sons", "earth, wind & fire"]
+            .map(str::to_owned)
+            .into();
+        let current = [
+            play("The Cave", "Mumford & Sons", "Sigh No More", None),
+            play(
+                "September",
+                "Earth, Wind & Fire feat. Someone",
+                "Best Of",
+                None,
+            ),
+            play("Song", "A & B feat. A", "Album", None),
+        ];
+        let summary = Summary::new(&current, &[], &known);
+        let mut artists: Vec<(&str, u32)> = summary
+            .artists
+            .iter()
+            .map(|a| (a.name.as_str(), a.plays))
+            .collect();
+        artists.sort();
+        assert_eq!(
+            artists,
+            [
+                ("A", 1),
+                ("B", 1),
+                ("Earth, Wind & Fire", 1),
+                ("Mumford & Sons", 1),
+                ("Someone", 1)
+            ]
         );
     }
 
@@ -426,5 +476,6 @@ mod tests {
         assert!(db.album_named("Nineteen", None).unwrap().is_none());
         assert!(db.artist_named("ADELE").unwrap().is_some());
         assert!(db.artist_named("Nobody").unwrap().is_none());
+        assert!(db.known_artist_names().unwrap().contains("adele"));
     }
 }

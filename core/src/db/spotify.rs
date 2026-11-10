@@ -626,13 +626,22 @@ impl Database {
         Ok(())
     }
 
-    /// A library entry now has its Spotify version.
-    pub fn set_item_spotify(&mut self, item_id: i64, uri: &str) -> Result<()> {
+    /// A library entry now has its Spotify version. `chosen`: the user
+    /// accepted it, so a re-read from Spotify keeps the library song even
+    /// when matching alone would only suggest it. The same pair chosen in
+    /// another playlist counts as chosen here too.
+    pub fn set_item_spotify(&mut self, item_id: i64, uri: &str, chosen: bool) -> Result<()> {
         self.conn.execute(
             "UPDATE playlist_item SET spotify_uri = ?2, suggested_spotify = NULL,
-               match_state = CASE WHEN local_track_id IS NULL THEN 'spotify_only' ELSE 'matched' END
+               match_state = CASE
+                 WHEN local_track_id IS NULL THEN 'spotify_only'
+                 WHEN ?3 OR EXISTS (SELECT 1 FROM playlist_item other
+                   WHERE other.local_track_id = playlist_item.local_track_id
+                     AND other.spotify_uri = ?2 AND other.match_state = 'user_matched')
+                   THEN 'user_matched'
+                 ELSE 'matched' END
              WHERE id = ?1",
-            params![item_id, uri],
+            params![item_id, uri, chosen],
         )?;
         Ok(())
     }
@@ -829,7 +838,7 @@ impl Database {
     ) -> Result<Vec<i64>> {
         let tx = self.conn.transaction()?;
         let mut position: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM playlist_item WHERE playlist_id = ?1",
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_item WHERE playlist_id = ?1",
             [id],
             |row| row.get(0),
         )?;
@@ -1496,5 +1505,50 @@ mod tests {
         assert!(ops[0].1.contains("rename"));
         db.remove_spotify_op(ops[0].0).unwrap();
         assert_eq!(db.playlists_with_ops().unwrap(), [id]);
+    }
+
+    #[test]
+    fn an_accepted_suggestion_survives_a_reread() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/25/2.flac", "25", "Send My Love", 2)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let aliases = Aliases::default();
+        let index = MatchIndex::new(db.match_tracks().unwrap(), &aliases);
+        let track = db.match_tracks().unwrap()[0].track_id;
+        let id = db.create_playlist("Mine", 5).unwrap();
+        db.add_to_playlist(id, &[track], None, 5).unwrap();
+        db.link_playlist(id, "sp1", "snap1", Some("Max")).unwrap();
+        // Spotify's version is 6 s longer: matching alone only suggests it,
+        // but the user accepted it.
+        let item = db.playlist_items(id).unwrap()[0].id;
+        db.set_item_spotify(item, "spotify:track:love", true)
+            .unwrap();
+        let entries = vec![remote(
+            "spotify:track:love",
+            "Send My Love (To Your New Lover)",
+            186,
+        )];
+        db.set_spotify_items(id, &entries, &index, "snap2", 8)
+            .unwrap();
+        assert_eq!(
+            states(&db, id),
+            [(
+                Some("spotify:track:love".into()),
+                "user_matched".into(),
+                true
+            )]
+        );
+        // The same song in another playlist, found through that choice:
+        // it counts as chosen there too.
+        let other = db.create_playlist("Other", 9).unwrap();
+        db.add_to_playlist(other, &[track], None, 9).unwrap();
+        let item = db.playlist_items(other).unwrap()[0].id;
+        db.set_item_spotify(item, "spotify:track:love", false)
+            .unwrap();
+        assert_eq!(
+            db.playlist_items(other).unwrap()[0].match_state,
+            "user_matched"
+        );
     }
 }

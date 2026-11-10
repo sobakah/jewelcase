@@ -51,8 +51,11 @@ struct AlbumEntry {
 }
 
 enum ScanMessage {
+    /// lyrembed's aliases, before scanning: the library read again during
+    /// the scan matches with them.
+    Aliases(Aliases),
     Progress(ScanProgress),
-    Done(Result<ScanSummary, String>, Aliases),
+    Done(Result<ScanSummary, String>),
 }
 
 /// What the grids show, read from the database (on any thread).
@@ -571,7 +574,7 @@ impl Library {
             .flatten()
             .copied()
             .collect();
-        if let Some(code) = &album.upc {
+        if let Some(code) = album.upc.as_ref().filter(|c| !barcode_key(c).is_empty()) {
             candidates.extend(
                 index
                     .by_barcode
@@ -614,7 +617,7 @@ impl Library {
                 for key in artist_keys(std::slice::from_ref(&version.artist_credit), &aliases) {
                     index.by_artist.entry(key).or_default().push(position);
                 }
-                if let Some(code) = &barcode {
+                if let Some(code) = barcode.as_ref().filter(|c| !barcode_key(c).is_empty()) {
                     index
                         .by_barcode
                         .entry(barcode_key(code))
@@ -1319,16 +1322,20 @@ impl Library {
 
     /// The suggested Spotify track is right: the entry goes to Spotify.
     pub fn accept_spotify_suggestion(&self, id: i64, item: i64, uri: &str) {
-        if self.refuse_while_sending(id) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             return;
         }
+        let linked = self.spotify_link(id).is_some();
         let mut position = None;
         self.playlist_op_quiet(|db, _| {
-            db.set_item_spotify(item, uri)?;
-            position = db.remote_position(item)?;
+            // Where it goes on Spotify first: if that can't be read,
+            // nothing is changed (not the entry without its add).
+            let at = db.remote_position(item)?;
+            db.set_item_spotify(item, uri, true)?;
+            position = at;
             Ok(())
         });
-        if let Some(position) = position {
+        if linked && let Some(position) = position {
             let op = self.spotify_add(id, vec![uri.to_owned()], position);
             self.queue_spotify_op(id, op);
         }
@@ -1377,6 +1384,10 @@ impl Library {
         })
         .await
         .map_err(|_| "the cover job failed".to_owned())??;
+        // Asked again: sending may have started while the image decoded.
+        if self.refuse_while_sending(id) {
+            return Ok(());
+        }
         self.playlist_op_quiet(|db, now| db.set_playlist_cover(id, Some(&key), now));
         // Spotify gets it too, for playlists that are synced and editable.
         if self.spotify_link(id).is_some_and(|p| p.editable) {
@@ -1482,6 +1493,7 @@ impl Library {
             let text = crate::tools::lyrembed_aliases_over_dbus()
                 .or_else(|| lyrembed.as_deref().and_then(Aliases::list_from_program));
             let aliases = Aliases::from_text_cached(text, &config::aliases_cache_path());
+            let _ = tx.send_blocking(ScanMessage::Aliases(aliases.clone()));
             let result = Database::open(&config::database_path())
                 .map_err(|e| e.to_string())
                 .and_then(|mut db| {
@@ -1492,7 +1504,7 @@ impl Library {
                     scanner::scan(&mut db, &folders, &aliases, &covers, force, &progress)
                         .map_err(|e| e.to_string())
                 });
-            let _ = tx.send_blocking(ScanMessage::Done(result, aliases));
+            let _ = tx.send_blocking(ScanMessage::Done(result));
         });
 
         glib::spawn_future_local(glib::clone!(
@@ -1500,19 +1512,34 @@ impl Library {
             self,
             async move {
                 let mut reloaded = false;
+                let mut done = false;
                 while let Ok(message) = rx.recv().await {
                     match message {
+                        ScanMessage::Aliases(aliases) => {
+                            let old = library.imp().aliases.replace(aliases);
+                            if old != *library.aliases() {
+                                // Matched with the new ones from now on.
+                                library.imp().match_index.replace(None);
+                                library.imp().album_index.replace(None);
+                            }
+                        }
                         ScanMessage::Progress(ScanProgress::AlbumsReady) => {
                             library.reload_in_background();
                             reloaded = true;
                         }
                         ScanMessage::Progress(progress) => library.show_progress(progress),
-                        ScanMessage::Done(result, aliases) => {
-                            library.imp().aliases.replace(aliases);
+                        ScanMessage::Done(result) => {
+                            done = true;
                             library.scan_done(result, reloaded);
                             break;
                         }
                     }
+                }
+                // The scan thread ended without a result (it panicked):
+                // not left "scanning" for good, which would hold back
+                // every later scan.
+                if !done {
+                    library.scan_done(Err("the scan stopped unexpectedly".into()), reloaded);
                 }
             }
         ));

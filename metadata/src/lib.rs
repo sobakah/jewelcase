@@ -86,6 +86,9 @@ pub struct Links {
     pub spotify_id: Option<String>,
     pub website: Option<String>,
     pub wikipedia_url: Option<String>,
+    /// The Commons image Wikidata names (`P18`), when Wikidata was read in
+    /// this lookup (its entity isn't fetched a second time for it).
+    pub commons_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +190,7 @@ impl Client {
                     info.links.spotify_id = info.links.spotify_id.take().or(wikidata.spotify_id);
                     info.links.wikipedia_url =
                         wikidata.wikipedia_url.or(info.links.wikipedia_url.take());
+                    info.links.commons_file = wikidata.image_file;
                 }
                 Err(err) => tracing::info!("Wikidata lookup of {qid} failed: {err}"),
             }
@@ -203,8 +207,18 @@ impl Client {
     /// The MBID via the artist's releases (exact), else a confident search.
     fn identify(&self, query: &ArtistQuery) -> Result<Identity> {
         for release in query.release_mbids.iter().take(3) {
-            let json =
-                self.musicbrainz(&format!("release/{release}"), &[("inc", "artist-credits")])?;
+            let json = match self
+                .musicbrainz(&format!("release/{release}"), &[("inc", "artist-credits")])
+            {
+                Ok(json) => json,
+                // A mistyped or deleted release ID: the next one, or
+                // the search. (Being offline or busy still ends it.)
+                Err(err) if err.is_refused() => {
+                    tracing::info!("MusicBrainz refused release {release}: {err}");
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
             if let Some(mbid) = artist_from_release(&json, &query.name) {
                 return Ok(Identity::Found(mbid));
             }
@@ -249,7 +263,7 @@ impl Client {
         if providers.wikidata
             && let Some(qid) = &links.wikidata_id
         {
-            match self.commons_portrait(qid) {
+            match self.commons_portrait(qid, links.commons_file.as_deref()) {
                 Ok(Some(candidate)) => candidates.push(candidate),
                 Ok(None) => {}
                 Err(err) => {
@@ -317,13 +331,20 @@ impl Client {
         parse_wikidata(&json, qid, language).ok_or(Error::Format("Wikidata"))
     }
 
-    fn commons_portrait(&self, qid: &str) -> Result<Option<PortraitCandidate>> {
-        let json = self.json(
-            &format!("https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"),
-            &[],
-        )?;
-        let Some(file) = parse_wikidata(&json, qid, "en").and_then(|w| w.image_file) else {
-            return Ok(None);
+    /// `file`: the image, if Wikidata was read already.
+    fn commons_portrait(&self, qid: &str, file: Option<&str>) -> Result<Option<PortraitCandidate>> {
+        let file = match file {
+            Some(file) => file.to_owned(),
+            None => {
+                let json = self.json(
+                    &format!("https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"),
+                    &[],
+                )?;
+                let Some(file) = parse_wikidata(&json, qid, "en").and_then(|w| w.image_file) else {
+                    return Ok(None);
+                };
+                file
+            }
         };
         let json = self.json(
             "https://commons.wikimedia.org/w/api.php",
@@ -909,7 +930,54 @@ fn strip_html(html: &str) -> String {
             _ => {}
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    // After the tags are gone, so "&lt;b&gt;" stays text.
+    decode_entities(&out)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `&amp;`, `&#160;`, `&#x2019;` and the other common entities; unknown
+/// ones stay as they are.
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let decoded = after.find(';').filter(|end| *end <= 10).and_then(|end| {
+            let name = &after[..end];
+            let c = match name {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "nbsp" => Some('\u{a0}'),
+                _ => {
+                    let number = name.strip_prefix('#')?;
+                    let code = match number.strip_prefix(['x', 'X']) {
+                        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                        None => number.parse().ok()?,
+                    };
+                    char::from_u32(code)
+                }
+            }?;
+            Some((c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A Wikipedia title as one URL path segment: percent-encoded except
@@ -1039,6 +1107,7 @@ mod tests {
                 spotify_id: Some("3Nrfpe0tUJi4K4DXYWgMUX".into()),
                 website: Some("https://ibighit.com/bts".into()),
                 wikipedia_url: None,
+                commons_file: None,
             }
         );
     }
@@ -1067,6 +1136,15 @@ mod tests {
             english.wikipedia_url.as_deref(),
             Some("https://en.wikipedia.org/wiki/BTS")
         );
+    }
+
+    #[test]
+    fn html_entities_in_attributions() {
+        assert_eq!(
+            strip_html("<a href=\"x\">Foo &amp; Bar</a>, CC&#160;BY-SA&#x20;4.0"),
+            "Foo & Bar, CC BY-SA 4.0"
+        );
+        assert_eq!(strip_html("&lt;b&gt; &unknown; &"), "<b> &unknown; &");
     }
 
     #[test]

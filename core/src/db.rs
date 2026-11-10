@@ -56,6 +56,33 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/028_unknown_lengths.sql")),
 ];
 
+/// Rebuilds the album table with AUTOINCREMENT, once
+/// (`db/album_autoincrement.sql`). Needs foreign keys off.
+fn album_ids_autoincrement(conn: &mut Connection) -> Result<()> {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'album'",
+        [],
+        |row| row.get(0),
+    )?;
+    if sql.contains("AUTOINCREMENT") {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
+    tx.execute_batch(include_str!("db/album_autoincrement.sql"))?;
+    let broken: i64 = tx.query_row(
+        "SELECT count(*) FROM pragma_foreign_key_check WHERE parent = 'album'",
+        [],
+        |row| row.get(0),
+    )?;
+    if broken > 0 {
+        // Rolled back on drop: the table stays as it was.
+        tracing::warn!("Album IDs stay as they are: {broken} foreign keys don't fit");
+        return Ok(());
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Separates the values of multi-value tags in one column.
 const LIST_SEPARATOR: char = '\u{1f}';
 
@@ -259,9 +286,13 @@ impl Database {
 
     fn setup(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Foreign keys only after migrating: rebuilding a table drops the
+        // old one, which would otherwise empty the tables referring to it.
+        conn.pragma_update(None, "foreign_keys", false)?;
         Migrations::from_slice(MIGRATIONS).to_latest(&mut conn)?;
+        album_ids_autoincrement(&mut conn)?;
+        conn.pragma_update(None, "foreign_keys", true)?;
         Ok(Self { conn })
     }
 
@@ -435,13 +466,16 @@ impl Database {
         Ok(())
     }
 
-    /// A cached romanization: `Some(None)` when lyrembed had nothing to do.
-    pub fn romanized(&self, key: &str) -> Result<Option<Option<String>>> {
+    /// A cached romanization: `Some(None)` when lyrembed had nothing to
+    /// do, if it said so since `misses_since` (a backend installed later
+    /// may romanize it after all).
+    pub fn romanized(&self, key: &str, misses_since: i64) -> Result<Option<Option<String>>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT lyrics FROM romanized WHERE key = ?1",
-                [key],
+                "SELECT lyrics FROM romanized
+                 WHERE key = ?1 AND (lyrics IS NOT NULL OR checked >= ?2)",
+                params![key, misses_since],
                 |row| row.get(0),
             )
             .optional()?)
@@ -1111,24 +1145,27 @@ impl Database {
             |row| row.get(0),
         )?;
         let at = position.unwrap_or(count).min(count);
+        // Spotify songs (negative IDs) go in with add_streams_to_playlist;
+        // songs a scan removed meanwhile don't go in. Only the rest make
+        // room, or the positions would have gaps.
+        let adding: Vec<_> = track_ids
+            .iter()
+            .filter(|track_id| **track_id > 0)
+            .filter_map(|track_id| tracks.get(track_id))
+            .collect();
         tx.execute(
             "UPDATE playlist_item SET position = position + ?3
              WHERE playlist_id = ?1 AND position >= ?2",
-            params![id, at, track_ids.len() as i64],
+            params![id, at, adding.len() as i64],
         )?;
         {
             let mut insert = tx.prepare_cached(INSERT_ITEM)?;
-            for (offset, track_id) in track_ids.iter().enumerate() {
-                // Spotify songs (negative IDs) go in with
-                // add_streams_to_playlist.
-                let Some(track) = tracks.get(track_id).filter(|_| *track_id > 0) else {
-                    continue;
-                };
+            for (offset, track) in adding.into_iter().enumerate() {
                 let tags = &track.record.tags;
                 insert.execute(params![
                     id,
                     at + offset as u32,
-                    track_id,
+                    track.record.id,
                     tags.isrc,
                     tags.title,
                     tags.artist.clone().or(track.album_artist.clone()),
@@ -1160,7 +1197,7 @@ impl Database {
         let tx = self.conn.transaction()?;
         {
             let start: u32 = tx.query_row(
-                "SELECT COUNT(*) FROM playlist_item WHERE playlist_id = ?1",
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_item WHERE playlist_id = ?1",
                 [id],
                 |row| row.get(0),
             )?;
@@ -2482,6 +2519,40 @@ mod tests {
     }
 
     #[test]
+    fn romanizations_are_kept_and_misses_asked_again_later() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.set_romanized("found", Some("Tōkyō"), 100).unwrap();
+        db.set_romanized("miss", None, 100).unwrap();
+        // Long after: a romanization still counts, "nothing to do" doesn't.
+        assert_eq!(
+            db.romanized("found", 1_000).unwrap(),
+            Some(Some("Tōkyō".to_owned()))
+        );
+        assert_eq!(db.romanized("miss", 1_000).unwrap(), None);
+        assert_eq!(db.romanized("miss", 50).unwrap(), Some(None));
+        assert_eq!(db.romanized("other", 0).unwrap(), None);
+    }
+
+    #[test]
+    fn a_removed_albums_id_isnt_reused() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/A/1/01.flac", "1", "One", 1)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let first = db.albums().unwrap()[0].id;
+        db.delete_tracks(&[PathBuf::from("/m/A/1/01.flac")])
+            .unwrap();
+        rebuild(&mut db);
+        assert!(db.albums().unwrap().is_empty());
+        db.upsert_tracks(&[file("/m/A/2/01.flac", "2", "Two", 1)], 1)
+            .unwrap();
+        rebuild(&mut db);
+        let albums = db.albums().unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_ne!(albums[0].id, first);
+    }
+
+    #[test]
     fn another_artist_of_the_same_name_doesnt_inherit_the_data() {
         let mut db = Database::open_in_memory().unwrap();
         db.upsert_tracks(&[file("/m/A/1/01.flac", "1", "One", 1)], 1)
@@ -2638,6 +2709,38 @@ mod tests {
             .unwrap();
         let added = db.playlist_items(playlist).unwrap()[0].added.unwrap();
         assert!((before - 1..=before + 5).contains(&added), "{added}");
+    }
+
+    #[test]
+    fn songs_that_are_gone_leave_no_gap_in_a_playlist() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/Adele/25/01.flac", "25", "Hello", 1),
+                file("/m/Adele/25/02.flac", "25", "Send My Love", 2),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let ids = track_ids(&db);
+        let playlist = db.create_playlist("Mix", 5).unwrap();
+        db.add_to_playlist(playlist, &[ids["Hello"]], None, 6)
+            .unwrap();
+        // 999 was removed by a scan before it got here.
+        db.add_to_playlist(playlist, &[999, ids["Send My Love"]], Some(0), 7)
+            .unwrap();
+        let positions: Vec<i64> = {
+            let mut stmt = db
+                .conn
+                .prepare("SELECT position FROM playlist_item ORDER BY position")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(positions, [0, 1]);
     }
 
     #[test]

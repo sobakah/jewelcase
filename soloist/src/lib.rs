@@ -151,6 +151,15 @@ pub struct Position {
 }
 
 impl Position {
+    /// A song's start, now.
+    pub fn at_start() -> Self {
+        Self {
+            position_ms: 0,
+            timestamp_ms: now_ms(),
+            speed: 1.0,
+        }
+    }
+
     fn parse(value: &Value) -> Option<Self> {
         Some(Self {
             position_ms: value["position_ms"].as_u64()?,
@@ -549,7 +558,13 @@ impl Soloist {
     pub fn shutdown(&self) {
         let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(mut child) = child {
-            // SIGTERM first, so Soloist can remove its runtime files.
+            // Exited and reaped already (the exit waiter asks every 300
+            // ms): its PID may belong to another process by now.
+            if child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            // SIGTERM first, so Soloist can remove its runtime files. Not
+            // reaped yet, so the PID is still this child's.
             if let Ok(pid) = libc::pid_t::try_from(child.id()) {
                 // SAFETY: a plain signal to our own child.
                 unsafe {
@@ -694,10 +709,19 @@ fn command_result(text: &str) -> Option<String> {
 }
 
 /// The API has no authentication: never talk to it over the network.
+/// Only a loopback address (or "localhost") stays; a name that merely
+/// starts like one ("127.example.com") doesn't. IPv6 without brackets.
 fn local_only(addr: &str) -> String {
     let addr = addr.trim();
-    if addr.starts_with("127.") || addr == "localhost" || addr == "::1" {
-        addr.to_owned()
+    let bare = addr
+        .strip_prefix('[')
+        .and_then(|a| a.strip_suffix(']'))
+        .unwrap_or(addr);
+    let loopback = bare
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback());
+    if loopback || bare == "localhost" {
+        bare.to_owned()
     } else {
         "127.0.0.1".into()
     }
@@ -772,7 +796,11 @@ fn connect_to(addr: &str, port: u16) -> Option<WebSocket<TcpStream>> {
     let start = Instant::now();
     loop {
         if let Ok(stream) = TcpStream::connect((addr, port)) {
-            let url = format!("ws://{addr}:{port}");
+            let url = if addr.contains(':') {
+                format!("ws://[{addr}]:{port}")
+            } else {
+                format!("ws://{addr}:{port}")
+            };
             match tungstenite::client::client(url.as_str(), stream) {
                 Ok((socket, _)) => {
                     let _ = socket.get_ref().set_read_timeout(Some(READ_POLL));
@@ -955,6 +983,15 @@ mod tests {
             Some(("127.0.0.1".into(), 9090))
         );
         assert_eq!(soloistd_websocket(r#"{"api_key":"k"}"#), None);
+        assert_eq!(
+            soloistd_websocket(r#"{"websocket":"[::1]:9090"}"#),
+            Some(("::1".into(), 9090))
+        );
+        assert_eq!(
+            soloistd_websocket(r#"{"websocket":"127.example.com:9090"}"#),
+            Some(("127.0.0.1".into(), 9090))
+        );
+        assert_eq!(local_only("127.0.0.2"), "127.0.0.2");
     }
 
     #[test]
