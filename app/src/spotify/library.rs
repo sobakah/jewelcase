@@ -23,6 +23,15 @@ use crate::objects::TrackObject;
 /// several (10 releases each).
 const DISCOGRAPHY_AGE_S: i64 = 7 * 24 * 3600;
 
+/// An artist's releases on Spotify, and when Spotify said so.
+pub struct Discography {
+    pub albums: Vec<SpotifyAlbum>,
+    /// When they were read (Unix seconds).
+    pub read: i64,
+    /// Spotify couldn't be asked anew (why); these are the stored ones.
+    pub problem: Option<String>,
+}
+
 /// Something that can be in the user's Spotify library: a saved album,
 /// a followed artist.
 #[derive(Debug, Clone)]
@@ -166,40 +175,55 @@ impl Spotify {
         });
     }
 
-    /// An artist's albums, EPs and singles on Spotify: read again after a
-    /// week; when Spotify can't be asked, what was read before, else why
-    /// not (for the user).
-    pub async fn discography(&self, artist_id: &str) -> Result<Vec<SpotifyAlbum>, String> {
+    /// An artist's releases on Spotify: the stored ones while younger than
+    /// a week, else asked for anew; `refresh`: asked for anew in any case
+    /// (the page's Refresh button). Stored ones also stand in when Spotify
+    /// can't be asked.
+    pub async fn discography(&self, artist_id: &str, refresh: bool) -> Result<Discography, String> {
         let library = GatefoldApplication::get().library();
         let cached = library
             .db()
             .and_then(|db| db.discography(artist_id).ok().flatten());
         if let Some((albums, read)) = &cached
+            && !refresh
             && now() - read < DISCOGRAPHY_AGE_S
         {
-            return Ok(albums.clone());
+            return Ok(Discography {
+                albums: albums.clone(),
+                read: *read,
+                problem: None,
+            });
         }
+        let stored = |problem: String| match &cached {
+            Some((albums, read)) => Ok(Discography {
+                albums: albums.clone(),
+                read: *read,
+                problem: Some(problem),
+            }),
+            None => Err(problem),
+        };
         if !self.is_connected() {
-            return cached
-                .map(|(albums, _)| albums)
-                .ok_or_else(|| gettext("Not connected to Spotify; connect in Preferences."));
+            return stored(gettext("Not connected to Spotify; connect in Preferences."));
         }
         let id = artist_id.to_owned();
         match self.call(move |client| client.artist_albums(&id)).await {
             Ok(albums) => {
                 let albums: Vec<SpotifyAlbum> = albums.iter().map(album_from).collect();
+                let read = now();
                 if let Some(mut db) = library.db()
-                    && let Err(err) = db.store_discography(artist_id, &albums, now())
+                    && let Err(err) = db.store_discography(artist_id, &albums, read)
                 {
                     tracing::warn!("Cannot store a discography: {err}");
                 }
-                Ok(albums)
+                Ok(Discography {
+                    albums,
+                    read,
+                    problem: None,
+                })
             }
             Err(err) => {
                 tracing::warn!("Cannot read the releases of {artist_id}: {err}");
-                cached
-                    .map(|(albums, _)| albums)
-                    .ok_or_else(|| super::answer_error(&err))
+                stored(super::answer_error(&err))
             }
         }
     }

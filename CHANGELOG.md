@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Playlists: the search above the songs now searches the playlist itself (title, artist, album). Its **+** button switches to adding songs from your library and, with the Spotify button beside it, Spotify's songs too; that's off by default for Gatefold's playlists and on for Spotify's.
+- Artist pages say when their Spotify releases were read (they're kept a week, as Spotify limits requests about artists), with a button to ask Spotify again now.
+- The lyrics show where they come from in a small tag in the corner: in the file's tags, an LRC or text file next to it, or LRCLIB.
+- The player no longer has an arrow at the top left: its grip on top does the same (as do Escape and a click beside the player).
+
 ## 0.4.0 (pre-release)
 
 cdport's own tag editor for *Edit Tags*, also in the Flatpak, and quieter tooltips; covers that keep their size and a default sort for playlists, both set in Preferences; and 43 fixes from a review of the whole program. *Edit Tags* needs cdport 1.4.0 (`pipx upgrade cdport`); Ear Tag and the other editors can still be chosen in Preferences. On the first start Gatefold changes its database slightly (a removed album's number isn't reused), and 0.3.0 can still open it afterwards. 0.3.0 offers this update itself (its banner, then Install).

@@ -64,7 +64,22 @@ mod imp {
         /// The name may be edited here (own playlists, not linked).
         pub renamable: std::cell::Cell<bool>,
         #[template_child]
-        pub add_search: TemplateChild<gtk::SearchEntry>,
+        pub search_row: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub search: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub spotify_toggle: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
+        pub add_toggle: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
+        pub search_status: TemplateChild<gtk::Label>,
+        /// The playlist's songs shown: those with all these words
+        /// (lowercase); empty: all.
+        pub filter: RefCell<Vec<String>>,
+        /// Spotify is asked a moment after typing stops; a newer search
+        /// makes an older answer stale.
+        pub spotify_generation: std::cell::Cell<u64>,
+        pub spotify_timer: RefCell<Option<glib::SourceId>>,
         #[template_child]
         pub add_results: TemplateChild<gtk::ListBox>,
         #[template_child]
@@ -256,13 +271,35 @@ mod imp {
                 }
             ));
             self.name_entry.add_controller(keys);
-            self.add_search.connect_search_changed(glib::clone!(
+            // Search: the playlist's songs, or (Add Songs) songs to add.
+            self.search.connect_search_changed(glib::clone!(
                 #[weak]
                 obj,
-                move |entry| obj.search_songs(&entry.text())
+                move |_| obj.search_changed()
             ));
-            self.add_search
-                .connect_stop_search(|entry| entry.set_text(""));
+            self.search.connect_stop_search(|entry| entry.set_text(""));
+            self.add_toggle.connect_toggled(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.search_mode_changed()
+            ));
+            self.spotify_toggle.connect_toggled(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.search_changed()
+            ));
+            let panel = obj.downgrade();
+            self.items.set_filter_func(move |row| {
+                panel.upgrade().is_none_or(|panel| panel.row_matches(row))
+            });
+            // Spotify can be searched only while connected.
+            let spotify = GatefoldApplication::get().spotify();
+            let status = spotify.connect_status_notify(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.update_spotify_toggle()
+            ));
+            crate::widgets::disconnect_with(&*obj, &spotify, status);
             self.arrange_banner.connect_button_clicked(glib::clone!(
                 #[weak]
                 obj,
@@ -342,7 +379,14 @@ impl PlaylistPanel {
         }
         imp.playlist.replace(Some(playlist.clone()));
         if changed {
-            imp.add_search.set_text("");
+            // Another playlist: searched anew, in its songs; adding finds
+            // Spotify's songs too for Spotify playlists. A new, empty one
+            // goes straight to adding.
+            let info = playlist.playlist();
+            imp.search.set_text("");
+            imp.spotify_toggle.set_active(info.spotify_id.is_some());
+            imp.add_toggle
+                .set_active(info.item_count == 0 && info.editable);
         }
         self.refresh();
         // Spotify's version may be newer.
@@ -351,9 +395,8 @@ impl PlaylistPanel {
                 .spotify()
                 .refresh_playlist(playlist.id());
         }
-        // A new, empty playlist: go straight to finding songs.
-        if changed && playlist.playlist().item_count == 0 && playlist.playlist().editable {
-            imp.add_search.grab_focus();
+        if changed && imp.add_toggle.is_active() {
+            imp.search.grab_focus();
         }
     }
 
@@ -393,9 +436,124 @@ impl PlaylistPanel {
             .and_then(|p| p.playlist().spotify_id.clone())
     }
 
-    /// Types `text` into the "Add Songs" field (screenshot hook).
+    /// Types `text` into the search, adding songs (screenshot hook).
     pub fn search_for_songs(&self, text: &str) {
-        self.imp().add_search.set_text(text);
+        self.imp().add_toggle.set_active(true);
+        self.imp().search.set_text(text);
+    }
+
+    /// Adding finds Spotify's songs too (screenshot hook).
+    pub fn search_spotify_too(&self) {
+        self.imp().spotify_toggle.set_active(true);
+    }
+
+    /// Types `text` into the search of the playlist's songs (screenshot
+    /// hook).
+    pub fn filter_songs(&self, text: &str) {
+        self.imp().add_toggle.set_active(false);
+        self.imp().search.set_text(text);
+    }
+
+    /// "Add Songs" turned on or off: the same text searches the other way.
+    fn search_mode_changed(&self) {
+        let imp = self.imp();
+        let adding = imp.add_toggle.is_active();
+        imp.search.set_placeholder_text(Some(&if adding {
+            gettext("Add Songs…")
+        } else {
+            gettext("Search in Playlist")
+        }));
+        self.update_spotify_toggle();
+        self.search_changed();
+        if adding {
+            imp.search.grab_focus();
+        }
+    }
+
+    fn update_spotify_toggle(&self) {
+        let imp = self.imp();
+        let connected = GatefoldApplication::get().spotify().is_connected();
+        let shown = imp.add_toggle.is_active() && connected;
+        if imp.spotify_toggle.is_visible() != shown {
+            imp.spotify_toggle.set_visible(shown);
+            self.search_changed();
+        }
+    }
+
+    fn search_changed(&self) {
+        let imp = self.imp();
+        let text = imp.search.text().to_string();
+        // A Spotify search on its way is for something else now.
+        imp.spotify_generation.set(imp.spotify_generation.get() + 1);
+        if let Some(timer) = imp.spotify_timer.take() {
+            timer.remove();
+        }
+        if imp.add_toggle.is_active() {
+            self.set_filter("");
+            self.search_songs(&text);
+        } else {
+            imp.add_results.remove_all();
+            imp.add_results.set_visible(false);
+            self.set_filter(&text);
+        }
+    }
+
+    /// Shows only the songs matching `text` (all of its words).
+    fn set_filter(&self, text: &str) {
+        let imp = self.imp();
+        let words: Vec<String> = text
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        if *imp.filter.borrow() != words {
+            imp.filter.replace(words);
+            imp.items.invalidate_filter();
+        }
+        self.update_search_status();
+    }
+
+    fn row_matches(&self, row: &gtk::ListBoxRow) -> bool {
+        let imp = self.imp();
+        let words = imp.filter.borrow();
+        if words.is_empty() {
+            return true;
+        }
+        let entries = imp.entries.borrow();
+        let Some(entry) = usize::try_from(row.index())
+            .ok()
+            .and_then(|index| entries.get(index))
+        else {
+            return true;
+        };
+        entry_matches(entry, &words)
+    }
+
+    /// While searching the playlist: how many songs match.
+    fn update_search_status(&self) {
+        let imp = self.imp();
+        if imp.add_toggle.is_active() {
+            return;
+        }
+        let words = imp.filter.borrow();
+        if words.is_empty() {
+            imp.search_status.set_visible(false);
+            return;
+        }
+        let entries = imp.entries.borrow();
+        let found = entries.iter().filter(|e| entry_matches(e, &words)).count() as u32;
+        imp.search_status.set_label(&if found == 0 {
+            gettext("No songs in this playlist match")
+        } else {
+            ngettext(
+                "{found} of {total} song",
+                "{found} of {total} songs",
+                entries.len() as u32,
+            )
+            .replace("{found}", &found.to_string())
+            .replace("{total}", &entries.len().to_string())
+        });
+        imp.search_status.set_visible(true);
     }
 
     fn is_renaming(&self) -> bool {
@@ -433,10 +591,13 @@ impl PlaylistPanel {
             .rename_playlist(playlist.id(), &name);
     }
 
-    /// Library songs matching `query`, each with a button to add it.
+    /// Songs to add: the library's matching `query`, then (with Spotify's
+    /// button on) Spotify's that aren't in the library, each with a button
+    /// to add it.
     fn search_songs(&self, query: &str) {
         let imp = self.imp();
         imp.add_results.remove_all();
+        imp.search_status.set_visible(false);
         let query = query.trim();
         let Some(playlist_id) = self.playlist_id().filter(|_| !query.is_empty()) else {
             imp.add_results.set_visible(false);
@@ -449,48 +610,208 @@ impl PlaylistPanel {
             let Some(track) = tracks.get(id).cloned().map(TrackObject::new) else {
                 continue;
             };
-            let row = {
-                let row = adw::ActionRow::builder().use_markup(false).build();
-                row.set_title(&track.title());
-                row.set_subtitle(
-                    &([track.artist(), track.track().album_title.clone()]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" — ")),
-                );
-                row
-            };
-            let cover: CoverImage = glib::Object::builder()
-                .property("min-size", 40)
-                .property("natural-size", 40)
-                .build();
+            let cover = Self::result_cover();
             cover.set_cover(track.cover_key());
-            cover.set_valign(gtk::Align::Center);
-            row.add_prefix(&cover);
-            let add = gtk::Button::builder()
-                .icon_name("list-add-symbolic")
-                .tooltip_text(gettext("Add to Playlist"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat", "circular"])
-                .build();
-            let track_id = track.id();
-            add.connect_clicked(move |button| {
-                GatefoldApplication::get().library().add_to_playlist(
-                    playlist_id,
-                    &[track_id],
-                    false,
-                );
-                // Added: show it, and don't add it twice by accident.
-                button.set_icon_name("object-select-symbolic");
-                button.set_sensitive(false);
-            });
-            row.add_suffix(&add);
-            row.set_activatable_widget(Some(&add));
-            imp.add_results.append(&row);
+            let subtitle = [track.artist(), track.track().album_title.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" — ");
+            imp.add_results.append(&Self::result_row(
+                playlist_id,
+                track.id(),
+                &track.title(),
+                &subtitle,
+                &cover,
+                false,
+            ));
         }
         imp.add_results
             .set_visible(imp.add_results.first_child().is_some());
+        if imp.spotify_toggle.is_visible() && imp.spotify_toggle.is_active() {
+            self.search_spotify(playlist_id, query.to_owned(), ids);
+        } else if ids.is_empty() {
+            imp.search_status
+                .set_label(&gettext("No songs in your library match"));
+            imp.search_status.set_visible(true);
+        }
+    }
+
+    fn result_cover() -> CoverImage {
+        let cover: CoverImage = glib::Object::builder()
+            .property("min-size", 40)
+            .property("natural-size", 40)
+            .build();
+        cover.set_valign(gtk::Align::Center);
+        cover
+    }
+
+    /// A song to add (`spotify`: only on Spotify, marked as such).
+    fn result_row(
+        playlist_id: i64,
+        track_id: i64,
+        title: &str,
+        subtitle: &str,
+        cover: &CoverImage,
+        spotify: bool,
+    ) -> adw::ActionRow {
+        let row = adw::ActionRow::builder().use_markup(false).build();
+        row.set_title(title);
+        row.set_subtitle(subtitle);
+        row.add_prefix(cover);
+        if spotify {
+            let icon = gtk::Image::builder()
+                .icon_name("gatefold-spotify-symbolic")
+                .tooltip_text(gettext("On Spotify, not in your library"))
+                .css_classes(["dim-label"])
+                .build();
+            row.add_suffix(&icon);
+        }
+        let add = gtk::Button::builder()
+            .icon_name("list-add-symbolic")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular"])
+            .build();
+        crate::widgets::set_accessible_label(&add, &gettext("Add to Playlist"));
+        add.connect_clicked(move |button| {
+            GatefoldApplication::get()
+                .library()
+                .add_to_playlist(playlist_id, &[track_id], false);
+            // Added: show it, and don't add it twice by accident.
+            button.set_icon_name("object-select-symbolic");
+            button.set_sensitive(false);
+        });
+        row.add_suffix(&add);
+        row.set_activatable_widget(Some(&add));
+        row
+    }
+
+    /// Asks Spotify a moment after typing stops, then adds its songs that
+    /// aren't among `listed` (the library's results) below them.
+    fn search_spotify(&self, playlist_id: i64, query: String, listed: Vec<i64>) {
+        const DELAY: std::time::Duration = std::time::Duration::from_millis(450);
+        let imp = self.imp();
+        let generation = imp.spotify_generation.get();
+        imp.search_status.set_label(&gettext("Searching Spotify…"));
+        imp.search_status.set_visible(true);
+        let timer = glib::timeout_add_local_once(
+            DELAY,
+            glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                move || {
+                    panel.imp().spotify_timer.replace(None);
+                    glib::spawn_future_local(async move {
+                        let answer = GatefoldApplication::get()
+                            .spotify()
+                            .call(move |client| {
+                                client.search_tracks(&query, gatefold_spotify::MAX_SEARCH_RESULTS)
+                            })
+                            .await;
+                        if panel.imp().spotify_generation.get() == generation {
+                            panel.show_spotify_songs(playlist_id, answer, &listed);
+                        }
+                    });
+                }
+            ),
+        );
+        imp.spotify_timer.replace(Some(timer));
+    }
+
+    fn show_spotify_songs(
+        &self,
+        playlist_id: i64,
+        answer: Result<Vec<gatefold_spotify::Track>, gatefold_spotify::Error>,
+        listed: &[i64],
+    ) {
+        let imp = self.imp();
+        let found = match answer {
+            Ok(found) => found,
+            Err(err) => {
+                tracing::warn!("Spotify search failed: {err}");
+                imp.search_status.set_label(&format!(
+                    "{} {}",
+                    gettext("Spotify can’t be searched right now."),
+                    crate::spotify::search_error(&err)
+                ));
+                return;
+            }
+        };
+        let library = GatefoldApplication::get().library();
+        let index = library.match_index();
+        let mut shown: std::collections::HashSet<i64> = listed.iter().copied().collect();
+        let mut covers = Vec::new();
+        for track in found.iter().filter(|t| !t.is_local) {
+            let subtitle = [Some(track.artist_line()), track.album.clone()]
+                .into_iter()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" — ");
+            let cover = Self::result_cover();
+            // In the library? Then it's the library's song (§9.5).
+            let local = index
+                .find(&gatefold_core::matching::RemoteTrack {
+                    title: track.name.clone(),
+                    artists: track.artists.clone(),
+                    album: track.album.clone(),
+                    duration_ms: track.duration_ms,
+                    isrc: track.isrc.clone(),
+                })
+                .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
+                .map(|(id, _)| id);
+            let (id, spotify) = match local {
+                Some(id) => {
+                    let song = library.tracks(&[id]).remove(&id).map(TrackObject::new);
+                    cover.set_cover(song.as_ref().and_then(TrackObject::cover_key));
+                    (id, false)
+                }
+                None => {
+                    // A Spotify song (negative ID, §9.4).
+                    let Some(id) = library.db().and_then(|mut db| {
+                        db.stream_track_id(&gatefold_core::db::StreamInfo {
+                            uri: track.uri.clone(),
+                            title: track.name.clone(),
+                            artist: Some(track.artist_line()),
+                            album: track.album.clone(),
+                            duration_ms: track.duration_ms,
+                            isrc: track.isrc.clone(),
+                            image_url: track.image_url.clone(),
+                        })
+                        .ok()
+                    }) else {
+                        continue;
+                    };
+                    if let Some(url) = &track.image_url {
+                        covers.push((cover.clone(), url.clone()));
+                    }
+                    (id, true)
+                }
+            };
+            if !shown.insert(id) {
+                continue;
+            }
+            imp.add_results.append(&Self::result_row(
+                playlist_id,
+                id,
+                &track.name,
+                &subtitle,
+                &cover,
+                spotify,
+            ));
+        }
+        let any = imp.add_results.first_child().is_some();
+        imp.add_results.set_visible(any);
+        imp.search_status
+            .set_label(&gettext("No songs in your library or on Spotify match"));
+        imp.search_status.set_visible(!any);
+        // Covers arrive after the rows.
+        let urls: Vec<String> = covers.iter().map(|(_, url)| url.clone()).collect();
+        crate::spotify::fetch_covers(urls, move || {
+            for (cover, url) in &covers {
+                cover.set_cover(Some(&crate::spotify::image_cover_key(url)));
+            }
+        });
     }
 
     /// Shows the current state of the playlist, or closes when it's gone.
@@ -544,8 +865,14 @@ impl PlaylistPanel {
         }
         imp.name
             .set_tooltip_text(renamable.then(|| gettext("Rename")).as_deref());
-        imp.add_search.set_visible(editable);
-        imp.add_search.set_sensitive(!sending);
+        // Searching: the songs (if Spotify shows them), and adding to
+        // playlists that can change.
+        imp.search_row.set_visible(info.readable || editable);
+        imp.add_toggle.set_visible(editable);
+        if !editable && imp.add_toggle.is_active() {
+            imp.add_toggle.set_active(false);
+        }
+        imp.add_results.set_sensitive(!sending);
         imp.arrange_banner.set_button_label(Some(&if sending {
             gettext("Sending…")
         } else {
@@ -613,6 +940,7 @@ impl PlaylistPanel {
         let linked = info.spotify_id.is_some();
         if same_playlist && !sort_changed && !rebuild && filled && !entries.is_empty() {
             self.update_rows(&playlist, entries);
+            self.update_search_status();
             if linked {
                 self.fetch_spotify_covers();
             }
@@ -639,6 +967,7 @@ impl PlaylistPanel {
         // Enough rows at once to reach the old place (rows are about 50 px).
         let first = keep_at.map_or(0, |(value, page)| ((value + page) / 40.0) as usize + 20);
         self.fill_rows(playlist, entries, 0, generation, first);
+        self.update_search_status();
         // Also for entries a sync brought in after the playlist opened.
         if linked {
             self.fetch_spotify_covers();
@@ -1158,6 +1487,9 @@ impl PlaylistPanel {
         }
         GatefoldApplication::get().spotify().hold_changes(id, true);
         imp.arrange_banner.set_revealed(true);
+        // Every song shows while arranging.
+        imp.add_toggle.set_active(false);
+        imp.search.set_text("");
         imp.rebuild.set(true);
         // Dragging works in the playlist's own order.
         if !self.in_own_order() {
@@ -1494,6 +1826,31 @@ fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
 
 /// The track ID an entry adds to a playlist: the library song, or the
 /// Spotify song (as one to stream, a negative ID).
+/// The entry's title, artists and album contain all `words` (lowercase).
+fn entry_matches(entry: &PlaylistItem, words: &[String]) -> bool {
+    let mut text = String::new();
+    let mut add = |part: Option<&str>| {
+        if let Some(part) = part {
+            text.push_str(&part.to_lowercase());
+            text.push('\n');
+        }
+    };
+    if let Some(track) = &entry.track {
+        let tags = &track.record.tags;
+        add(tags.title.as_deref());
+        add(tags.artist.as_deref());
+        add(track.album_artist.as_deref());
+        add(track.album_title.as_deref());
+        if tags.title.is_none() {
+            add(track.record.path.file_stem().and_then(|s| s.to_str()));
+        }
+    }
+    add(entry.title.as_deref());
+    add(entry.artist.as_deref());
+    add(entry.album.as_deref());
+    words.iter().all(|word| text.contains(word.as_str()))
+}
+
 fn entry_track_id(entry: &PlaylistItem) -> Option<i64> {
     entry_track_ids(std::slice::from_ref(entry)).pop().flatten()
 }

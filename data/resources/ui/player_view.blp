@@ -58,15 +58,8 @@ template $GatefoldPlayerView: Adw.Bin {
             }
           };
 
-          [start]
-          Gtk.Button {
-            icon-name: "pan-down-symbolic";
-            accessibility {
-              label: _("Hide Player");
-            }
-
-            action-name: "win.close-player";
-          }
+          // Hidden by the grip on top (like the side panels), dragging
+          // down, or Escape; no arrow besides.
 
           // Spotify Connect devices (CONCEPT.md §9.3).
           [end]

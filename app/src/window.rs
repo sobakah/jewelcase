@@ -1629,7 +1629,8 @@ impl GatefoldWindow {
     /// panel actions (`panel.add-to-playlist`);
     /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
     /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
-    /// `GATEFOLD_SCREENSHOT_ADD_SONGS=text` searches in the playlist panel;
+    /// `GATEFOLD_SCREENSHOT_ADD_SONGS=text` searches songs to add in the
+    /// playlist panel (`GATEFOLD_SCREENSHOT_FILTER_SONGS`: its own songs);
     /// `GATEFOLD_SCREENSHOT_SETTINGS="key=value …"` sets GSettings first;
     /// `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
     /// Without `GATEFOLD_SCREENSHOT`, only that album step runs.
@@ -1772,9 +1773,27 @@ impl GatefoldWindow {
                 window.imp().search_bar.set_search_mode(true);
                 window.imp().search_entry.set_text(&text);
             }
-            // `GATEFOLD_SCREENSHOT_ADD_SONGS=text`: search in the playlist panel.
-            if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_ADD_SONGS") {
-                window.imp().playlist_panel.search_for_songs(&text);
+            // `GATEFOLD_SCREENSHOT_ADD_SONGS=text`: search songs to add in
+            // the playlist panel; `GATEFOLD_SCREENSHOT_FILTER_SONGS=text`:
+            // its own songs. 2 s in, once the playlist is open (opening one
+            // clears its search).
+            let add = std::env::var("GATEFOLD_SCREENSHOT_ADD_SONGS").ok();
+            let filter = std::env::var("GATEFOLD_SCREENSHOT_FILTER_SONGS").ok();
+            if add.is_some() || filter.is_some() {
+                let window = window.clone();
+                glib::timeout_add_seconds_local_once(2, move || {
+                    let panel = &window.imp().playlist_panel;
+                    if let Some(text) = &add {
+                        // `GATEFOLD_SCREENSHOT_ADD_SPOTIFY=1`: Spotify too.
+                        if std::env::var_os("GATEFOLD_SCREENSHOT_ADD_SPOTIFY").is_some() {
+                            panel.search_spotify_too();
+                        }
+                        panel.search_for_songs(text);
+                    }
+                    if let Some(text) = &filter {
+                        panel.filter_songs(text);
+                    }
+                });
             }
             // `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8`: import and show a playlist.
             if let Ok(path) = std::env::var("GATEFOLD_SCREENSHOT_IMPORT") {

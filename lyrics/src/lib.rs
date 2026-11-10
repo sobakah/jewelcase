@@ -9,10 +9,14 @@ use std::path::Path;
 
 pub use lrc::Line;
 
-/// Where lyrics came from, for the pane's header.
+/// Where lyrics came from, shown beside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    Sidecar,
+    /// `Song.lrc` next to the file.
+    LrcFile,
+    /// `Song.txt` next to the file.
+    TextFile,
+    /// The file's own tags.
     Embedded,
     /// LRCLIB, for songs that aren't in the library (shown only).
     Online,
@@ -138,7 +142,7 @@ fn load_from(path: &Path, title: Option<&str>, embedded: &sources::Embedded) -> 
 
     let romanized_sidecar = sources::romanized_sidecar(path);
     if let Some(text) = sources::sidecar(path, "lrc").filter(|t| lrc::has_timestamps(t)) {
-        return LyricsState::Lyrics(synced(&text, romanized_sidecar.as_deref(), Source::Sidecar));
+        return LyricsState::Lyrics(synced(&text, romanized_sidecar.as_deref(), Source::LrcFile));
     }
 
     let synced_texts: Vec<&sources::RawLyrics> = embedded
@@ -173,7 +177,7 @@ fn load_from(path: &Path, title: Option<&str>, embedded: &sources::Embedded) -> 
         return LyricsState::Lyrics(unsynced(&raw.text, Source::Embedded));
     }
     if let Some(text) = sources::sidecar(path, "txt").filter(|t| !t.trim().is_empty()) {
-        return LyricsState::Lyrics(unsynced(&text, Source::Sidecar));
+        return LyricsState::Lyrics(unsynced(&text, Source::TextFile));
     }
     LyricsState::None
 }
@@ -270,7 +274,7 @@ mod tests {
         let LyricsState::Lyrics(lyrics) = load(&song, Some("Song")) else {
             panic!("expected lyrics");
         };
-        assert_eq!(lyrics.source, Source::Sidecar);
+        assert_eq!(lyrics.source, Source::LrcFile);
         assert!(lyrics.synced && lyrics.dual);
         assert_eq!(lyrics.lines[1].secondary.as_deref(), Some("Yoru"));
     }
@@ -324,6 +328,7 @@ mod tests {
             panic!("expected lyrics");
         };
         assert!(!lyrics.synced);
+        assert_eq!(lyrics.source, Source::TextFile);
         assert_eq!(lyrics.lines.len(), 2);
         assert_eq!(load(&song, Some("Song (Inst.)")), LyricsState::Instrumental);
     }

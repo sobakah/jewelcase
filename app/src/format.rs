@@ -28,6 +28,25 @@ pub fn length(ms: u64) -> String {
     }
 }
 
+/// How long ago `then` (Unix seconds) was, by calendar day here: "today",
+/// "yesterday", "3 days ago".
+pub fn days_ago(then: i64) -> String {
+    // Days since 1970 in local time.
+    fn local_day(unix: i64) -> i64 {
+        let offset = gtk::glib::DateTime::from_unix_local(unix)
+            .map(|d| d.utc_offset().as_seconds())
+            .unwrap_or(0);
+        (unix + offset).div_euclid(86_400)
+    }
+    let days = local_day(crate::metadata::now()) - local_day(then);
+    match days {
+        ..=0 => gettext("today"),
+        1 => gettext("yesterday"),
+        n => ngettext("{} day ago", "{} days ago", n.min(u32::MAX as i64) as u32)
+            .replace("{}", &n.to_string()),
+    }
+}
+
 pub fn song_count(count: u32) -> String {
     ngettext("{} song", "{} songs", count).replace("{}", &count.to_string())
 }

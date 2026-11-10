@@ -71,6 +71,9 @@ mod imp {
         /// Counts fills of the sections; an older "On Spotify" answer is
         /// dropped.
         pub generation: Cell<u64>,
+        /// The next look at Spotify asks it anew (Refresh), instead of
+        /// taking releases read in the last week.
+        pub ask_spotify: Cell<bool>,
 
         pub artist_id: Cell<i64>,
         pub artist: RefCell<Option<ArtistObject>>,
@@ -129,6 +132,17 @@ mod imp {
                     .map(|t| t.track().record.path.clone())
                     .collect();
                 GatefoldApplication::get().tools().edit_tags(files);
+            });
+            // Spotify's releases asked for anew (only those: a library
+            // artist's online lookup isn't repeated).
+            klass.install_action("artist.refresh-spotify", None, |page, _, _| {
+                page.imp().ask_spotify.set(true);
+                page.action_set_enabled("artist.refresh-spotify", false);
+                if page.spotify_artist_id().is_some() {
+                    page.refresh_spotify();
+                } else {
+                    page.fill_sections();
+                }
             });
             klass.install_action("artist.lookup", None, |page, _, _| {
                 GatefoldApplication::get()
@@ -594,6 +608,7 @@ impl ArtistPage {
             return;
         };
         let generation = self.next_generation();
+        let refresh = self.imp().ask_spotify.take();
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = page)]
             self,
@@ -602,19 +617,25 @@ impl ArtistPage {
                 if let Some(artist) = spotify.spotify_artist(&id).await {
                     page.show_spotify_header(&artist);
                 }
-                let albums = spotify.discography(&id).await;
+                let discography = spotify.discography(&id, refresh).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
                 page.clear_sections();
-                match &albums {
-                    Err(why) => page.add_spotify_problem(why),
-                    Ok(albums) if albums.is_empty() => {
-                        page.add_note(&gettext("No albums, EPs or singles on Spotify"));
+                let discography = match discography {
+                    Ok(discography) => discography,
+                    Err(why) => {
+                        page.add_spotify_problem(&why);
+                        return;
                     }
-                    Ok(_) => {}
+                };
+                page.imp()
+                    .sections
+                    .append(&page.freshness(&discography, refresh));
+                if discography.albums.is_empty() {
+                    page.add_note(&gettext("No albums, EPs or singles on Spotify"));
                 }
-                page.add_spotify_sections(albums.as_deref().unwrap_or_default(), false);
+                page.add_spotify_sections(&discography.albums, None);
             }
         ));
     }
@@ -682,6 +703,7 @@ impl ArtistPage {
             return;
         };
         let generation = self.next_generation();
+        let refresh = self.imp().ask_spotify.take();
         if !spotify.is_connected() {
             return;
         }
@@ -700,7 +722,7 @@ impl ArtistPage {
                     Ok(None) => return,
                     Err(why) => {
                         if page.imp().generation.get() == generation {
-                            page.add_spotify_heading();
+                            page.add_spotify_heading(None);
                             page.add_spotify_problem(&why);
                         }
                         return;
@@ -709,56 +731,114 @@ impl ArtistPage {
                 if page.imp().generation.get() == generation {
                     page.set_follow(&id, &name);
                 }
-                let albums = spotify.discography(&id).await;
+                let discography = spotify.discography(&id, refresh).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
-                let albums = match albums {
-                    Ok(albums) => albums,
+                let discography = match discography {
+                    Ok(discography) => discography,
                     Err(why) => {
-                        page.add_spotify_heading();
+                        page.add_spotify_heading(None);
                         page.add_spotify_problem(&why);
                         return;
                     }
                 };
                 let library = GatefoldApplication::get().library();
-                let missing: Vec<_> = albums
-                    .into_iter()
+                let missing: Vec<_> = discography
+                    .albums
+                    .iter()
                     .filter(|album| library.local_album_for(album).is_none())
+                    .cloned()
                     .collect();
-                page.add_spotify_sections(&missing, true);
+                let freshness = page.freshness(&discography, refresh);
+                if missing.is_empty() {
+                    // Still said, with Refresh: a new release shows up here.
+                    page.add_spotify_heading(Some(&freshness));
+                    page.add_note(&gettext(
+                        "Everything they released on Spotify is in your library",
+                    ));
+                    return;
+                }
+                page.add_spotify_sections(&missing, Some(&freshness));
             }
         ));
     }
 
     /// Albums, and EPs and singles, from Spotify; with `heading`, under
-    /// "On Spotify" (on a library artist's page).
-    fn add_spotify_sections(&self, albums: &[gatefold_core::db::SpotifyAlbum], heading: bool) {
+    /// "On Spotify" (on a library artist's page), with that widget beside.
+    fn add_spotify_sections(
+        &self,
+        albums: &[gatefold_core::db::SpotifyAlbum],
+        heading: Option<&gtk::Widget>,
+    ) {
         if albums.is_empty() {
             return;
         }
-        if heading {
-            self.add_spotify_heading();
+        if let Some(beside) = heading {
+            self.add_spotify_heading(Some(beside));
         }
         let (singles, full): (Vec<_>, Vec<_>) = albums.iter().cloned().partition(|a| a.is_single());
         self.add_spotify_section(&gettext("Albums"), full);
         self.add_spotify_section(&gettext("EPs & Singles"), singles);
     }
 
-    /// "On Spotify", above a library artist's releases there.
-    fn add_spotify_heading(&self) {
-        self.imp().sections.append(
+    /// "On Spotify", above a library artist's releases there; `beside`
+    /// at its end (when they were read, Refresh).
+    fn add_spotify_heading(&self, beside: Option<&gtk::Widget>) {
+        let row = gtk::Box::builder().spacing(12).margin_top(12).build();
+        row.append(
             &gtk::Label::builder()
                 .label(gettext("On Spotify"))
                 .xalign(0.0)
-                .margin_top(12)
+                .hexpand(true)
                 .css_classes(["title-2"])
                 .build(),
         );
+        if let Some(beside) = beside {
+            beside.set_valign(gtk::Align::Center);
+            row.append(beside);
+        }
+        self.imp().sections.append(&row);
+    }
+
+    /// When Spotify was asked for the releases, and a button to ask again
+    /// (they're kept a week, as Spotify limits requests about artists).
+    /// After a Refresh that Spotify didn't answer: why, as a message.
+    fn freshness(&self, discography: &crate::spotify::Discography, refresh: bool) -> gtk::Widget {
+        if let (true, Some(why)) = (refresh, &discography.problem) {
+            GatefoldApplication::get().spotify().message(&format!(
+                "{} {why}",
+                gettext("Spotify can’t be asked right now.")
+            ));
+        }
+        self.action_set_enabled("artist.refresh-spotify", true);
+        let row = gtk::Box::builder().spacing(6).build();
+        row.append(
+            &gtk::Label::builder()
+                // Translators: {} is "today", "yesterday" or "3 days ago".
+                .label(
+                    gettext("Read from Spotify {}")
+                        .replace("{}", &crate::format::days_ago(discography.read)),
+                )
+                .xalign(0.0)
+                .css_classes(["dim-label", "caption"])
+                .build(),
+        );
+        row.append(
+            &gtk::Button::builder()
+                .icon_name("view-refresh-symbolic")
+                .tooltip_text(gettext("Ask Spotify Again"))
+                .action_name("artist.refresh-spotify")
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build(),
+        );
+        row.upcast()
     }
 
     /// Why Spotify's part is missing (e.g. how long Spotify asks to wait).
     fn add_spotify_problem(&self, why: &str) {
+        self.action_set_enabled("artist.refresh-spotify", true);
         self.add_note(&format!(
             "{}\n{why}",
             gettext("Spotify can’t show this artist’s releases right now")

@@ -35,6 +35,9 @@ mod imp {
         pub scroller: gtk::ScrolledWindow,
         pub lines_box: gtk::Box,
         pub status: adw::StatusPage,
+        /// Where the shown lyrics come from (the file's tags, a file next
+        /// to it, LRCLIB), in a corner above them.
+        pub source: gtk::Label,
         pub rows: RefCell<Vec<(Option<u64>, gtk::Button)>>,
         pub active: Cell<Option<usize>>,
         pub synced: Cell<bool>,
@@ -78,6 +81,14 @@ mod imp {
                 status: adw::StatusPage::builder()
                     .icon_name("gatefold-lyrics-symbolic")
                     .css_classes(["compact"])
+                    .build(),
+                source: gtk::Label::builder()
+                    .halign(gtk::Align::End)
+                    .valign(gtk::Align::Start)
+                    .margin_top(6)
+                    .margin_end(6)
+                    .visible(false)
+                    .css_classes(["lyrics-source", "caption"])
                     .build(),
                 rows: RefCell::default(),
                 active: Cell::default(),
@@ -165,7 +176,20 @@ impl LyricsView {
         imp.status_actions.append(&find);
         imp.status_actions.append(&self.lyrembed_button());
         imp.status.set_child(Some(&imp.status_actions));
-        self.set_child(Some(&imp.stack));
+        let overlay = gtk::Overlay::builder().child(&imp.stack).build();
+        overlay.add_overlay(&imp.source);
+        self.set_child(Some(&overlay));
+        // Only over lyrics, not over "No Lyrics" and the like.
+        imp.stack.connect_visible_child_name_notify(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |stack| {
+                view.imp().source.set_visible(
+                    stack.visible_child_name().as_deref() == Some("lyrics")
+                        && !view.imp().source.label().is_empty(),
+                );
+            }
+        ));
         self.add_css_class("lyrics-view");
 
         // A scroll that isn't ours pauses auto-scroll.
@@ -451,6 +475,7 @@ impl LyricsView {
         }
         match state {
             LyricsState::Lyrics(lyrics) => {
+                self.show_source(lyrics.source);
                 imp.synced.set(lyrics.synced);
                 imp.lines.replace(lyrics.lines.clone());
                 self.rebuild();
@@ -470,6 +495,34 @@ impl LyricsView {
                 )),
             ),
         }
+    }
+
+    /// The corner label: where these lyrics come from.
+    fn show_source(&self, source: gatefold_lyrics::Source) {
+        use gatefold_lyrics::Source;
+        let (label, tooltip) = match source {
+            Source::Embedded => (
+                gettext("In the File"),
+                gettext("Lyrics from the song file’s tags"),
+            ),
+            Source::LrcFile => (
+                gettext("LRC File"),
+                gettext("Lyrics from the .lrc file next to the song"),
+            ),
+            Source::TextFile => (
+                gettext("Text File"),
+                gettext("Lyrics from the .txt file next to the song"),
+            ),
+            Source::Online => (
+                gettext("LRCLIB"),
+                gettext("Lyrics found on LRCLIB (lrclib.net), only shown"),
+            ),
+        };
+        let imp = self.imp();
+        imp.source.set_label(&label);
+        imp.source.set_tooltip_text(Some(&tooltip));
+        imp.source
+            .set_visible(imp.stack.visible_child_name().as_deref() == Some("lyrics"));
     }
 
     /// Recreates the line widgets (new lyrics or a changed layout setting).

@@ -188,10 +188,51 @@ template $GatefoldPlaylistPanel: Adw.Bin {
                 }
               }
 
-              // Find songs in the library and add them right here.
-              Gtk.SearchEntry add_search {
-                placeholder-text: _("Add Songs…");
+              // Search the playlist's songs; with "Add Songs" on, the
+              // library (and Spotify, with its button) to add from.
+              Gtk.Box search_row {
+                spacing: 6;
                 margin-bottom: 6;
+
+                Gtk.SearchEntry search {
+                  placeholder-text: _("Search in Playlist");
+                  hexpand: true;
+                }
+
+                // Only while adding: also Spotify's songs (on by default
+                // for Spotify playlists).
+                Gtk.ToggleButton spotify_toggle {
+                  icon-name: "gatefold-spotify-symbolic";
+                  tooltip-text: _("Also Search Spotify");
+                  valign: center;
+                  visible: false;
+
+                  styles [
+                    "flat",
+                  ]
+                }
+
+                Gtk.ToggleButton add_toggle {
+                  icon-name: "list-add-symbolic";
+                  tooltip-text: _("Add Songs");
+                  valign: center;
+
+                  styles [
+                    "flat",
+                  ]
+                }
+              }
+
+              Gtk.Label search_status {
+                wrap: true;
+                xalign: 0;
+                visible: false;
+                margin-bottom: 6;
+
+                styles [
+                  "dim-label",
+                  "caption",
+                ]
               }
 
               Gtk.ListBox add_results {
@@ -229,7 +270,7 @@ template $GatefoldPlaylistPanel: Adw.Bin {
               Adw.StatusPage empty {
                 icon-name: "view-list-bullet-symbolic";
                 title: _("Empty Playlist");
-                description: _("Search above to add songs, or use “Add to Playlist…” on an album or song.");
+                description: _("Add songs with the + button above, or use “Add to Playlist…” on an album or song.");
                 visible: false;
 
                 styles [
