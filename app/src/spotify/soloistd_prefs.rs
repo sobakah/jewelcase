@@ -51,7 +51,7 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
     let missing = adw::ActionRow::builder()
         .title(gettext("Not Installed"))
         .subtitle(gettext(
-            "Install soloistd and run “soloistd setup” and “soloistd service install”, then open Preferences again",
+            "“Set Up With soloistd” under Streaming above has the steps",
         ))
         .build();
     group.add(&missing);

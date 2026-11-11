@@ -318,6 +318,10 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     let about = adw::ActionRow::builder().use_markup(false).build();
     about.add_css_class("property");
     group.add(&about);
+    // The steps to set Soloist up, with or without soloistd.
+    let guide = super::streaming_guide::guide(spotify);
+    group.add(&guide.with_soloistd);
+    group.add(&guide.without_soloistd);
 
     let switch = adw::SwitchRow::builder()
         .title(gettext("Stream _From Spotify"))
@@ -424,7 +428,15 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     group.add(&status);
 
     let probes: Rc<Cell<u64>> = Rc::default();
+    let (guide_with, guide_without, guide_refresh) =
+        (guide.with_soloistd, guide.without_soloistd, guide.refresh);
     let update = glib::clone!(
+        #[weak]
+        guide_with,
+        #[weak]
+        guide_without,
+        #[strong]
+        guide_refresh,
         #[weak]
         about,
         #[weak]
@@ -443,7 +455,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             let soloist = spotify.stream_backend() == Backend::Soloist;
             about.set_title(&if soloist {
                 gettext(
-                    "Spotify Soloist is Spotify’s own headless player; it plays through your speakers, Jewelcase controls it. Get it from Spotify (soloistd can install and update it), plus a free Soloist API key. Needs Spotify Premium. Spotify’s terms don’t clearly cover using it from another app.",
+                    "Spotify Soloist is Spotify’s own player without a screen: it plays through your speakers, and Jewelcase tells it what to play. It needs Spotify Premium and a free Soloist API key. Spotify’s terms don’t clearly cover using it from another app.",
                 )
             } else {
                 gettext(
@@ -458,6 +470,11 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             program.set_visible(soloist);
             key.set_visible(soloist);
             offset.set_visible(soloist);
+            guide_with.set_visible(soloist && !crate::config::is_flatpak());
+            guide_without.set_visible(soloist);
+            if soloist && guide_without.is_mapped() {
+                guide_refresh();
+            }
             if soloist {
                 let configured = spotify.settings().string("soloist-path");
                 let configured = (!configured.trim().is_empty())
@@ -521,7 +538,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
                 "pairing" => gettext(
                     "Link Soloist once: in the Spotify app on your phone or computer, open the device list and choose it",
                 ),
-                "missing" => gettext("Soloist isn’t installed (see above)"),
+                "missing" => gettext("Soloist isn’t installed yet: see the steps above"),
                 "needs-key" => gettext("Enter your Soloist API key above"),
                 "expired" => gettext(
                     "This Soloist build has expired: download the new one (soloistd updates it by itself)",

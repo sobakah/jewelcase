@@ -42,7 +42,8 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Jewelcase.Devel`
   Integrations shows the steps when they aren't set up.
 - **Soloist** runs inside the sandbox as the Flatpak's own: the binary
   soloistd downloads and updates on the host (`~/.local/share/soloistd/bin`,
-  read-only), with the API key entered in the Flatpak's Preferences, its own
+  read-only), with the Soloist API key entered in the Flatpak's Preferences
+  (the same one soloistd uses: Spotify gives one per account), its own
   data folder (linked once in the Spotify app) and the device name
   "Jewelcase Devel". soloistd manages only one Soloist, so it stays with the
   installed app; the Flatpak doesn't show its controls.

@@ -12,6 +12,7 @@ mod remote;
 mod soloist;
 mod soloistd_prefs;
 mod stream;
+mod streaming_guide;
 mod sync;
 
 use std::cell::{Cell, OnceCell, RefCell};
