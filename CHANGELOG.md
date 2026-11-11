@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A new app icon**: a clear CD case with the disc inside, drawn flat like GNOME's own icons.
+
 ## [0.5.1] — 2026-11-11
 
 The library database is unchanged; 0.5.0 still opens it.
