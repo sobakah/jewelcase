@@ -587,6 +587,24 @@ menu sort_menu {
   }
 }
 
+menu artist_sort_menu {
+  section {
+    label: _("Sort By");
+
+    item {
+      label: _("_Name");
+      action: "win.artist-sort";
+      target: "name";
+    }
+
+    item {
+      label: _("Date _Added");
+      action: "win.artist-sort";
+      target: "added";
+    }
+  }
+}
+
 menu primary_menu {
   section {
     item {

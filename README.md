@@ -16,8 +16,8 @@ Jewelcase is built around your local library: covers to browse, albums and artis
 
 ## Features
 
-- **Albums**: a grid of covers. Editions (deluxe, remastered, a Japanese version) are merged into one album. An album opens beside the grid, and each song unfolds to show its details.
-- **Artists**: album artists only, so featured guests don't clutter the list. Artist pages group albums, EPs & singles, soundtracks and collaborations, and list the artist's songs on other albums. Portraits, a short bio and links come from online sources if you allow it.
+- **Albums**: a grid of covers, sorted by artist, title, year or date added. Editions (deluxe, remastered, a Japanese version) are merged into one album. An album opens beside the grid, and each song unfolds to show its details.
+- **Artists**: album artists only, so featured guests don't clutter the list; sorted by name or date added. Artist pages group albums, EPs & singles, soundtracks and collaborations, and list the artist's songs on other albums. Portraits, a short bio and links come from online sources if you allow it.
 - **Player**: a cover-coloured full player with synced lyrics. Korean, Japanese and Chinese lyrics show with a romanization. Crossfade follows where songs really fade, and albums stay gapless. Media keys and GNOME's media controls work.
 - **Queue and smart shuffle**: *Play Next*, *Add to Queue*, a reorderable queue that's kept between starts. Shuffle songs or albums, or mix in similar songs by genre, tempo, artist or sound.
 - **Playlists and search**: mosaic covers, drag and drop, search within a playlist, import and export (M3U8, XSPF). One search (Ctrl+F) finds artists, albums, songs and playlists.

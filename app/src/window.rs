@@ -62,8 +62,11 @@ mod imp {
         /// Albums of the current cdport import already announced: each
         /// reload during the import shows only the new ones.
         pub announced: RefCell<std::collections::HashSet<i64>>,
-        /// The "album-sort" setting, kept here: the sorter compares often.
+        /// The "album-sort" and "artist-sort" settings, kept here: the
+        /// sorters compare often.
         pub album_sort: RefCell<String>,
+        pub artist_sort: RefCell<String>,
+        pub artist_sorter: OnceCell<gtk::CustomSorter>,
         #[template_child]
         pub bottom_sheet: TemplateChild<adw::BottomSheet>,
         #[template_child]
@@ -72,6 +75,10 @@ mod imp {
         pub stack: TemplateChild<adw::ViewStack>,
         #[template_child]
         pub sort_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub sort_menu: TemplateChild<gio::Menu>,
+        #[template_child]
+        pub artist_sort_menu: TemplateChild<gio::Menu>,
         #[template_child]
         pub search_bar: TemplateChild<gtk::SearchBar>,
         #[template_child]
@@ -329,6 +336,7 @@ mod imp {
                 self.stack.set_visible_child_name(&start);
             }
             obj.add_action(&settings.create_action("album-sort"));
+            obj.add_action(&settings.create_action("artist-sort"));
             self.settings.set(settings).expect("settings are set once");
             obj.load_window_state();
             if config::is_development() {
@@ -354,13 +362,13 @@ mod imp {
             obj.setup_spotify_loading();
             obj.setup_jewel_cases();
 
-            // Sorting only applies to the album grid.
-            let sort_button = self.sort_button.get();
-            self.stack
-                .bind_property("visible-child-name", &sort_button, "visible")
-                .transform_to(|_, name: Option<String>| Some(name.as_deref() == Some("albums")))
-                .sync_create()
-                .build();
+            // The album and artist grids can be sorted, each with its menu.
+            self.stack.connect_visible_child_name_notify(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.update_sort_button()
+            ));
+            obj.update_sort_button();
         }
     }
 
@@ -510,6 +518,7 @@ impl JewelcaseWindow {
                     if let Some(sorter) = window.imp().sorter.get() {
                         sorter.changed(gtk::SorterChange::Different);
                     }
+                    window.refresh_spotify_shelves();
                 }
             ),
         );
@@ -556,8 +565,46 @@ impl JewelcaseWindow {
         let imp = self.imp();
         let library = JewelcaseApplication::get().library();
 
+        imp.artist_sort
+            .replace(self.settings().string("artist-sort").into());
+        let sorter = gtk::CustomSorter::new(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            gtk::Ordering::Equal,
+            move |a, b| {
+                let a = a.downcast_ref::<ArtistObject>().expect("artists");
+                let b = b.downcast_ref::<ArtistObject>().expect("artists");
+                crate::sorting::compare_artists(
+                    &window.imp().artist_sort.borrow(),
+                    &crate::sorting::ArtistKey::local(a.artist()),
+                    &crate::sorting::ArtistKey::local(b.artist()),
+                )
+                .into()
+            }
+        ));
+        let sorted = gtk::SortListModel::new(Some(library.artists().clone()), Some(sorter.clone()));
+        imp.artist_sorter.set(sorter).expect("set once");
+        self.settings().connect_changed(
+            Some("artist-sort"),
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |settings, key| {
+                    window
+                        .imp()
+                        .artist_sort
+                        .replace(settings.string(key).into());
+                    if let Some(sorter) = window.imp().artist_sorter.get() {
+                        sorter.changed(gtk::SorterChange::Different);
+                    }
+                    window.refresh_spotify_shelves();
+                }
+            ),
+        );
+
         imp.artist_grid.setup(
-            library.artists(),
+            &sorted,
             // A tile's padding (style.css: .artist-grid .grid-tile).
             24,
             "artist-grid",
@@ -966,11 +1013,17 @@ impl JewelcaseWindow {
             return;
         }
         let needs = spotify.needs_library_permission();
-        let albums: Vec<_> = spotify
-            .saved_albums()
-            .into_iter()
-            .filter(|album| library.local_album_for(album).is_none())
-            .collect();
+        // Sorted like the library (album-sort), from Spotify's order, which
+        // has the most recently saved first.
+        let album_sort = imp.album_sort.borrow().clone();
+        let albums: Vec<_> = crate::sorting::sort_spotify(
+            spotify.saved_albums(),
+            crate::sorting::AlbumKey::spotify,
+            |a, b| crate::sorting::compare_albums(&album_sort, a, b),
+        )
+        .into_iter()
+        .filter(|album| library.local_album_for(album).is_none())
+        .collect();
         let items = albums
             .iter()
             .map(|album| ShelfItem {
@@ -1005,14 +1058,18 @@ impl JewelcaseWindow {
                 local_ids.insert(id);
             }
         }
-        let artists: Vec<_> = spotify
-            .followed_artists()
-            .into_iter()
-            .filter(|artist| {
-                !local_ids.contains(&artist.spotify_id)
-                    && !local_names.contains(&artist.name.to_lowercase())
-            })
-            .collect();
+        let artist_sort = imp.artist_sort.borrow().clone();
+        let artists: Vec<_> = crate::sorting::sort_spotify(
+            spotify.followed_artists(),
+            crate::sorting::ArtistKey::spotify,
+            |a, b| crate::sorting::compare_artists(&artist_sort, a, b),
+        )
+        .into_iter()
+        .filter(|artist| {
+            !local_ids.contains(&artist.spotify_id)
+                && !local_names.contains(&artist.name.to_lowercase())
+        })
+        .collect();
         let items = artists
             .iter()
             .map(|artist| ShelfItem {
@@ -1634,19 +1691,42 @@ impl JewelcaseWindow {
     }
 
     fn compare_albums(&self, a: &AlbumObject, b: &AlbumObject) -> Ordering {
-        let (a, b) = (a.album(), b.album());
-        let by_artist = || {
-            a.artist_sort
-                .cmp(&b.artist_sort)
-                .then(a.year.cmp(&b.year))
-                .then(a.sort_title.cmp(&b.sort_title))
-        };
-        match self.imp().album_sort.borrow().as_str() {
-            "title" => a.sort_title.cmp(&b.sort_title).then_with(by_artist),
-            // Newest first.
-            "year" => b.year.cmp(&a.year).then_with(by_artist),
-            "added" => b.added.cmp(&a.added).then_with(by_artist),
-            _ => by_artist(),
+        crate::sorting::compare_albums(
+            &self.imp().album_sort.borrow(),
+            &crate::sorting::AlbumKey::local(a.album()),
+            &crate::sorting::AlbumKey::local(b.album()),
+        )
+    }
+
+    /// The sort button: on the albums page their sort and genre filter, on
+    /// the artists page their sort; hidden elsewhere.
+    fn update_sort_button(&self) {
+        let imp = self.imp();
+        let page = imp.stack.visible_child_name();
+        let button = &imp.sort_button;
+        match page.as_deref() {
+            Some("albums") => {
+                button.set_menu_model(Some(&*imp.sort_menu));
+                let filtered = imp.genre_filter.borrow().is_some();
+                button.set_tooltip_text(Some(&if filtered {
+                    gettext("Sort and Filter Albums (Filtered)")
+                } else {
+                    gettext("Sort and Filter Albums")
+                }));
+                if filtered {
+                    button.add_css_class("accent");
+                } else {
+                    button.remove_css_class("accent");
+                }
+                button.set_visible(true);
+            }
+            Some("artists") => {
+                button.set_menu_model(Some(&*imp.artist_sort_menu));
+                button.set_tooltip_text(Some(&gettext("Sort Artists")));
+                button.remove_css_class("accent");
+                button.set_visible(true);
+            }
+            _ => button.set_visible(false),
         }
     }
 
@@ -1670,9 +1750,8 @@ impl JewelcaseWindow {
             }
         ));
         self.add_action(&action);
-        if let Some(menu) = imp.sort_button.menu_model().and_downcast::<gio::Menu>() {
-            menu.append_submenu(Some(&gettext("_Genre")), &imp.genre_menu);
-        }
+        imp.sort_menu
+            .append_submenu(Some(&gettext("_Genre")), &imp.genre_menu);
         self.fill_genre_menu();
     }
 
@@ -1708,21 +1787,12 @@ impl JewelcaseWindow {
 
     fn set_genre_filter(&self, genre: Option<String>) {
         let imp = self.imp();
-        let active = genre.is_some();
         imp.genre_filter.replace(genre);
         if let Some(filter) = imp.genre_filter_model.get() {
             filter.changed(gtk::FilterChange::Different);
         }
         // The sort button shows that a filter is on.
-        if active {
-            imp.sort_button.add_css_class("accent");
-            imp.sort_button
-                .set_tooltip_text(Some(&gettext("Sort and Filter Albums (Filtered)")));
-        } else {
-            imp.sort_button.remove_css_class("accent");
-            imp.sort_button
-                .set_tooltip_text(Some(&gettext("Sort and Filter Albums")));
-        }
+        self.update_sort_button();
     }
 
     fn library_reloaded(&self) {

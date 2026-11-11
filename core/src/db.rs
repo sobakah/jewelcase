@@ -146,6 +146,9 @@ pub struct Artist {
     pub portrait_key: Option<String>,
     /// The cover of the artist's newest album, for the fallback avatar.
     pub cover_key: Option<String>,
+    /// When the artist came into the library: the first of their albums
+    /// to be added (Unix seconds; 0 without albums of their own).
+    pub added: i64,
     pub meta: ArtistMeta,
 }
 
@@ -2257,7 +2260,9 @@ const ARTIST_COLUMNS: &str =
        ORDER BY aa.role = 'credit' DESC, a.year DESC LIMIT 1),
     ar.lookup_state, ar.looked_up, ar.lookup_mbid, ar.wikidata_id, ar.spotify_id,
     ar.wikipedia_url, ar.website, ar.bio, ar.portrait_key, ar.portrait_source,
-    ar.portrait_attribution, ar.custom_portrait_key";
+    ar.portrait_attribution, ar.custom_portrait_key,
+    (SELECT COALESCE(MIN(a.added), 0) FROM album_artist aa JOIN album a ON a.id = aa.album_id
+       WHERE aa.artist_id = ar.id AND aa.role = 'credit')";
 
 fn artist(row: &Row) -> rusqlite::Result<Artist> {
     Ok(Artist {
@@ -2270,6 +2275,7 @@ fn artist(row: &Row) -> rusqlite::Result<Artist> {
         track_count: row.get(6)?,
         portrait_key: row.get(7)?,
         cover_key: row.get(8)?,
+        added: row.get(21)?,
         meta: ArtistMeta {
             lookup_state: row.get(9)?,
             looked_up: row.get(10)?,
@@ -2611,6 +2617,27 @@ mod tests {
         assert_ne!(after[0].id, adele.id);
         assert_eq!(after[0].meta.bio.as_deref(), Some("Singer"));
         assert_eq!(after[0].meta.custom_portrait_key.as_deref(), Some("p1"));
+    }
+
+    #[test]
+    fn an_artist_is_added_with_their_first_album() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(&[file("/m/Adele/19/01.flac", "19", "Daydreamer", 1)], 100)
+            .unwrap();
+        db.upsert_tracks(&[file("/m/Adele/25/01.flac", "25", "Hello", 1)], 300)
+            .unwrap();
+        let mut other = file("/m/Sia/1000/01.flac", "1000 Forms of Fear", "Chandelier", 1);
+        other.tags.album_artist = Some("Sia".into());
+        db.upsert_tracks(&[other], 200).unwrap();
+        rebuild(&mut db);
+        let added: Vec<_> = db
+            .artists()
+            .unwrap()
+            .into_iter()
+            .map(|a| (a.name, a.added))
+            .collect();
+        // Adele came first, with "19"; "25" later doesn't change that.
+        assert_eq!(added, [("Adele".into(), 100), ("Sia".into(), 200)]);
     }
 
     pub(super) fn rebuild(db: &mut Database) {

@@ -119,6 +119,16 @@
       </choices>
       <default>"artist"</default>
       <summary>Album sort order</summary>
+      <description>Also sorts the albums saved on Spotify; “added” is when they were saved there.</description>
+    </key>
+    <key name="artist-sort" type="s">
+      <choices>
+        <choice value="name"/>
+        <choice value="added"/>
+      </choices>
+      <default>"name"</default>
+      <summary>Artist sort order</summary>
+      <description>Also sorts the artists followed on Spotify. “added”: newest first, when the first of an artist’s albums was added to the library, or when you followed them on Spotify.</description>
     </key>
     <key name="crossfade" type="i">
       <range min="0" max="12"/>

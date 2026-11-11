@@ -6,7 +6,13 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Sort artists** by name or by date added, from the sort button on the Artists page.
+
 ### Changed
+
+- Albums saved on Spotify and artists followed there are sorted like your own albums and artists, instead of in the order you saved or followed them.
 
 - **A new app icon**: a clear CD case with the disc inside, drawn flat like GNOME's own icons.
 
