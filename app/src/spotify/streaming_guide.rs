@@ -90,6 +90,8 @@ struct Found {
     /// soloistd downloaded Soloist.
     soloistd_soloist: bool,
     service: ServiceState,
+    /// soloistd's Soloist answers on its WebSocket address.
+    listening: bool,
     /// A Soloist Jewelcase can start itself.
     own_soloist: bool,
 }
@@ -105,13 +107,47 @@ pub struct Guide {
 pub fn guide(spotify: &Spotify) -> Guide {
     let flatpak = crate::config::is_flatpak();
 
-    // With soloistd (not in a Flatpak, which can't run or control it).
+    // With soloistd. A Flatpak uses the soloistd on the computer, whose
+    // commands it can't run and whose settings it can only read.
     let with_soloistd = adw::ExpanderRow::builder()
         .title(gettext("Set Up With soloistd"))
-        .visible(!flatpak)
         .build();
     let releases: &'static str = "https://github.com/MopigamesYT/soloistd/releases";
-    let a = [
+    let a: Vec<Step> = if flatpak {
+        vec![
+            Step::new(
+                1,
+                &gettext("Get your Soloist API key"),
+                Some(&gettext(
+                    "On Spotify’s developer dashboard. There’s one per Spotify account: if you have one, use it",
+                )),
+            )
+            .link(jewelcase_soloist::API_KEY_URL),
+            Step::new(
+                2,
+                &gettext("On your computer, install soloistd and run this in a terminal"),
+                Some("soloistd setup"),
+            )
+            .copy("soloistd setup")
+            .link(releases),
+            Step::new(
+                3,
+                &gettext("Let Jewelcase control it"),
+                Some(&gettext(
+                    "Turn on “Control by Jewelcase” in the installed Jewelcase’s Preferences, or add \"websocket\": \"127.0.0.1:9090\" to ~/.config/soloistd/config.json",
+                )),
+            ),
+            Step::new(
+                4,
+                &gettext("Then run it in the background, also after you log in"),
+                Some("soloistd service install"),
+            )
+            .copy("soloistd service install"),
+            Step::new(5, &gettext("Turn on “Stream From Spotify” below"), None),
+            Step::new(6, &gettext("Link Soloist once"), None),
+        ]
+    } else {
+        vec![
         Step::new(
             1,
             &gettext("Get your Soloist API key"),
@@ -145,14 +181,20 @@ pub fn guide(spotify: &Spotify) -> Guide {
         ),
         Step::new(6, &gettext("Turn on “Stream From Spotify” below"), None),
         Step::new(7, &gettext("Link Soloist once"), None),
-    ];
+        ]
+    };
     for step in &a {
         with_soloistd.add_row(&step.row);
     }
 
-    // Without soloistd: Jewelcase starts Soloist itself.
+    // Without soloistd: Jewelcase starts Soloist itself (in a Flatpak the
+    // one soloistd downloaded, without soloistd's service).
     let without_soloistd = adw::ExpanderRow::builder()
-        .title(gettext("Set Up Without soloistd"))
+        .title(if flatpak {
+            gettext("Set Up Without soloistd’s Service")
+        } else {
+            gettext("Set Up Without soloistd")
+        })
         .build();
     let b = [
         Step::new(
@@ -215,9 +257,24 @@ pub fn guide(spotify: &Spotify) -> Guide {
                 let Ok(found) = gio::spawn_blocking(move || {
                     let configured = (!configured.trim().is_empty())
                         .then(|| std::path::PathBuf::from(configured.trim()));
+                    let config = soloistd::Config::load();
+                    // Its address as Jewelcase reads it (loopback only).
+                    let listening = std::fs::read_to_string(soloistd::config_path())
+                        .ok()
+                        .and_then(|text| jewelcase_soloist::soloistd_websocket(&text))
+                        .and_then(|(addr, port)| {
+                            let addr: std::net::IpAddr = addr.parse().ok()?;
+                            std::net::TcpStream::connect_timeout(
+                                &(addr, port).into(),
+                                std::time::Duration::from_millis(300),
+                            )
+                            .ok()
+                        })
+                        .is_some();
                     Found {
                         soloistd: soloistd::binary().is_some(),
-                        config: soloistd::Config::load(),
+                        config,
+                        listening,
                         soloistd_soloist: soloistd::soloist_version().is_some(),
                         service: soloistd::service_state(),
                         own_soloist: jewelcase_soloist::find_binary(configured.as_deref())
@@ -245,24 +302,31 @@ pub fn guide(spotify: &Spotify) -> Guide {
                     .and_then(soloistd::Config::device_name)
                     .unwrap_or_else(|| "Soloist".to_owned());
                 // Translators: {} is a device name.
-                a[6].row.set_subtitle(
+                a[a.len() - 1].row.set_subtitle(
                     &gettext(
                         "Choose “{}” in the Spotify app’s device list on your phone or computer",
                     )
                     .replace("{}", &device),
                 );
-                let done_a = [
-                    config.is_some_and(soloistd::Config::has_api_key),
-                    found.soloistd,
-                    config.is_some() && found.soloistd_soloist,
-                    !matches!(
-                        found.service,
-                        ServiceState::NotInstalled | ServiceState::Unknown
-                    ),
-                    config.is_some_and(|c| c.websocket().is_some()),
-                    streaming,
-                    ready,
-                ];
+                let key = config.is_some_and(soloistd::Config::has_api_key);
+                let set_up = config.is_some() && found.soloistd_soloist;
+                let websocket = config.is_some_and(|c| c.websocket().is_some());
+                let done_a = if flatpak {
+                    vec![key, set_up, websocket, found.listening, streaming, ready]
+                } else {
+                    vec![
+                        key,
+                        found.soloistd,
+                        set_up,
+                        !matches!(
+                            found.service,
+                            ServiceState::NotInstalled | ServiceState::Unknown
+                        ),
+                        websocket,
+                        streaming,
+                        ready,
+                    ]
+                };
                 // Without.
                 b[3].row.set_subtitle(
                     &gettext(
@@ -276,7 +340,7 @@ pub fn guide(spotify: &Spotify) -> Guide {
                     streaming && !matches!(status.as_str(), "off" | "missing" | "needs-key"),
                     ready,
                 ];
-                for (step, done) in a.iter().zip(done_a) {
+                for (step, done) in a.iter().zip(done_a.iter().copied()) {
                     step.set_done(done);
                 }
                 for (step, done) in b.iter().zip(done_b) {

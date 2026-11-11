@@ -40,13 +40,17 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Jewelcase.Devel`
   (`cdport --install-dbus-service`, `lyrembed --install-dbus-service`;
   `--talk-name=io.github.sobakah.cdport`, `…lyrembed`). Preferences ›
   Integrations shows the steps when they aren't set up.
-- **Soloist** runs inside the sandbox as the Flatpak's own: the binary
-  soloistd downloads and updates on the host (`~/.local/share/soloistd/bin`,
-  read-only), with the Soloist API key entered in the Flatpak's Preferences
-  (the same one soloistd uses: Spotify gives one per account), its own
-  data folder (linked once in the Spotify app) and the device name
-  "Jewelcase Devel". soloistd manages only one Soloist, so it stays with the
-  installed app; the Flatpak doesn't show its controls.
+- **Soloist**: the Flatpak uses soloistd's Soloist on the host, like the
+  installed app. It reads soloistd's `config.json` (`~/.config/soloistd`,
+  read-only) for its WebSocket address ("Control by Jewelcase" must be on)
+  and connects over 127.0.0.1. It's the same Spotify device for both apps:
+  whichever plays last has it, so test one at a time. The Flatpak can't run
+  soloistd's commands or change its settings, so Preferences doesn't show
+  soloistd's controls; its steps point to the installed app or the terminal.
+  While soloistd's service doesn't run, the Flatpak starts the Soloist
+  soloistd downloaded itself (`~/.local/share/soloistd/bin`, read-only),
+  with the Soloist API key entered in its Preferences (Spotify gives one
+  per account), its own data folder and the device name "Jewelcase Devel".
 - **Doesn't work yet**: Ear Tag (`flatpak run` from inside the sandbox).
   Jewelcase shows it as not installed.
 - **No update check**: Flatpaks update through their repository.

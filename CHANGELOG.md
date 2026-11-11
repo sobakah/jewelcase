@@ -6,6 +6,7 @@ Gatefold is now **Jewelcase**, with a new icon: a CD jewel case. The vinyl name 
 
 - The new icon fills its space like GNOME's own icons, instead of looking small next to them.
 - Preferences → Spotify → Streaming walks you through setting up Spotify Soloist, like the Spotify client ID: step by step with soloistd (recommended: it installs Soloist, keeps it up to date and runs it in the background) or without it. Each step shows a check mark once it's done, also after you've run a command in a terminal.
+- The test Flatpak uses soloistd's Soloist on your computer, like the installed app, instead of a Soloist of its own: Spotify gives one Soloist API key per account anyway.
 - The README says what Jewelcase is and how it brings your own files and Spotify together, how to install and use it, and how to develop it.
 
 ## 0.4.1 (pre-release)

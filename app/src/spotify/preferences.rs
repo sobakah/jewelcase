@@ -470,7 +470,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             program.set_visible(soloist);
             key.set_visible(soloist);
             offset.set_visible(soloist);
-            guide_with.set_visible(soloist && !crate::config::is_flatpak());
+            guide_with.set_visible(soloist);
             guide_without.set_visible(soloist);
             if soloist && guide_without.is_mapped() {
                 guide_refresh();
