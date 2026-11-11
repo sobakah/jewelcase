@@ -607,14 +607,14 @@ impl PreferencesDialog {
         // lyrembed
         let lyrembed = &detected.lyrembed;
         imp.lyrembed_status
-            .set_subtitle(&companion_status(lyrembed, "lyrembed", flatpak));
+            .set_subtitle(&companion_status(lyrembed, flatpak));
         imp.romanize_status.set_visible(lyrembed.usable());
         let romanize = if detected.can_romanize() {
             gettext("Lyrics without romanization get it for display, also from LRCLIB")
         } else {
             // §5.1: without "romanize --stdio", lyrics show as tagged.
             gettext(
-                "Not available: needs lyrembed 1.1.1 or newer (update it on lyrembed's page, or with “pipx upgrade lyrembed”). Lyrics show as tagged.",
+                "Not available: needs a newer lyrembed (update it on lyrembed's page, or with “pipx upgrade lyrembed”). Lyrics show as tagged.",
             )
         };
         imp.romanize_status.set_subtitle(&romanize);
@@ -629,7 +629,7 @@ impl PreferencesDialog {
         // cdport
         let cdport = &detected.cdport;
         imp.cdport_status
-            .set_subtitle(&companion_status(cdport, "cdport", flatpak));
+            .set_subtitle(&companion_status(cdport, flatpak));
         imp.cdport_library.set_visible(cdport.usable());
         imp.cdport_library.set_subtitle(
             &cdport
@@ -785,7 +785,7 @@ impl Step {
     }
 }
 
-/// "Version 1.3.0 · /home/…/cdport", or less when unknown.
+/// "Version 1.0.0 · /home/…/cdport", or less when unknown.
 fn found(version: Option<jewelcase_tools::Version>, path: Option<&Path>) -> String {
     match (version, path) {
         // Translators: {version} and {path} of a found program.
@@ -816,26 +816,16 @@ fn pipx_steps() -> Vec<Step> {
     ]
 }
 
-/// A companion tool's status line (`name`: "lyrembed" or "cdport").
-fn companion_status<C>(tool: &crate::tools::Companion<C>, name: &str, flatpak: bool) -> String {
+/// A companion tool's status line.
+fn companion_status<C>(tool: &crate::tools::Companion<C>, flatpak: bool) -> String {
     let path = tool.program.as_ref().map(|p| p.path.as_path());
     if tool.dbus {
-        // Translators: {} is "Version 1.3.0 · <path>" or "Version 1.3.0".
+        // Translators: {} is "Version 1.0.0 · <path>" or "Version 1.0.0".
         return gettext("{} · through D-Bus").replace("{}", &found(tool.version, path));
     }
     if let Some(error) = &tool.dbus_error {
         // Translators: {} is the error message.
         return gettext("Its D-Bus service doesn't start: {}").replace("{}", error);
-    }
-    if tool.is_old() {
-        let found = found(tool.version, path);
-        return if name == "cdport" {
-            // Translators: {} is "Version 1.2.1 · <path>".
-            gettext("cdimport, cdport’s old version: {}").replace("{}", &found)
-        } else {
-            // Translators: {} is "Version 1.1.1 · <path>".
-            gettext("{} (without D-Bus)").replace("{}", &found)
-        };
     }
     if tool.program.is_some() {
         return found(tool.version, path);
@@ -849,7 +839,7 @@ fn companion_status<C>(tool: &crate::tools::Companion<C>, name: &str, flatpak: b
 
 /// The steps to install lyrembed or set up its D-Bus service.
 fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Setup> {
-    use jewelcase_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND, UPGRADE_COMMAND};
+    use jewelcase_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND};
     const ACTION: &str = "app.set-up-lyrembed";
     let has_program = lyrembed.program.is_some();
     if lyrembed.dbus {
@@ -875,21 +865,6 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
                 "The service is set up, but lyrembed didn't start through it, e.g. because lyrembed was moved or removed since.",
             ),
             steps,
-        });
-    }
-    if lyrembed.is_old() {
-        return Some(Setup {
-            title: gettext("Update lyrembed"),
-            description: gettext(
-                "From version 1.2.0 on, lyrembed has a D-Bus interface: its pages and lyrics searches keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use it too. Until you update, Jewelcase uses it as before. Its page offers the update too.",
-            ),
-            steps: vec![
-                Step::command(gettext("Update lyrembed"), UPGRADE_COMMAND),
-                Step::command(
-                    gettext("Let Jewelcase reach lyrembed through D-Bus"),
-                    SERVICE_COMMAND,
-                ),
-            ],
         });
     }
     if lyrembed.can_set_up_service() {
@@ -936,7 +911,7 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
 }
 
 fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
-    use jewelcase_tools::cdport::{INSTALL_COMMAND, REMOVE_OLD_COMMAND, SERVICE_COMMAND};
+    use jewelcase_tools::cdport::{INSTALL_COMMAND, SERVICE_COMMAND};
     let service_step = || {
         Step::command(
             gettext("Let Jewelcase reach cdport through D-Bus"),
@@ -966,22 +941,6 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
                 "The service is set up, but cdport didn't start through it, e.g. because cdport was moved or removed since.",
             ),
             steps,
-        });
-    }
-    if cdport.is_old() {
-        return Some(Setup {
-            title: gettext("Update to cdport"),
-            description: gettext(
-                "cdimport is now called cdport. From version 1.3.0 on, it has a D-Bus interface: imports keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use it too. Until you update, Jewelcase uses cdimport as before.",
-            ),
-            steps: vec![
-                Step::command(
-                    gettext("Remove cdimport (your settings stay)"),
-                    REMOVE_OLD_COMMAND,
-                ),
-                Step::command(gettext("Install cdport"), INSTALL_COMMAND),
-                service_step(),
-            ],
         });
     }
     if cdport.can_set_up_service() {

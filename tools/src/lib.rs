@@ -1,9 +1,9 @@
 //! Jewelcase's companion tools (CONCEPT.md §10): lyrembed, cdport and the
-//! tag editor (Ear Tag by default).
+//! tag editor (cdport's by default).
 //!
 //! The command line is the stable interface: arguments, exit codes,
-//! `--version` and the "`<tool> is running at <url>`" line; cdport also
-//! has a D-Bus interface (its names are in `cdport`). This crate builds
+//! `--version` and the "`<tool> is running at <url>`" line; cdport and
+//! lyrembed also have a D-Bus interface (its names are in their modules). This crate builds
 //! commands and reads the tools' configs; running them is the app's job
 //! (`gio::Subprocess`, D-Bus calls).
 
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn versions() {
         assert_eq!(parse_version("lyrembed 1.1.0\n"), Some(Version(1, 1, 0)));
-        assert_eq!(parse_version("cdimport v1.2"), Some(Version(1, 2, 0)));
+        assert_eq!(parse_version("cdport v1.2"), Some(Version(1, 2, 0)));
         assert_eq!(parse_version("tool 2.0.1rc1"), Some(Version(2, 0, 1)));
         assert_eq!(parse_version("no version"), None);
         assert!(Version(1, 2, 0) > Version(1, 1, 9));
@@ -121,10 +121,10 @@ mod tests {
             Some("http://127.0.0.1:8123/?token=a-b_c")
         );
         assert_eq!(
-            page_url("cdimport is running at https://evil.example/?token=x"),
+            page_url("cdport is running at https://evil.example/?token=x"),
             None
         );
-        assert_eq!(page_url("cdimport is running at http://127.0.0.1:1/"), None);
+        assert_eq!(page_url("cdport is running at http://127.0.0.1:1/"), None);
         assert_eq!(page_url("Scanning…"), None);
     }
 

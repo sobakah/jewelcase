@@ -50,123 +50,14 @@
   <releases>
     <release version="0.5.0" date="2026-11-11" type="development">
       <description>
-        <p>Gatefold is now Jewelcase, with a new icon.</p>
-        <ul>
-          <li>A new name and icon: a CD jewel case</li>
-          <li>Your library, settings and logins come along by themselves</li>
-          <li>Step-by-step setup for streaming with Spotify Soloist</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.4.1" date="2026-11-10" type="development">
-      <description>
-        <p>Search in playlists, fresher artist pages, and where lyrics come from.</p>
-        <ul>
-          <li>Search a playlist's songs, or add songs from the library and Spotify</li>
-          <li>Artist pages can ask Spotify again for new releases</li>
-          <li>The lyrics say whether they're in the file, a file next to it, or from LRCLIB</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.4.0" date="2026-11-10" type="development">
-      <description>
-        <p>Tags edited in cdport's editor, quieter tooltips, and many fixes.</p>
-        <ul>
-          <li>Edit Tags opens cdport's own tag editor, also in the Flatpak</li>
-          <li>Tooltips wait for the pointer to rest, and common buttons have none</li>
-          <li>Cover size and a default sort for playlists, set in Preferences</li>
-          <li>Fixes from a review of the whole program</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.3.0" date="2026-11-09" type="development">
-      <description>
-        <p>A new icon, sliding panels, and the companion tools over D-Bus.</p>
-        <ul>
-          <li>A new icon: a gatefold LP, slightly opened, the record halfway out</li>
-          <li>Side panels slide like a record leaving its sleeve, with a shadow</li>
-          <li>cdimport is now cdport; cdport and lyrembed work over D-Bus</li>
-          <li>Preferences show how to install and set up the companion tools</li>
-          <li>A light or dark choice, and dark GTK themes followed on other desktops</li>
-          <li>Bundled icons, and Spotify logins kept without a keyring</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.3" date="2026-11-08" type="development">
-      <description>
-        <p>Saving albums and following artists on Spotify, and fixes.</p>
-        <ul>
-          <li>Fixed: Spotify songs played through Soloist no longer race through the rest of the album</li>
-          <li>Save Spotify albums and follow artists on Spotify, with Undo</li>
-          <li>Connect Again in Preferences grants new Spotify permissions and keeps your playlists</li>
-          <li>Songs whose files don't say how long they are get their length</li>
-          <li>Spotify album artists open their page; clicking an album title copies it</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.2" date="2026-11-08" type="development">
-      <description>
-        <p>Listening statistics, a visualizer and update notices.</p>
-        <ul>
-          <li>Listening Statistics: what played most this week, month, year or ever, with listening time and how it changed</li>
-          <li>A visualizer moves with songs from your library, in the player and the mini player</li>
-          <li>New versions of Jewelcase, Soloist and soloistd are announced and installed when you choose to</li>
-          <li>Next in the Spotify app skips to Jewelcase's next song while Soloist plays</li>
-          <li>The Pre-Amp setting is gone: local and Spotify songs play equally loud</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.1" date="2026-11-08" type="development">
-      <description>
-        <p>Recently played Spotify songs, and adding the playing song to playlists.</p>
-        <ul>
-          <li>Recently Played has the Spotify songs that played in Jewelcase, with a menu to queue them again or add them to a playlist</li>
-          <li>Add the playing song to a playlist from the player or the queue</li>
-          <li>Playlists that have a song come first in "Add to Playlist"; choosing one again removes it</li>
-          <li>Song Info lists the playlists that have the song</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.0" date="2026-11-08" type="development">
-      <description>
-        <p>Spotify playlists you can fully edit, a new search, and lyrics for Spotify songs.</p>
-        <ul>
-          <li>Reorder, rename, give a cover to, delete or unfollow Spotify playlists</li>
-          <li>Changes to Spotify playlists are sent more safely</li>
-          <li>Search results by kind, with Spotify's results and an icon for what's in your library; recent searches</li>
-          <li>Lyrics for Spotify songs from LRCLIB, and romanization for lyrics without it (with lyrembed 1.1.1)</li>
-          <li>Songs chosen in the Spotify app keep playing on Soloist</li>
-          <li>Renamed music folders keep their songs' play history</li>
-          <li>Smart shuffle mixes in related artists from ListenBrainz</li>
-          <li>Artist pages can be resized</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.1.1" date="2026-11-08" type="development">
-      <description>
-        <p>Playlists, Spotify fixes and a new look for the side panels.</p>
-        <ul>
-          <li>Playlists can be sorted by title, artist, album, date added or duration, also reversed</li>
-          <li>Playlist songs can be queued, added to other playlists and lead to their album and artist</li>
-          <li>The artist and album of Spotify songs in the player open their pages</li>
-          <li>Choose the view to start with, and whether lyrics and queue show in the player</li>
-          <li>Side panels show their cover blurred behind the top and close with a grip</li>
-          <li>Artist photos from Spotify and Deezer; fanart.tv is no longer used</li>
-          <li>Spotify search works again, and Jewelcase respects Spotify's rate limits</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.1.0" date="2026-11-07" type="development">
-      <description>
-        <p>The first pre-release of Jewelcase.</p>
+        <p>A pre-release of Jewelcase, a music player for your album library with Spotify woven in.</p>
         <ul>
           <li>Albums grouped from your music files, with editions merged and covers as the main way around</li>
           <li>Artist pages with portraits, a short bio and links, from optional online lookups</li>
-          <li>A player with synced lyrics and romanization, gapless playback, loudness levelling and smart crossfade</li>
-          <li>Playlists with M3U8 and XSPF import and export, and one search for everything</li>
-          <li>Smart shuffle that mixes in similar songs by genre, tempo, artist or sound</li>
-          <li>Lyrics, CD import and tag editing through lyrembed, cdimport and Ear Tag</li>
-          <li>Optional Spotify integration: Connect devices, playlists, saved albums, followed artists and streaming through Spotify Soloist</li>
+          <li>A player with synced lyrics and romanization, a visualizer, gapless playback, loudness levelling and smart crossfade</li>
+          <li>Playlists, smart shuffle, listening statistics and one search for everything</li>
+          <li>Lyrics, CD import and tag editing through lyrembed and cdport</li>
+          <li>Optional Spotify integration: playlists both ways, saved albums, followed artists, Connect devices and streaming through Spotify Soloist</li>
         </ul>
       </description>
     </release>

@@ -55,7 +55,7 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Jewelcase.Devel`
   Jewelcase shows it as not installed.
 - **No update check**: Flatpaks update through their repository.
 
-## Tested (2026-11-09, headless)
+## Tested (headless)
 
 Scanning the library (read-only), covers (glycin's loaders from the runtime),
 the album panel, playback and the visualizer, and the `bpmdetect` element for

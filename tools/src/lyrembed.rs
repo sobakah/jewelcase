@@ -1,27 +1,20 @@
 //! lyrembed: lyrics search, checking and romanization (CONCEPT.md §10.1).
 //!
-//! From 1.2.0 on, lyrembed offers a D-Bus interface, which the bus starts
-//! on demand once `lyrembed --install-dbus-service` has run; it's the only
-//! way a Flatpak can reach it. Without it, the player starts the program.
+//! lyrembed offers a D-Bus interface, which the bus starts on demand once
+//! `lyrembed --install-dbus-service` has run; it's the only way a Flatpak
+//! can reach it. Without it, the player starts the program.
 
 use std::ffi::OsString;
 use std::path::Path;
 
 use crate::{Version, config_path, read_json};
 
-/// `lyrembed romanize --stdio` (§10.4) came with lyrembed 1.1.1; probing
-/// decides (`romanize --help`), not the version.
 /// How to install it (pipx, from its repository, with romanization).
 pub const INSTALL_COMMAND: &str =
     "pipx install \"lyrembed[all] @ git+https://github.com/sobakah/lyrembed.git\"";
-/// Updating a pipx install (its page offers the same).
-pub const UPGRADE_COMMAND: &str = "pipx upgrade lyrembed";
 /// Lets the session bus start lyrembed when Jewelcase calls it.
 pub const SERVICE_ARG: &str = "--install-dbus-service";
 pub const SERVICE_COMMAND: &str = "lyrembed --install-dbus-service";
-
-/// The first version with the D-Bus interface.
-pub const DBUS_VERSION: Version = Version(1, 2, 0);
 
 /// lyrembed's D-Bus interface (`lyrembed/dbus_service.py`). It opens its
 /// pages in the browser itself: their address never comes over the bus.
@@ -105,8 +98,9 @@ impl Config {
     }
 }
 
-/// Whether this lyrembed can romanize for display (`romanize --stdio`,
-/// §5.1). `help` is the output of `lyrembed romanize --help`.
+/// Whether this lyrembed can romanize for display without D-Bus
+/// (`romanize --stdio`, §5.1): the program is probed, not its version.
+/// `help` is the output of `lyrembed romanize --help`.
 pub fn supports_romanize_stdio(help: &str) -> bool {
     help.contains("--stdio")
 }
@@ -115,7 +109,7 @@ pub fn supports_romanize_stdio(help: &str) -> bool {
 pub fn romanize_requirement(version: Option<Version>) -> String {
     match version {
         Some(version) => format!(
-            "lyrembed {version} has no “romanize --stdio” yet, which automatic romanization needs (lyrembed 1.1.1 or newer)"
+            "lyrembed {version} has no “romanize --stdio”, which automatic romanization needs"
         ),
         None => "Automatic romanization needs lyrembed".to_owned(),
     }

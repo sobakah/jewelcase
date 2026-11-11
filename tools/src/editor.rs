@@ -11,7 +11,7 @@ pub const EAR_TAG_INSTALL_URI: &str = "appstream://app.drey.EarTag";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Editor {
-    /// cdport's tag editor (cdport 1.4.0 on), one album folder at a time.
+    /// cdport's tag editor, one album folder at a time.
     Cdport,
     EarTag,
     Kid3,
@@ -21,8 +21,8 @@ pub enum Editor {
 }
 
 impl Editor {
-    /// From the `tag-editor` setting ("auto", from before cdport had its
-    /// own editor, and anything unknown: cdport's).
+    /// From the `tag-editor` setting ("auto", an old value, and anything
+    /// unknown: cdport's).
     pub fn from_name(name: &str, custom: &str) -> Self {
         match name {
             "eartag" => Self::EarTag,

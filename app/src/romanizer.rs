@@ -1,6 +1,6 @@
 //! Automatic romanization for display (CONCEPT.md §5.1) with lyrembed's
-//! engine: its D-Bus service's `Romanize` when it's set up (lyrembed 1.2.0),
-//! else `lyrembed romanize --stdio`, one process started on first need and
+//! engine: its D-Bus service's `Romanize` when it's set up, else
+//! `lyrembed romanize --stdio`, one process started on first need and
 //! stopped after 5 minutes without requests (Python and its dictionaries
 //! take about a second to start). Results are kept in the
 //! database by the lyrics text, so each text is romanized once. Nothing is

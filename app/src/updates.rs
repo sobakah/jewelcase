@@ -557,7 +557,7 @@ fn newest_release(repo: &'static str, current: &str) -> Result<Option<Release>, 
     }))
 }
 
-/// "v0.2.1", "0.2.1", "soloistd 0.2.0" → (0, 2, 1).
+/// "0.2.1", "v0.2.1", "soloistd 0.2.1" → (0, 2, 1).
 fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
     let word = text.split_whitespace().find(|w| {
         w.trim_start_matches('v')
@@ -795,12 +795,15 @@ mod tests {
 
     #[test]
     fn versions_from_tags_and_version_lines() {
+        // Tags are plain ("0.5.1"); older ones had a "v".
+        assert_eq!(parse_version("0.5.1"), Some((0, 5, 1)));
         assert_eq!(parse_version("v0.2.1"), Some((0, 2, 1)));
         assert_eq!(parse_version("0.3"), Some((0, 3, 0)));
         assert_eq!(parse_version("soloistd 0.2.0"), Some((0, 2, 0)));
         assert_eq!(parse_version("0.2.1-dev"), Some((0, 2, 1)));
         assert_eq!(parse_version("nightly"), None);
         assert!(parse_version("v0.10.0") > parse_version("v0.9.9"));
+        assert!(parse_version("0.10.0") > parse_version("v0.9.9"));
     }
 
     #[test]

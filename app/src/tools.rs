@@ -6,9 +6,9 @@
 //! "Show Page" and "Stop" (SIGINT, as Ctrl+C). Results arrive through the
 //! files: the library's inotify watcher picks them up.
 //!
-//! cdport 1.3.0 and lyrembed 1.2.0 and newer are reached over D-Bus when
-//! their service is set up (`--install-dbus-service`): their runs then
-//! belong to them, not to Jewelcase, and it's the only way from a Flatpak.
+//! cdport and lyrembed are reached over D-Bus when their service is set up
+//! (`--install-dbus-service`): their runs then belong to them, not to
+//! Jewelcase, and it's the only way from a Flatpak.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
@@ -61,7 +61,7 @@ impl Detected {
 }
 
 /// A companion tool as found: over D-Bus, as a program here, or both.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Companion<C> {
     /// The program. A Flatpak doesn't see it.
     pub program: Option<ToolInfo>,
@@ -72,41 +72,10 @@ pub struct Companion<C> {
     pub dbus_error: Option<String>,
     pub version: Option<Version>,
     pub config: C,
-    /// The first version with the D-Bus interface.
-    pub dbus_version: Version,
-    /// The program's old name (cdport's `cdimport`).
-    pub old_name: Option<&'static str>,
 }
 
-/// cdport (`cdport`, or `cdimport` before 1.3.0).
 pub type Cdport = Companion<cdport::Config>;
 pub type Lyrembed = Companion<lyrembed::Config>;
-
-impl Default for Cdport {
-    fn default() -> Self {
-        Companion::new(cdport::DBUS_VERSION, Some("cdimport"))
-    }
-}
-
-impl Default for Lyrembed {
-    fn default() -> Self {
-        Companion::new(lyrembed::DBUS_VERSION, None)
-    }
-}
-
-impl<C: Default> Companion<C> {
-    fn new(dbus_version: Version, old_name: Option<&'static str>) -> Self {
-        Self {
-            program: None,
-            dbus: false,
-            dbus_error: None,
-            version: None,
-            config: C::default(),
-            dbus_version,
-            old_name,
-        }
-    }
-}
 
 impl<C> Companion<C> {
     /// Jewelcase can use it.
@@ -114,23 +83,9 @@ impl<C> Companion<C> {
         self.dbus || self.program.is_some()
     }
 
-    /// A version from before the D-Bus interface (for cdport: cdimport).
-    pub fn is_old(&self) -> bool {
-        let Some(program) = self.program.as_ref().filter(|_| !self.dbus) else {
-            return false;
-        };
-        match self.version {
-            Some(version) => version < self.dbus_version,
-            // Its version unknown: the name tells.
-            None => self
-                .old_name
-                .is_some_and(|old| program.path.file_name().is_some_and(|n| n == old)),
-        }
-    }
-
-    /// A version with the D-Bus interface, without its service set up.
+    /// The program is here, its D-Bus service isn't set up.
     pub fn can_set_up_service(&self) -> bool {
-        !self.dbus && self.program.is_some() && !self.is_old()
+        !self.dbus && self.program.is_some()
     }
 }
 
@@ -1422,12 +1377,6 @@ impl Tools {
             self.missing_tool("cdport");
             return;
         }
-        if cdport.version.is_none_or(|v| v < cdport::EDIT_TAGS_VERSION) {
-            self.message(&gettext(
-                "Editing tags needs cdport 1.4.0 or newer (update it with “pipx upgrade cdport”)",
-            ));
-            return;
-        }
         if folders.len() > 1 {
             // An artist's albums, or an album in disc folders.
             let name = folder
@@ -1478,8 +1427,8 @@ fn edit_tags_status() -> String {
     gettext("Editing tags with cdport")
 }
 
-/// cdimport's settings (0.2.x) carried over to cdport's keys, once: the old
-/// keys are reset afterwards.
+/// The settings under cdport's old name (cdimport) carried over to cdport's
+/// keys, once: the old keys are reset afterwards.
 fn migrate_cdimport_settings(settings: &gio::Settings) {
     let path = settings.string("cdimport-path");
     if !path.is_empty() {
@@ -1504,7 +1453,7 @@ fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
         Some(ToolInfo { path, version })
     };
     let lyrembed = detect_lyrembed(probe("lyrembed", lyrembed_override));
-    // Without D-Bus, romanizing needs `romanize --stdio` (1.1.1).
+    // Without D-Bus, romanizing needs `romanize --stdio`.
     let romanize_stdio = !lyrembed.dbus
         && lyrembed.program.as_ref().is_some_and(|tool| {
             run_for_output(&[
@@ -1514,11 +1463,8 @@ fn detect(lyrembed_override: &Path, cdport_override: &Path) -> Detected {
             ])
             .is_some_and(|help| lyrembed::supports_romanize_stdio(&help))
         });
-    let cdport_program = cdport::PROGRAMS
-        .iter()
-        .find_map(|name| probe(name, cdport_override));
     Detected {
-        cdport: detect_cdport(cdport_program),
+        cdport: detect_cdport(probe(cdport::PROGRAM, cdport_override)),
         lyrembed,
         romanize_stdio,
         ear_tag: ear_tag_installed(),
@@ -1760,54 +1706,27 @@ mod tests {
     }
 
     #[test]
-    fn cdport_states() {
+    fn companion_states() {
         let none = Cdport::default();
         assert!(!Lyrembed::default().usable());
-        let old_lyrembed = Lyrembed {
-            program: program(Some(Version(1, 1, 1))),
-            version: Some(Version(1, 1, 1)),
-            ..Lyrembed::default()
-        };
-        assert!(old_lyrembed.usable() && old_lyrembed.is_old());
-        assert!(
-            !Lyrembed {
-                program: program(None),
-                ..Lyrembed::default()
-            }
-            .is_old(),
-            "lyrembed has no old name to tell by"
-        );
-        assert!(!none.usable() && !none.is_old() && !none.can_set_up_service());
+        assert!(!none.usable() && !none.can_set_up_service());
 
-        let old = Cdport {
-            program: program(Some(Version(1, 2, 1))),
-            version: Some(Version(1, 2, 1)),
-            ..Cdport::default()
-        };
-        assert!(old.usable() && old.is_old() && !old.can_set_up_service());
-
-        let without_service = Cdport {
-            program: program(Some(Version(1, 3, 0))),
-            version: Some(Version(1, 3, 0)),
-            ..Cdport::default()
-        };
-        assert!(
-            Cdport {
-                program: program(None),
+        // Found as a program, whatever its version: offered the service.
+        for version in [Some(Version(1, 0, 0)), None] {
+            let without_service = Cdport {
+                program: program(version),
+                version,
                 ..Cdport::default()
-            }
-            .can_set_up_service(),
-            "a cdport whose version isn't known isn't taken for cdimport"
-        );
-        assert!(without_service.usable() && !without_service.is_old());
-        assert!(without_service.can_set_up_service());
+            };
+            assert!(without_service.usable() && without_service.can_set_up_service());
+        }
 
         // Seen only over D-Bus (from a Flatpak): no program, still usable.
         let dbus = Cdport {
             dbus: true,
-            version: Some(Version(1, 3, 0)),
+            version: Some(Version(1, 0, 0)),
             ..Cdport::default()
         };
-        assert!(dbus.usable() && !dbus.is_old() && !dbus.can_set_up_service());
+        assert!(dbus.usable() && !dbus.can_set_up_service());
     }
 }

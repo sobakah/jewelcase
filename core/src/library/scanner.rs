@@ -182,7 +182,7 @@ pub fn scan(
     Ok(summary)
 }
 
-/// Gone paths that turn up elsewhere (a renamed or moved folder, cdimport
+/// Gone paths that turn up elsewhere (a renamed or moved folder, cdport
 /// sorting files) are moved in the database instead of deleted and added
 /// again, so their songs keep their ID and with it the play history, the
 /// queue, playlists and Spotify matches. Same file name, size and

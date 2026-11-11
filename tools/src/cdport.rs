@@ -1,10 +1,9 @@
-//! cdport (called cdimport before 1.3.0): getting CDs into the library
-//! (CONCEPT.md §10.2).
+//! cdport: getting CDs into the library and editing tags (CONCEPT.md
+//! §10.2, §10.3).
 //!
-//! From 1.3.0 on, cdport offers a D-Bus interface, which the bus starts on
-//! demand once `cdport --install-dbus-service` has run; it's the only way
-//! a Flatpak can reach it. Without it, the player starts the program
-//! (`cdport`, or `cdimport` for 1.2.x) as before.
+//! cdport offers a D-Bus interface, which the bus starts on demand once
+//! `cdport --install-dbus-service` has run; it's the only way a Flatpak
+//! can reach it. Without it, the player starts the program.
 
 use std::ffi::OsString;
 use std::fs;
@@ -14,21 +13,12 @@ use crate::{config_path, expand_home, read_json};
 
 /// How to install it (pipx, from its repository).
 pub const INSTALL_COMMAND: &str = "pipx install git+https://github.com/sobakah/cdport.git";
-/// Switching from cdimport 1.2.x: both install a `cdimport` command.
-pub const REMOVE_OLD_COMMAND: &str = "pipx uninstall cdimport";
 /// Lets the session bus start cdport when Jewelcase calls it.
 pub const SERVICE_ARG: &str = "--install-dbus-service";
 pub const SERVICE_COMMAND: &str = "cdport --install-dbus-service";
 
-/// The program's names: cdport, and its old name (still installed by
-/// cdport as an alias, and the only one of cdimport 1.2.x).
-pub const PROGRAMS: [&str; 2] = ["cdport", "cdimport"];
-
-/// The first version with the D-Bus interface.
-pub const DBUS_VERSION: crate::Version = crate::Version(1, 3, 0);
-/// The first version whose tag editor opens on its own (`--edit-tags`,
-/// D-Bus `EditTags`).
-pub const EDIT_TAGS_VERSION: crate::Version = crate::Version(1, 4, 0);
+/// The program's name.
+pub const PROGRAM: &str = "cdport";
 
 /// cdport's D-Bus interface (`cdport/dbus_service.py`).
 pub const BUS_NAME: &str = "io.github.sobakah.cdport";
@@ -36,7 +26,7 @@ pub const OBJECT_PATH: &str = "/io/github/sobakah/cdport";
 pub const INTERFACE: &str = "io.github.sobakah.cdport1";
 
 /// cdport's marker of an unfinished import (only its presence is checked;
-/// it kept the old name).
+/// it kept cdport's old name).
 const STATE_FILE: &str = ".cdimport.json";
 
 /// What the player reads from cdport's config (it never writes it), or
@@ -50,7 +40,8 @@ pub struct Config {
 }
 
 impl Config {
-    /// `~/.config/cdport/config.json`, or cdimport's before cdport moved it.
+    /// `~/.config/cdport/config.json`, or the one under cdport's old name
+    /// (cdimport) where cdport hasn't moved it yet.
     pub fn read() -> Self {
         let new = config_path("cdport");
         Self::from_path(&if new.is_file() {

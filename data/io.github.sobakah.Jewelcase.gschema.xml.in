@@ -149,7 +149,7 @@
     <key name="skipped-updates" type="as">
       <default>[]</default>
       <summary>Updates skipped</summary>
-      <description>Updates the user chose to skip, e.g. “jewelcase:v0.2.2” or “soloist:&lt;ETag&gt;”; not offered again.</description>
+      <description>Updates the user chose to skip, e.g. “jewelcase:0.5.1” or “soloist:&lt;ETag&gt;”; not offered again.</description>
     </key>
     <key name="statistics-period" type="s">
       <choices>
@@ -233,7 +233,7 @@
     <key name="cdport-path" type="s">
       <default>""</default>
       <summary>cdport program</summary>
-      <description>Empty: look for cdport (or cdimport, its old name) in PATH and ~/.local/bin. Not needed when cdport's D-Bus service is set up.</description>
+      <description>Empty: look for cdport in PATH and ~/.local/bin. Not needed when cdport's D-Bus service is set up.</description>
     </key>
     <key name="tag-editor" type="s">
       <choices>
@@ -246,14 +246,14 @@
       </choices>
       <default>"cdport"</default>
       <summary>Tag editor</summary>
-      <description>“cdport”: cdport’s own tag editor (cdport 1.4.0 or newer), in the browser. “auto”, from before it had one, counts as “cdport”. A Flatpak always uses cdport’s.</description>
+      <description>“cdport”: cdport’s own tag editor, in the browser. “auto”, an old value, counts as “cdport”. A Flatpak always uses cdport’s.</description>
     </key>
     <key name="tag-editor-command" type="s">
       <default>""</default>
       <summary>Custom tag editor command</summary>
       <description>With {files} for the files or {dir} for their folder.</description>
     </key>
-    <!-- cdimport's keys before cdport's name (0.2.x): read once by tools.rs
+    <!-- The keys under cdport's old name (cdimport): read once by tools.rs
          and carried over to the cdport keys. -->
     <key name="cdimport-path" type="s">
       <default>""</default>

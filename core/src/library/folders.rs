@@ -1,7 +1,7 @@
 //! Rules for which folders may become library folders (CONCEPT.md §3.1).
 //!
 //! - Symlinks are not allowed: neither the folder itself nor a symlinked
-//!   parent inside the user's home (e.g. `~/Musik/Verknüpfung mit Musik@GDrive/…`).
+//!   parent inside the user's home (e.g. `~/Musik/Link to Music@Cloud/…`).
 //!   Symlinks at or above the home folder (`/home → /var/home` on Atomic
 //!   desktops) are system layout and are ignored.
 //! - Library folders must not overlap: no folder inside another one, and no
@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn rejects_symlinked_folder() {
         let h = home();
-        let drive = h.home.join("Google Drive/Musik");
+        let drive = h.home.join("Cloud/Music");
         fs::create_dir_all(&drive).unwrap();
-        let link = h.home.join("Musik@GDrive");
+        let link = h.home.join("Music@Cloud");
         symlink(&drive, &link).unwrap();
         assert_eq!(
             validate(&h, &link, &[]),
@@ -159,9 +159,9 @@ mod tests {
     #[test]
     fn rejects_folder_below_symlinked_parent_inside_home() {
         let h = home();
-        let drive = h.home.join("Google Drive/Musik");
+        let drive = h.home.join("Cloud/Music");
         fs::create_dir_all(drive.join("Adele")).unwrap();
-        let link = h.music.join("Verknüpfung mit Musik@GDrive");
+        let link = h.music.join("Link to Music@Cloud");
         symlink(&drive, &link).unwrap();
         assert_eq!(
             validate(&h, &link.join("Adele"), &[]),

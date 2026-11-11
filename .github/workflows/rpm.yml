@@ -1,16 +1,16 @@
 # Builds the Fedora RPM in a clean Fedora 45 container (CONCEPT.md §12).
 #
-# - Pushing a tag like v0.1.0 builds it and puts the packages on a draft
-#   release (a pre-release for 0.x versions and tags with "-"); check it,
-#   then publish it on GitHub. Its notes are the version's section of
-#   CHANGELOG.md.
+# - Pushing a version tag like 0.5.0 (no "v") builds it and puts the
+#   packages on a draft release (a pre-release for 0.x versions and tags
+#   with "-"); check it, then publish it on GitHub. Its notes are the
+#   version's section of CHANGELOG.md (`## [0.5.0] — date`).
 # - "Run workflow" in the Actions tab builds it as a test; tick "release"
 #   to also make a draft release for the version in meson.build.
 name: RPM
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["[0-9]*"]
   workflow_dispatch:
     inputs:
       release:
@@ -43,7 +43,7 @@ jobs:
         run: |
           version=$(sed -n "s/^  version: '\(.*\)',$/\1/p" meson.build)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
             echo "::error::The tag ${GITHUB_REF_NAME} doesn't match the version $version in meson.build"
             exit 1
           fi
@@ -87,17 +87,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.rpm.outputs.version }}
         run: |
-          tag="v$VERSION"
-          # 0.x versions and tags like v1.0.0-beta1 are pre-releases.
+          tag="$VERSION"
+          # 0.x versions and tags like 1.0.0-beta1 are pre-releases.
           prerelease=""
           case "$VERSION" in 0.*|*-*) prerelease="--prerelease" ;; esac
           # The program and the source package; debuginfo stays in the
           # workflow's artifact.
           files=$(find dist -name '*.rpm' ! -name '*-debuginfo-*' ! -name '*-debugsource-*')
-          # The version's section of CHANGELOG.md, or GitHub's own notes.
+          # The version's section of CHANGELOG.md (from its heading
+          # "## [X.Y.Z] — date" to the next "## " or the link list at the
+          # end), or GitHub's own notes.
           awk -v v="$VERSION" '
-            index($0, "## " v) == 1 && (length($0) == length(v) + 3 || substr($0, length(v) + 4, 1) == " ") { found = 1; next }
-            found && /^## / { exit }
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && (/^## / || /^\[[^]]*\]: /) { exit }
             found { print }
           ' CHANGELOG.md > notes.md
           if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi

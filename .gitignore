@@ -4,3 +4,4 @@
 /rpmbuild/
 /.cargo/
 *.tar.xz
+/CLAUDE.local.md
