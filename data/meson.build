@@ -56,9 +56,10 @@ custom_target(
   build_by_default: true,
 )
 
-# Icons
+# Icons. The development build's icon carries GNOME's construction stripes,
+# so it can be told apart from the installed release in the app grid.
 install_data(
-  'icons/hicolor/scalable/apps' / base_id + '.svg',
+  'icons/hicolor/scalable/apps' / application_id + '.svg',
   install_dir: datadir / 'icons' / 'hicolor' / 'scalable' / 'apps',
   rename: application_id + '.svg',
 )
@@ -74,9 +75,10 @@ flatpak_validate_icon = find_program('flatpak-validate-icon',
 if flatpak_validate_icon.found()
   foreach icon : [
     'icons/hicolor/scalable/apps' / base_id + '.svg',
+    'icons/hicolor/scalable/apps' / base_id + '.Devel.svg',
     'icons/hicolor/symbolic/apps' / base_id + '-symbolic.svg',
   ]
-    test('validate-icon-' + icon.split('/')[2], flatpak_validate_icon,
+    test('validate-icon-' + fs.stem(icon), flatpak_validate_icon,
       args: ['--sandbox', '512', '512', files(icon)])
   endforeach
 endif

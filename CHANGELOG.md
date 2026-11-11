@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The development build and the test Flatpak have their own icon, with GNOME's yellow and black
+  construction stripes, so they can be told apart from the installed Jewelcase.
+
 ## [0.5.0] — 2026-11-11
 
 A pre-release. Jewelcase is a music player for GNOME built around your own album library, with

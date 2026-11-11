@@ -274,7 +274,8 @@ make test
   warning "Unknown bus method ReloadConfig" at the end is harmless (its sandboxed D-Bus may only
   talk to `org.freedesktop.Flatpak`).
 - Flatpak's icon check recognizes an SVG by `<svg` near the file's start: nothing long (a comment)
-  may come before the `<svg>` element. `make test` checks both app icons.
+  may come before the `<svg>` element. `make test` checks the app icons
+  (release, `.Devel` with GNOME's construction stripes, symbolic).
 - Rendering SVGs for review: Python with `gi` `Rsvg` 2.0 and cairo works. Compare app icons against
   `/usr/share/icons/hicolor/scalable/apps/org.gnome.*.svg` at 64 px.
 - GitHub redirects `sobakah/gatefold` to `sobakah/jewelcase`, also for the API, so old installs
