@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.5.0" date="2026-11-11" type="development">
+      <description>
+        <p>Gatefold is now Jewelcase, with a new icon.</p>
+        <ul>
+          <li>A new name and icon: a CD jewel case</li>
+          <li>Your library, settings and logins come along by themselves</li>
+          <li>Step-by-step setup for streaming with Spotify Soloist</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-11-10" type="development">
       <description>
         <p>Search in playlists, fresher artist pages, and where lyrics come from.</p>

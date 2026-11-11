@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.4.1
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,11 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Wed Nov 11 2026 sobakah - 0.5.0-1
+- Gatefold is now Jewelcase, with a jewel-case icon; replaces the
+  gatefold package and takes over its library, settings and logins
+- Step-by-step setup for Spotify Soloist, with or without soloistd
+
 * Tue Nov 10 2026 sobakah - 0.4.1-1
 - Search in a playlist; add library or Spotify songs from there
 - Artist pages: ask Spotify again for an artist's releases

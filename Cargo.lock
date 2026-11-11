@@ -2433,7 +2433,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jewelcase"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-channel",
  "futures-lite",
@@ -2461,7 +2461,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-channel",
  "bliss-audio",
@@ -2483,7 +2483,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-lyrics"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "lofty",
  "tempfile",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-metadata"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-soloist"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-channel",
  "libc",
@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-spotify"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
  "rand 0.9.5",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-stream"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-channel",
  "base64 0.23.1",
@@ -2546,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "jewelcase-tools"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde_json",
  "tempfile",
