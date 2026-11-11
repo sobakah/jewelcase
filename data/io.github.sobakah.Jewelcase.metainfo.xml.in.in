@@ -48,6 +48,17 @@
   </branding>
 
   <releases>
+    <release version="0.5.1" date="2026-11-11" type="development">
+      <description>
+        <ul>
+          <li>Editing tags works with cdport 1.0.0, and setting up cdport's and lyrembed's D-Bus services is offered again</li>
+          <li>A small spinner while something loads from Spotify</li>
+          <li>Shuffle and Repeat have tooltips that name the current mode</li>
+          <li>The visualizer is off by default and moves more smoothly</li>
+          <li>Tooltips appear after the usual short pause again</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-11-11" type="development">
       <description>
         <p>A pre-release of Jewelcase, a music player for your album library with Spotify woven in.</p>

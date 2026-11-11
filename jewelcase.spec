@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,11 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Wed Nov 11 2026 sobakah - 0.5.1-1
+- Editing tags works with cdport 1.0.0; D-Bus setup offered again
+- Spinner while loading from Spotify; mode tooltips on Shuffle and Repeat
+- Visualizer off by default and smoother; tooltips without the long wait
+
 * Wed Nov 11 2026 sobakah - 0.5.0-1
 - Pre-release: a GNOME music player for an album library with Spotify
   woven in (playlists both ways, saved albums, followed artists,

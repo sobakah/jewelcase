@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-11
+
+The library database is unchanged; 0.5.0 still opens it.
+
 ### Added
 
 - **Loading from Spotify** shows: a small spinner in the header bar while searches, playlists,
@@ -77,5 +81,6 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.5.1...HEAD
+[0.5.1]: https://github.com/sobakah/jewelcase/releases/tag/0.5.1
 [0.5.0]: https://github.com/sobakah/jewelcase/releases/tag/0.5.0
