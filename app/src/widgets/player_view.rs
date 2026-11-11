@@ -323,7 +323,7 @@ impl PlayerView {
             ),
         );
 
-        super::mini_player::show_mixing(&imp.shuffle_button);
+        super::mini_player::show_shuffle(&imp.shuffle_button);
         imp.shuffle_options
             .set_popover(Some(&super::shuffle_options::shuffle_popover()));
         imp.repeat_options
@@ -378,8 +378,6 @@ impl PlayerView {
                 true
             });
 
-        super::tooltips::wait_for_rest(&*imp.info_popover);
-        super::tooltips::wait_for_rest(&*imp.devices_popover);
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {
             let player = JewelcaseApplication::get().player();

@@ -6,10 +6,27 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Loading from Spotify** shows: a small spinner in the header bar while searches, playlists,
+  artists or albums are on their way.
+- Shuffle and Repeat have a tooltip that names the current mode, such as "Shuffle: Albums" or
+  "Repeat: One Song".
+- A hidden extra for everyone who misses their CD shelf.
+
 ### Changed
 
+- **The visualizer is off by default.** Turn it on in Preferences → Playback.
+- The visualizer moves smoothly: its bars follow the music 50 times a second instead of 25 and
+  rise over a few frames instead of jumping.
+- Tooltips appear after GTK's usual short pause again instead of waiting a second.
 - The development build and the test Flatpak have their own icon, with GNOME's yellow and black
   construction stripes, so they can be told apart from the installed Jewelcase.
+
+### Fixed
+
+- **Editing tags with cdport works with cdport 1.0.0**: Jewelcase no longer asks for "cdport 1.4.0
+  or newer", and it offers to set up cdport's and lyrembed's D-Bus services again.
 
 ## [0.5.0] — 2026-11-11
 

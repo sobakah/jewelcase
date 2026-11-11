@@ -58,6 +58,7 @@ mod imp {
             obj.set_halign(gtk::Align::Center);
             obj.add_css_class("album-tile");
             self.cover.set_margin_bottom(6);
+            super::super::album_case(&self.cover);
             obj.append(&self.cover);
             obj.append(&self.title);
             obj.append(&self.artist);

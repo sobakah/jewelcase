@@ -153,6 +153,10 @@ make test
 
 `JEWELCASE_LOG=debug` (or `trace`, `warn`) sets the log level; the log goes to the journal
 (`journalctl --user -t jewelcase`, with hourly Spotify request counts per kind).
+`JEWELCASE_FRAME_STATS=1` logs each animation's frame rate, longest frame and painting time (also
+in release builds): measure before changing anything for "it feels slow". Headless runs render on
+the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
+(`CLAUDE.local.md`).
 
 ## Rules that must not break
 
@@ -191,11 +195,13 @@ make test
 - **Change UI elements everywhere they appear**, unasked: grips, panel slides, buttons. Grep for
   the style class or widget (`.grip`, `SlideView`, `panel-close-handle`, `sheet-close-handle`) and
   bring every place in line, or say why one can't follow.
-- Tooltips: common symbols (play, pause, next, shuffle, repeat, volume, close, ⋮) have no tooltip,
-  only an accessible label (`widgets::set_accessible_label`); less common icons keep one, with the
-  key combination if there is one. Tooltips wait until the pointer rests for a second
-  (`widgets/tooltips.rs`).
+- Tooltips: common symbols (play, pause, next, volume, close, ⋮) have no tooltip, only an
+  accessible label (`widgets::set_accessible_label`); less common icons keep one, with the key
+  combination if there is one. Shuffle and repeat have one that names the current mode (the
+  owner's choice). Tooltips use GTK's own timing (the owner had a one-second wait removed).
 - Settings are GSettings keys in `data/io.github.sobakah.Jewelcase.gschema.xml.in`.
+- A hidden extra, not in the README: ↑ ↑ ↓ ↓ ← → ← → B A in the main window toggles `jewel-cases`
+  (album covers drawn in CD jewel cases, `widgets/cover_image.rs` `draw_case`).
 - Companion tools (`app/src/tools.rs`, `tools/`): cdport and lyrembed are used over D-Bus whenever
   their `GetInfo` answers, else as programs (found in `PATH`, then `~/.local/bin`). Features are
   detected (`lyrembed romanize --help` for `--stdio`), not read from version numbers.
@@ -222,6 +228,8 @@ make test
 - **Real clicks headless**: mutter's `org.gnome.Mutter.RemoteDesktop` on the private bus. The
   session dies with its caller, so use one process (Python `Gio.DBus`): `CreateSession`, `Start`,
   `NotifyPointerMotionRelative(-10000,-10000)` then `(x,y)`, `NotifyPointerButton(272, true/false)`.
+  Keys: `NotifyKeyboardKeysym(keysym, true/false)`; the first key after `Start` is lost (send
+  Shift first). The screenshot hook renders the window only: tooltips don't show in it.
 - **Spotify without the account**: debug builds talk to
   `JEWELCASE_SPOTIFY_TEST_SERVER=http://127.0.0.1:<port>` and complete the login by themselves.
   The stand-in server is a throwaway Python script in the scratchpad (not in the repo):

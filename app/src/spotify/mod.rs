@@ -78,6 +78,11 @@ mod imp {
         /// none); it can't be edited meanwhile.
         #[property(get)]
         pub sending: Cell<i64>,
+        /// Requests for something on screen are on their way (the window
+        /// shows a small spinner); polls of a Spotify device don't count.
+        #[property(get)]
+        pub loading: Cell<bool>,
+        pub requests: Cell<u32>,
         /// Streaming (§9.4): "off", "connecting", "ready" or "error".
         #[property(get)]
         pub stream_status: RefCell<String>,
@@ -530,22 +535,54 @@ impl Spotify {
         ));
     }
 
-    /// Runs `job` with the client on a worker thread. A lost login logs
-    /// out.
+    /// Runs `job` with the client on a worker thread; `loading` is on
+    /// meanwhile. A lost login logs out.
     pub(crate) async fn call<T: Send + 'static>(
         &self,
         job: impl FnOnce(&Client) -> jewelcase_spotify::Result<T> + Send + 'static,
     ) -> jewelcase_spotify::Result<T> {
+        self.request(job, true).await
+    }
+
+    /// As `call`, without `loading`: for what's asked again and again in
+    /// the background (a Spotify device's playback and queue).
+    pub(crate) async fn call_quietly<T: Send + 'static>(
+        &self,
+        job: impl FnOnce(&Client) -> jewelcase_spotify::Result<T> + Send + 'static,
+    ) -> jewelcase_spotify::Result<T> {
+        self.request(job, false).await
+    }
+
+    async fn request<T: Send + 'static>(
+        &self,
+        job: impl FnOnce(&Client) -> jewelcase_spotify::Result<T> + Send + 'static,
+        counted: bool,
+    ) -> jewelcase_spotify::Result<T> {
         let Some(client) = self.client() else {
             return Err(Error::LoggedOut);
         };
+        if counted {
+            self.count_request(1);
+        }
         let result = gio::spawn_blocking(move || job(&client))
             .await
             .unwrap_or(Err(Error::Cancelled));
+        if counted {
+            self.count_request(-1);
+        }
         if matches!(result, Err(Error::LoggedOut)) && self.is_connected() {
             self.logged_out();
         }
         result
+    }
+
+    fn count_request(&self, change: i32) {
+        let imp = self.imp();
+        let requests = imp.requests.get().saturating_add_signed(change);
+        imp.requests.set(requests);
+        if imp.loading.replace(requests > 0) != (requests > 0) {
+            self.notify_loading();
+        }
     }
 }
 

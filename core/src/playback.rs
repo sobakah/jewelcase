@@ -81,12 +81,15 @@ fn is_mp4(uri: &str) -> bool {
 
 /// Bands the `spectrum` element measures (linear, up to half the rate).
 const SPECTRUM_BANDS: u32 = 1024;
-/// A frame every 40 ms: 25 a second.
-const SPECTRUM_INTERVAL_MS: u64 = 40;
+/// A frame every 20 ms: 50 a second (at 25, the bars visibly moved in
+/// steps on a fast screen).
+const SPECTRUM_INTERVAL_MS: u64 = 20;
+/// A frame older than this (a pause, a stall) means nothing is heard.
+const SPECTRUM_STALE_MS: u64 = 160;
 /// Quieter bands (dB) count as silence.
 const SPECTRUM_THRESHOLD_DB: i32 = -80;
 /// Frames waiting for the sink, at most (a few seconds).
-const SPECTRUM_QUEUE: usize = 100;
+const SPECTRUM_QUEUE: usize = 200;
 
 /// One spectrum measurement.
 #[derive(Debug, Clone, PartialEq)]
@@ -461,7 +464,7 @@ impl Player {
         }
         // Far older than now (a pause, a stall): nothing is heard.
         let fresh = queue.current.as_ref().is_some_and(|f| {
-            heard.saturating_sub(f.running_time_ns) < 4 * SPECTRUM_INTERVAL_MS * 1_000_000
+            heard.saturating_sub(f.running_time_ns) < SPECTRUM_STALE_MS * 1_000_000
         });
         if fresh { queue.current.clone() } else { None }
     }

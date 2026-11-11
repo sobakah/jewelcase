@@ -137,9 +137,14 @@
       <description>Off: songs of an album playing in order follow gaplessly.</description>
     </key>
     <key name="visualizer" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Visualizer</summary>
       <description>Bars that move with the music in the player and the mini player (local songs only; off while GNOME’s animations are off).</description>
+    </key>
+    <key name="jewel-cases" type="b">
+      <default>false</default>
+      <summary>Albums in jewel cases</summary>
+      <description>Album covers in the grids are drawn in CD jewel cases. A hidden extra, with no switch in Preferences.</description>
     </key>
     <key name="check-updates" type="b">
       <default>true</default>

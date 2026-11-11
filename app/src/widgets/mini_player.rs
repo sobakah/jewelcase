@@ -116,7 +116,6 @@ mod imp {
                     glib::Propagation::Proceed
                 }
             ));
-            crate::widgets::tooltips::wait_for_rest(&*self.queue_popover);
             // The queue card is built when first opened.
             self.queue_popover.connect_show(|popover| {
                 if popover.child().is_none() {
@@ -146,7 +145,7 @@ mod imp {
             });
             obj.update_track(&player);
             update_repeat_button(&self.repeat_button, &player);
-            show_mixing(&self.shuffle_button);
+            show_shuffle(&self.shuffle_button);
             super::update_play_button(&self.play_button, player.playing());
         }
     }
@@ -253,7 +252,8 @@ pub(super) fn show_remaining() -> bool {
         .boolean("show-remaining-time")
 }
 
-/// Repeat's icon and tooltip for its current mode.
+/// Repeat's icon and tooltip for its current mode. The tooltip names the
+/// mode: the three icons alone don't say which is which.
 pub(super) fn update_repeat_button(button: &gtk::Button, player: &Player) {
     let (icon, tooltip) = match player.repeat().as_str() {
         "all" => ("media-playlist-repeat-symbolic", gettext("Repeat: All")),
@@ -267,36 +267,64 @@ pub(super) fn update_repeat_button(button: &gtk::Button, player: &Player) {
         ),
     };
     button.set_icon_name(icon);
-    // A common symbol: announced, no tooltip.
+    button.set_tooltip_text(Some(&tooltip));
     super::set_accessible_label(button, &tooltip);
 }
 
-/// Smart shuffle (mixing in similar songs, §7) shows on the shuffle
-/// button: its own icon, highlighted even while plain shuffle is off.
-pub(super) fn show_mixing(button: &gtk::ToggleButton) {
-    let settings = JewelcaseApplication::get().player().settings().clone();
+/// Shuffle's icon and tooltip, kept up to date. The tooltip names the
+/// mode (off, songs, albums), and smart shuffle (mixing in similar songs,
+/// §7) shows on the button: its own icon, highlighted even while plain
+/// shuffle is off.
+pub(super) fn show_shuffle(button: &gtk::ToggleButton) {
+    let player = JewelcaseApplication::get().player();
+    let settings = player.settings().clone();
     let update = glib::clone!(
         #[weak]
         button,
-        move |settings: &gtk::gio::Settings| {
-            let mixing = settings.boolean("mix-similar");
-            // Only Jewelcase's own icon for mixing gets a tooltip.
-            if mixing {
-                let text = gettext("Shuffle (Mixing In Similar Songs)");
-                button.set_icon_name("jewelcase-smart-shuffle-symbolic");
-                button.set_tooltip_text(Some(&text));
-                super::set_accessible_label(&button, &text);
-                button.add_css_class("smart-shuffle");
-            } else {
-                button.set_icon_name("media-playlist-shuffle-symbolic");
-                button.set_tooltip_text(None);
-                super::set_accessible_label(&button, &gettext("Shuffle"));
-                button.remove_css_class("smart-shuffle");
-            }
-        }
+        move || update_shuffle_button(&button)
     );
-    update(&settings);
-    settings.connect_changed(Some("mix-similar"), move |settings, _| update(settings));
+    update();
+    player.connect_shuffle_notify({
+        let update = update.clone();
+        move |_| update()
+    });
+    for key in ["shuffle-albums", "mix-similar"] {
+        let update = update.clone();
+        settings.connect_changed(Some(key), move |_, _| update());
+    }
+}
+
+fn update_shuffle_button(button: &gtk::ToggleButton) {
+    let player = JewelcaseApplication::get().player();
+    let settings = player.settings();
+    let mixing = settings.boolean("mix-similar");
+    let albums = settings.boolean("shuffle-albums");
+    let mode = shuffle_mode_text(player.shuffle(), albums, mixing, player.is_remote());
+    if mixing {
+        button.set_icon_name("jewelcase-smart-shuffle-symbolic");
+        button.add_css_class("smart-shuffle");
+    } else {
+        button.set_icon_name("media-playlist-shuffle-symbolic");
+        button.remove_css_class("smart-shuffle");
+    }
+    button.set_tooltip_text(Some(&mode.join("\n")));
+    super::set_accessible_label(button, &mode.join(", "));
+}
+
+/// The lines of shuffle's tooltip. A Spotify device shuffles its own way:
+/// only on or off, and Jewelcase mixes nothing in there.
+fn shuffle_mode_text(on: bool, albums: bool, mixing: bool, remote: bool) -> Vec<String> {
+    let mode = match (on, albums) {
+        (false, _) => gettext("Shuffle: Off"),
+        _ if remote => gettext("Shuffle: On"),
+        (true, false) => gettext("Shuffle: Songs"),
+        (true, true) => gettext("Shuffle: Albums"),
+    };
+    let mut lines = vec![mode];
+    if mixing && !remote {
+        lines.push(gettext("Mixing in similar songs"));
+    }
+    lines
 }
 
 pub(super) fn update_play_button(button: &gtk::Button, playing: bool) {
@@ -306,5 +334,37 @@ pub(super) fn update_play_button(button: &gtk::Button, playing: bool) {
     } else {
         button.set_icon_name("media-playback-start-symbolic");
         super::set_accessible_label(button, &gettext("Play"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shuffle_mode_text;
+
+    #[test]
+    fn shuffle_tooltip_names_the_mode() {
+        assert_eq!(
+            shuffle_mode_text(false, false, false, false),
+            ["Shuffle: Off"]
+        );
+        assert_eq!(
+            shuffle_mode_text(false, true, false, false),
+            ["Shuffle: Off"]
+        );
+        assert_eq!(
+            shuffle_mode_text(true, false, false, false),
+            ["Shuffle: Songs"]
+        );
+        assert_eq!(
+            shuffle_mode_text(true, true, false, false),
+            ["Shuffle: Albums"]
+        );
+        // Mixing works with shuffle off too: a second line.
+        assert_eq!(
+            shuffle_mode_text(false, false, true, false),
+            ["Shuffle: Off", "Mixing in similar songs"]
+        );
+        // A Spotify device: on or off, and nothing mixed in.
+        assert_eq!(shuffle_mode_text(true, true, true, true), ["Shuffle: On"]);
     }
 }

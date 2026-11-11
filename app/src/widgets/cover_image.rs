@@ -4,9 +4,9 @@
 
 use std::cell::{Cell, RefCell};
 
-use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use gtk::{gdk, glib, graphene, gsk};
 use jewelcase_core::library::covers::CoverSize;
 
 use crate::covers;
@@ -37,6 +37,9 @@ mod imp {
         pub placeholder: gtk::Image,
         /// The cache key shown by `set_cover`.
         pub key: RefCell<Option<String>>,
+        /// Drawn in a CD jewel case (a hidden extra: window.rs).
+        #[property(get, set = Self::set_case)]
+        pub case: Cell<bool>,
     }
 
     impl Default for CoverImage {
@@ -60,6 +63,7 @@ mod imp {
                     .overflow(gtk::Overflow::Hidden)
                     .build(),
                 key: RefCell::default(),
+                case: Cell::new(false),
             }
         }
     }
@@ -134,6 +138,16 @@ mod imp {
                 child.allocate(side, side, baseline, Some(transform.clone()));
             }
         }
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            self.parent_snapshot(snapshot);
+            if self.case.get()
+                && self.picture.is_visible()
+                && let Some(bounds) = self.picture.compute_bounds(&*self.obj())
+            {
+                let dark = adw::StyleManager::default().is_dark();
+                super::draw_case(snapshot, &bounds, dark);
+            }
+        }
     }
 
     impl CoverImage {
@@ -151,6 +165,12 @@ mod imp {
         fn set_capped(&self, capped: bool) {
             self.capped.set(capped);
             self.obj().queue_resize();
+        }
+
+        fn set_case(&self, case: bool) {
+            if self.case.replace(case) != case {
+                self.obj().queue_draw();
+            }
         }
 
         fn set_natural_size(&self, size: i32) {
@@ -218,4 +238,108 @@ impl CoverImage {
     pub fn set_label(&self, label: &str) {
         self.update_property(&[gtk::accessible::Property::Label(label)]);
     }
+}
+
+/// A CD jewel case over the cover in `bounds`, like the app icon's: the
+/// hinge on the left, the clear lid's frame around the booklet, a glare
+/// across it and the case's edge below.
+fn draw_case(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, dark: bool) {
+    let (x, y, side) = (bounds.x(), bounds.y(), bounds.width());
+    let u = |part: f32| part * side;
+    let rgba = |hex: u32, alpha: f32| {
+        gdk::RGBA::new(
+            ((hex >> 16) & 0xff) as f32 / 255.0,
+            ((hex >> 8) & 0xff) as f32 / 255.0,
+            (hex & 0xff) as f32 / 255.0,
+            alpha,
+        )
+    };
+    // GNOME's palette: the icon's light greys, smoked in the dark.
+    let (frame, hinge, edge, shine) = if dark {
+        (
+            rgba(0x3d3846, 0.94),
+            rgba(0x5e5c64, 1.0),
+            rgba(0x241f31, 1.0),
+            0.25,
+        )
+    } else {
+        (
+            rgba(0xdeddda, 0.94),
+            rgba(0x9a9996, 1.0),
+            rgba(0x5e5c64, 1.0),
+            0.6,
+        )
+    };
+    let outer = gsk::RoundedRect::from_rect(*bounds, u(0.035));
+    let hinge_width = u(0.09);
+    let edge_height = u(0.03);
+    // The booklet behind the lid.
+    let booklet = graphene::Rect::new(
+        x + u(0.12),
+        y + u(0.04),
+        side - u(0.12) - u(0.04),
+        side - u(0.04) - u(0.065),
+    );
+
+    // The lid's frame: the case without the booklet.
+    let builder = gsk::PathBuilder::new();
+    builder.add_rounded_rect(&outer);
+    builder.add_rect(&booklet);
+    snapshot.append_fill(&builder.to_path(), gsk::FillRule::EvenOdd, &frame);
+
+    // The hinge and the edge, inside the case's rounded corners.
+    snapshot.push_rounded_clip(&outer);
+    snapshot.append_color(&hinge, &graphene::Rect::new(x, y, hinge_width, side));
+    snapshot.append_color(
+        &edge,
+        &graphene::Rect::new(x, y + side - edge_height, side, edge_height),
+    );
+    snapshot.pop();
+    // The hinge's ridges.
+    let ridges = gsk::PathBuilder::new();
+    for at in [0.14, 0.2, 0.8, 0.86] {
+        ridges.move_to(x + u(0.025), y + u(at));
+        ridges.line_to(x + hinge_width - u(0.025), y + u(at));
+    }
+    let stroke = gsk::Stroke::new(u(0.018).max(1.0));
+    stroke.set_line_cap(gsk::LineCap::Round);
+    snapshot.append_stroke(&ridges.to_path(), &stroke, &rgba(0xf6f5f4, 0.9));
+
+    // The booklet's edge under the lid.
+    let rim = gsk::PathBuilder::new();
+    rim.add_rect(&booklet);
+    snapshot.append_stroke(
+        &rim.to_path(),
+        &gsk::Stroke::new(1.0),
+        &rgba(0x000000, 0.25),
+    );
+
+    // A glare across the lid's top left.
+    let (bx, by, bw, bh) = (booklet.x(), booklet.y(), booklet.width(), booklet.height());
+    let glare = gsk::PathBuilder::new();
+    glare.move_to(bx, by);
+    glare.line_to(bx + 0.6 * bw, by);
+    glare.line_to(bx, by + 0.7 * bh);
+    glare.close();
+    snapshot.push_fill(&glare.to_path(), gsk::FillRule::Winding);
+    snapshot.append_linear_gradient(
+        &booklet,
+        &graphene::Point::new(bx, by),
+        &graphene::Point::new(bx + 0.32 * bw, by + 0.37 * bh),
+        &[
+            gsk::ColorStop::new(0.0, rgba(0xffffff, 0.5)),
+            gsk::ColorStop::new(1.0, rgba(0xffffff, 0.0)),
+        ],
+    );
+    snapshot.pop();
+
+    // The lid's bright outline.
+    let inset = graphene::Rect::new(x + 0.5, y + 0.5, side - 1.0, side - 1.0);
+    let outline = gsk::PathBuilder::new();
+    outline.add_rounded_rect(&gsk::RoundedRect::from_rect(inset, u(0.035) - 0.5));
+    snapshot.append_stroke(
+        &outline.to_path(),
+        &gsk::Stroke::new(1.0),
+        &rgba(0xffffff, shine),
+    );
 }

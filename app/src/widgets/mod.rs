@@ -22,7 +22,6 @@ mod shuffle_options;
 mod slide_view;
 mod spotify_tile;
 pub mod statistics;
-pub mod tooltips;
 mod track_info;
 mod track_row;
 mod visualizer;
@@ -93,6 +92,16 @@ pub fn tile_cover() -> CoverImage {
         .get()
         .build();
     cover
+}
+
+/// An album's cover goes into a jewel case while the hidden extra is on
+/// (window.rs).
+pub fn album_case(cover: &CoverImage) {
+    use gtk::prelude::*;
+    tile_settings()
+        .bind("jewel-cases", cover, "case")
+        .get()
+        .build();
 }
 
 /// The name an icon-only button is announced by (what its tooltip said

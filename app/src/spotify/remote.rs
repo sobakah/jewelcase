@@ -88,8 +88,9 @@ pub struct RemoteState {
 }
 
 impl Spotify {
+    /// Quietly: the device list shows its own spinner.
     pub async fn devices(&self) -> jewelcase_spotify::Result<Vec<Device>> {
-        self.call(|client| client.devices()).await
+        self.call_quietly(|client| client.devices()).await
     }
 
     pub fn remote_device_id(&self) -> Option<String> {
@@ -470,7 +471,7 @@ impl Spotify {
         if !player.is_remote() {
             return;
         }
-        let result = self.call(|client| client.playback()).await;
+        let result = self.call_quietly(|client| client.playback()).await;
         // "Play Here" while asking: the answer is for a mode that ended.
         if !player.is_remote() {
             return;
@@ -503,7 +504,7 @@ impl Spotify {
                     read
                 };
                 if read_queue {
-                    match self.call(|client| client.queue()).await {
+                    match self.call_quietly(|client| client.queue()).await {
                         Ok(queue) => {
                             let mut tracks: Vec<TrackObject> = track.iter().cloned().collect();
                             tracks.extend(self.track_objects(&queue).await);

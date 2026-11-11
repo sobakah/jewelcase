@@ -20,6 +20,8 @@ pub fn tile_content(item: &ShelfItem) -> (gtk::Box, CoverImage) {
     let cover = super::tile_cover();
     if item.artist {
         cover.set_placeholder_icon("avatar-default-symbolic");
+    } else {
+        super::album_case(&cover);
     }
     cover.set_cover(item.cover_key.as_deref());
     cover.set_label(&item.title);

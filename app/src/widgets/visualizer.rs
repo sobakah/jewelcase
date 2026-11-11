@@ -1,6 +1,6 @@
 //! A spectrum visualizer (CONCEPT.md §4.3): bars in the cover color that
-//! follow the local song as it's heard, rising at once and falling back
-//! gently. A still, faint strip for Spotify songs (Soloist plays them
+//! follow the local song as it's heard, rising quickly and falling back
+//! gently, smoothly on every frame between the spectrum's 50 a second. A still, faint strip for Spotify songs (Soloist plays them
 //! itself), while paused and when nothing plays.
 //!
 //! It asks the player for bars once a frame, only while it's on screen
@@ -19,6 +19,10 @@ use crate::config::APP_ID;
 
 /// How fast a bar falls back (its full height per second).
 const FALL_PER_S: f32 = 1.8;
+/// How quickly a bar rises to a louder level: this time constant (s), so
+/// it's nearly there within one spectrum frame (20 ms) but moves on every
+/// screen frame in between instead of jumping.
+const RISE_S: f32 = 0.012;
 /// The height of a silent bar, as part of the widget's height.
 const REST: f32 = 0.12;
 
@@ -277,8 +281,7 @@ impl Visualizer {
                     .and_then(|t| t.get(i))
                     .copied()
                     .unwrap_or(0.0);
-                let fallen = (*level - FALL_PER_S * dt).max(0.0);
-                *level = target.max(fallen);
+                *level = next_level(*level, target, dt);
                 moving |= *level > 0.0;
             }
         }
@@ -290,5 +293,40 @@ impl Visualizer {
             return glib::ControlFlow::Break;
         }
         glib::ControlFlow::Continue
+    }
+}
+
+/// A bar's level `dt` seconds later, heading for `target`: up quickly, down
+/// gently, never past it.
+fn next_level(level: f32, target: f32, dt: f32) -> f32 {
+    if target > level {
+        level + (target - level) * (1.0 - (-dt / RISE_S).exp())
+    } else {
+        (level - FALL_PER_S * dt).max(target).max(0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bars_rise_over_frames_and_fall_gently() {
+        // A frame at 170 Hz: part of the way up, not all of it at once.
+        let frame = 1.0 / 170.0;
+        let first = next_level(0.0, 1.0, frame);
+        assert!(first > 0.2 && first < 0.6, "{first}");
+        // Within one spectrum frame (20 ms), nearly there; never past it.
+        let mut level = 0.0;
+        for _ in 0..4 {
+            level = next_level(level, 1.0, 0.005);
+        }
+        assert!(level > 0.8 && level <= 1.0, "{level}");
+        // Falling: at FALL_PER_S, not below the target.
+        assert!((next_level(1.0, 0.0, 0.1) - (1.0 - FALL_PER_S * 0.1)).abs() < 1e-6);
+        assert_eq!(next_level(0.5, 0.45, 0.1), 0.45);
+        assert_eq!(next_level(0.1, 0.0, 0.1), 0.0);
+        // No time passed (the first frame): unchanged.
+        assert_eq!(next_level(0.3, 1.0, 0.0), 0.3);
     }
 }

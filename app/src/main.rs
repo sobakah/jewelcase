@@ -3,6 +3,7 @@ mod application;
 mod config;
 mod covers;
 mod format;
+mod frame_stats;
 mod icons;
 mod library;
 mod library_folders;

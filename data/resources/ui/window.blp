@@ -79,6 +79,21 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
             icon-name: "system-search-symbolic";
             tooltip-text: _("Search (Ctrl+F)");
           }
+
+          // While something on screen loads from Spotify (window.rs).
+          [end]
+          Gtk.Revealer spotify_loading {
+            transition-type: crossfade;
+            visible: false;
+
+            child: Adw.Spinner {
+              width-request: 16;
+              height-request: 16;
+              margin-start: 6;
+              margin-end: 6;
+              tooltip-text: _("Loading from Spotify…");
+            };
+          }
         }
 
         [top]

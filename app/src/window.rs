@@ -15,6 +15,42 @@ use crate::widgets::{
     PlaylistTile, SearchView, panel_resizer, playlist_picker,
 };
 
+/// How long a Spotify request runs before the header bar's spinner shows,
+/// and how long it stays after the last one.
+const LOADING_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
+const LOADING_LINGER: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The keys that put the albums in jewel cases (see `setup_jewel_cases`).
+const KONAMI: [gtk::gdk::Key; 10] = {
+    use gtk::gdk::Key;
+    [
+        Key::Up,
+        Key::Up,
+        Key::Down,
+        Key::Down,
+        Key::Left,
+        Key::Right,
+        Key::Left,
+        Key::Right,
+        Key::b,
+        Key::a,
+    ]
+};
+
+/// How much of `KONAMI` has been typed after `key`, given `progress`
+/// before it.
+fn konami_step(progress: usize, key: gtk::gdk::Key) -> usize {
+    if KONAMI.get(progress) == Some(&key) {
+        return progress + 1;
+    }
+    // A third ↑ still leaves the first two; any other ↑ starts again.
+    match key {
+        gtk::gdk::Key::Up if progress == 2 => 2,
+        gtk::gdk::Key::Up => 1,
+        _ => 0,
+    }
+}
+
 mod imp {
     use super::*;
 
@@ -44,6 +80,10 @@ mod imp {
         pub scan_banner: TemplateChild<adw::Banner>,
         #[template_child]
         pub tool_revealer: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub spotify_loading: TemplateChild<gtk::Revealer>,
+        /// Shows `spotify_loading` once a request takes a moment.
+        pub loading_delay: RefCell<Option<glib::SourceId>>,
         #[template_child]
         pub tool_label: TemplateChild<gtk::Label>,
         #[template_child]
@@ -278,10 +318,7 @@ mod imp {
             if config::is_development() {
                 obj.add_css_class("devel");
             }
-            // Tooltips wait for the pointer to rest (dialogs are inside
-            // the window; popovers do the same themselves).
-            crate::widgets::tooltips::wait_for_rest(&*obj);
-
+            crate::frame_stats::watch(obj.upcast_ref());
             let settings = gio::Settings::new(APP_ID);
             settings
                 .bind("library-view", &*self.stack, "visible-child-name")
@@ -314,6 +351,8 @@ mod imp {
             self.search_bar.set_key_capture_widget(Some(&*obj));
             obj.setup_search();
             obj.setup_spotify_shelves();
+            obj.setup_spotify_loading();
+            obj.setup_jewel_cases();
 
             // Sorting only applies to the album grid.
             let sort_button = self.sort_button.get();
@@ -746,6 +785,125 @@ impl JewelcaseWindow {
             }
         };
         imp_toast(self, &message);
+    }
+
+    /// A small spinner in the header bar while something loads from
+    /// Spotify. Only once a request takes a moment (quick ones would make
+    /// it flicker), and faded out when the last answer is in.
+    fn setup_spotify_loading(&self) {
+        let revealer = self.imp().spotify_loading.get();
+        // Hidden once faded out, so it takes no room.
+        revealer.connect_child_revealed_notify(|revealer| {
+            if !revealer.reveals_child() {
+                revealer.set_visible(false);
+            }
+        });
+        let spotify = JewelcaseApplication::get().spotify();
+        spotify.connect_loading_notify(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |spotify| window.spotify_loading_changed(spotify.loading())
+        ));
+    }
+
+    /// A hidden extra: ↑ ↑ ↓ ↓ ← → ← → B A puts the albums in jewel
+    /// cases (`jewel-cases`), and again takes them out.
+    fn setup_jewel_cases(&self) {
+        let progress = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let keys = gtk::EventControllerKey::new();
+        // Before the grids and type-to-search see the keys.
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, modifiers| {
+                let plain = !modifiers.intersects(
+                    gtk::gdk::ModifierType::CONTROL_MASK
+                        | gtk::gdk::ModifierType::ALT_MASK
+                        | gtk::gdk::ModifierType::SUPER_MASK,
+                );
+                let next = if plain {
+                    konami_step(progress.get(), key.to_lower())
+                } else {
+                    0
+                };
+                progress.set(next);
+                if next <= KONAMI.len() - 2 {
+                    return glib::Propagation::Proceed;
+                }
+                // B and A finish the code: they don't start a search.
+                if next == KONAMI.len() {
+                    progress.set(0);
+                    window.toggle_jewel_cases();
+                }
+                glib::Propagation::Stop
+            }
+        ));
+        self.add_controller(keys);
+    }
+
+    fn toggle_jewel_cases(&self) {
+        let settings = self.settings();
+        let on = !settings.boolean("jewel-cases");
+        let _ = settings.set_boolean("jewel-cases", on);
+        self.show_toast(&if on {
+            gettext("Your albums are back in their jewel cases")
+        } else {
+            gettext("Your albums are out of their jewel cases")
+        });
+    }
+
+    fn spotify_loading_changed(&self, loading: bool) {
+        let imp = self.imp();
+        let shown = imp.spotify_loading.reveals_child();
+        // A timer still waiting: to show it (while hidden) or to hide it
+        // (while shown).
+        let pending = imp.loading_delay.take();
+        let (show, delay) = match (loading, shown) {
+            // Shown, and the next request started: it stays.
+            (true, true) => {
+                if let Some(timer) = pending {
+                    timer.remove();
+                }
+                return;
+            }
+            // Already waiting to show.
+            (true, false) if pending.is_some() => {
+                imp.loading_delay.replace(pending);
+                return;
+            }
+            (true, false) => (true, LOADING_DELAY),
+            // Hidden a little later: requests that follow one another
+            // (an artist, then their albums) keep it.
+            (false, true) => (false, LOADING_LINGER),
+            (false, false) => {
+                if let Some(timer) = pending {
+                    timer.remove();
+                }
+                return;
+            }
+        };
+        if let Some(timer) = pending {
+            timer.remove();
+        }
+        let timer = glib::timeout_add_local_once(
+            delay,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move || {
+                    let imp = window.imp();
+                    imp.loading_delay.take();
+                    if show {
+                        imp.spotify_loading.set_visible(true);
+                    }
+                    imp.spotify_loading.set_reveal_child(show);
+                }
+            ),
+        );
+        imp.loading_delay.replace(Some(timer));
     }
 
     /// The saved albums and followed artists on Spotify that aren't in the
@@ -2172,5 +2330,32 @@ fn screenshot_target(target: &str) -> glib::Variant {
     match glib::Variant::parse(None, target) {
         Ok(v) => v.get::<i32>().map_or(v, |n| i64::from(n).to_variant()),
         Err(_) => target.to_variant(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::gdk::Key;
+
+    fn typed(keys: &[Key]) -> usize {
+        keys.iter()
+            .fold(0, |progress, key| konami_step(progress, *key))
+    }
+
+    #[test]
+    fn konami_code() {
+        assert_eq!(typed(&KONAMI), KONAMI.len());
+        // An extra ↑ at the start, or a slip and a new start.
+        let mut extra = vec![Key::Up];
+        extra.extend(KONAMI);
+        assert_eq!(typed(&extra), KONAMI.len());
+        let mut slip = vec![Key::Up, Key::Up, Key::Down, Key::x];
+        slip.extend(KONAMI);
+        assert_eq!(typed(&slip), KONAMI.len());
+        // Wrong order, or letters alone: nothing.
+        assert_eq!(typed(&[Key::Up, Key::Down, Key::Up, Key::Down]), 0);
+        assert_eq!(typed(&[Key::b, Key::a]), 0);
+        assert_eq!(typed(&KONAMI[..9]), 9);
     }
 }
