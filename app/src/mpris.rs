@@ -1,29 +1,29 @@
 //! MPRIS for GNOME Shell's media controls and media keys (CONCEPT.md §11).
 
-use gatefold_core::library::covers::CoverSize;
-use gatefold_core::queue::RepeatMode;
 use gtk::glib;
 use gtk::prelude::*;
+use jewelcase_core::library::covers::CoverSize;
+use jewelcase_core::queue::RepeatMode;
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Time, TrackId};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::covers;
 use crate::player::Player;
 
-/// Starts the MPRIS server (`org.mpris.MediaPlayer2.Gatefold`) on the main loop.
-pub fn start(app: &GatefoldApplication, player: &Player) {
+/// Starts the MPRIS server (`org.mpris.MediaPlayer2.Jewelcase`) on the main loop.
+pub fn start(app: &JewelcaseApplication, player: &Player) {
     let app = app.downgrade();
     let player = player.downgrade();
     glib::spawn_future_local(async move {
         // The development build has its own name, so both can run.
         let name = if APP_ID.ends_with(".Devel") {
-            "Gatefold.Devel"
+            "Jewelcase.Devel"
         } else {
-            "Gatefold"
+            "Jewelcase"
         };
         let server = match mpris_server::Player::builder(name)
-            .identity("Gatefold")
+            .identity("Jewelcase")
             .desktop_entry(APP_ID)
             .can_raise(true)
             .can_quit(true)
@@ -51,7 +51,7 @@ pub fn start(app: &GatefoldApplication, player: &Player) {
     });
 }
 
-fn connect_methods(server: &mpris_server::Player, app: &GatefoldApplication, player: &Player) {
+fn connect_methods(server: &mpris_server::Player, app: &JewelcaseApplication, player: &Player) {
     let weak = player.downgrade();
     let with = move |f: fn(&Player)| {
         let weak = weak.clone();
@@ -177,7 +177,7 @@ fn current_track_id(player: &Player) -> Option<TrackId> {
     } else {
         id.to_string()
     };
-    TrackId::try_from(format!("/io/github/sobakah/Gatefold/Track/{part}")).ok()
+    TrackId::try_from(format!("/io/github/sobakah/Jewelcase/Track/{part}")).ok()
 }
 
 fn metadata(player: &Player) -> Metadata {
@@ -209,7 +209,7 @@ fn metadata(player: &Player) -> Metadata {
     {
         builder = builder.art_url(uri);
     }
-    if let Some(uri) = gatefold_core::playback::file_uri(&record.path) {
+    if let Some(uri) = jewelcase_core::playback::file_uri(&record.path) {
         builder = builder.url(uri);
     }
     builder.build()

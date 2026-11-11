@@ -1,4 +1,4 @@
-//! Loads cover and portrait thumbnails made by gatefold_core's CoverCache.
+//! Loads cover and portrait thumbnails made by jewelcase_core's CoverCache.
 //!
 //! The thumbnails are our own JPEGs, so GDK's built-in loader reads them.
 //! Recently used textures are cached; covers repeat a lot in the grid.
@@ -6,8 +6,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use gatefold_core::library::covers::{CoverCache, CoverSize};
 use gtk::gdk;
+use jewelcase_core::library::covers::{CoverCache, CoverSize};
 
 use crate::config;
 

@@ -16,7 +16,7 @@ pub const INSTALL_COMMAND: &str =
     "pipx install \"lyrembed[all] @ git+https://github.com/sobakah/lyrembed.git\"";
 /// Updating a pipx install (its page offers the same).
 pub const UPGRADE_COMMAND: &str = "pipx upgrade lyrembed";
-/// Lets the session bus start lyrembed when Gatefold calls it.
+/// Lets the session bus start lyrembed when Jewelcase calls it.
 pub const SERVICE_ARG: &str = "--install-dbus-service";
 pub const SERVICE_COMMAND: &str = "lyrembed --install-dbus-service";
 

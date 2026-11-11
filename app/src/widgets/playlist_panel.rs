@@ -5,14 +5,14 @@ use std::sync::OnceLock;
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_core::db::PlaylistItem;
 use gettextrs::{gettext, ngettext};
 use gtk::glib::subclass::Signal;
 use gtk::{gio, glib};
+use jewelcase_core::db::PlaylistItem;
 
 use super::playlist_picker::ask_name;
 use super::{CoverBackdrop, CoverImage};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::format;
 
@@ -30,7 +30,7 @@ pub const DEFAULT_SORTS: [&str; 7] = [
 ];
 
 /// How playlists whose sort wasn't chosen are listed: Spotify's or
-/// Gatefold's playlists (Preferences › Library › Playlists).
+/// Jewelcase's playlists (Preferences › Library › Playlists).
 fn default_sort(spotify: bool) -> (String, bool) {
     let key = if spotify {
         "spotify-playlist-sort"
@@ -49,7 +49,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/playlist_panel.ui")]
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/playlist_panel.ui")]
     pub struct PlaylistPanel {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
@@ -123,7 +123,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlaylistPanel {
-        const NAME: &'static str = "GatefoldPlaylistPanel";
+        const NAME: &'static str = "JewelcasePlaylistPanel";
         type Type = super::PlaylistPanel;
         type ParentType = adw::Bin;
 
@@ -145,13 +145,13 @@ mod imp {
             klass.install_action("playlist.play-next", None, |panel, _, _| {
                 let tracks = panel.queueable();
                 if !tracks.is_empty() {
-                    GatefoldApplication::get().player().play_next(tracks);
+                    JewelcaseApplication::get().player().play_next(tracks);
                 }
             });
             klass.install_action("playlist.add-to-queue", None, |panel, _, _| {
                 let tracks = panel.queueable();
                 if !tracks.is_empty() {
-                    GatefoldApplication::get().player().add_to_queue(tracks);
+                    JewelcaseApplication::get().player().add_to_queue(tracks);
                 }
             });
             klass.install_action("playlist.add-to-playlist", None, |panel, _, _| {
@@ -174,7 +174,7 @@ mod imp {
             });
             klass.install_action("playlist.reset-cover", None, |panel, _, _| {
                 if let Some(id) = panel.playlist_id() {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .reset_playlist_cover(id);
                 }
@@ -189,14 +189,14 @@ mod imp {
                 let Some(id) = panel.playlist_id() else {
                     return;
                 };
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .spotify()
                     .publish(id, &panel)
                     .await;
             });
             klass.install_action("playlist.refresh", None, |panel, _, _| {
                 if let Some(id) = panel.playlist_id() {
-                    GatefoldApplication::get().spotify().refresh_playlist(id);
+                    JewelcaseApplication::get().spotify().refresh_playlist(id);
                 }
             });
             klass.install_action("playlist.open-spotify", None, |panel, _, _| {
@@ -293,7 +293,7 @@ mod imp {
                 panel.upgrade().is_none_or(|panel| panel.row_matches(row))
             });
             // Spotify can be searched only while connected.
-            let spotify = GatefoldApplication::get().spotify();
+            let spotify = JewelcaseApplication::get().spotify();
             let status = spotify.connect_status_notify(glib::clone!(
                 #[weak]
                 obj,
@@ -308,7 +308,7 @@ mod imp {
             // Hidden (another view, the window closing): the new order goes.
             obj.connect_unmap(|obj| obj.finish_arranging());
             // Locked while its changes are being sent.
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .spotify()
                 .connect_sending_notify(glib::clone!(
                     #[weak]
@@ -333,7 +333,7 @@ mod imp {
                 );
                 crate::widgets::disconnect_with(&*obj, &settings, id);
             }
-            GatefoldApplication::get().library().connect_local(
+            JewelcaseApplication::get().library().connect_local(
                 "playlists-changed",
                 false,
                 glib::clone!(
@@ -391,7 +391,7 @@ impl PlaylistPanel {
         self.refresh();
         // Spotify's version may be newer.
         if changed && playlist.playlist().spotify_id.is_some() {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .spotify()
                 .refresh_playlist(playlist.id());
         }
@@ -472,7 +472,7 @@ impl PlaylistPanel {
 
     fn update_spotify_toggle(&self) {
         let imp = self.imp();
-        let connected = GatefoldApplication::get().spotify().is_connected();
+        let connected = JewelcaseApplication::get().spotify().is_connected();
         let shown = imp.add_toggle.is_active() && connected;
         if imp.spotify_toggle.is_visible() != shown {
             imp.spotify_toggle.set_visible(shown);
@@ -586,7 +586,7 @@ impl PlaylistPanel {
             return;
         }
         imp.name.set_text(&name);
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .rename_playlist(playlist.id(), &name);
     }
@@ -603,7 +603,7 @@ impl PlaylistPanel {
             imp.add_results.set_visible(false);
             return;
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let ids = library.search(query, 8).tracks;
         let tracks = library.tracks(&ids);
         for id in &ids {
@@ -661,7 +661,7 @@ impl PlaylistPanel {
         row.add_prefix(cover);
         if spotify {
             let icon = gtk::Image::builder()
-                .icon_name("gatefold-spotify-symbolic")
+                .icon_name("jewelcase-spotify-symbolic")
                 .tooltip_text(gettext("On Spotify, not in your library"))
                 .css_classes(["dim-label"])
                 .build();
@@ -674,7 +674,7 @@ impl PlaylistPanel {
             .build();
         crate::widgets::set_accessible_label(&add, &gettext("Add to Playlist"));
         add.connect_clicked(move |button| {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .library()
                 .add_to_playlist(playlist_id, &[track_id], false);
             // Added: show it, and don't add it twice by accident.
@@ -702,10 +702,10 @@ impl PlaylistPanel {
                 move || {
                     panel.imp().spotify_timer.replace(None);
                     glib::spawn_future_local(async move {
-                        let answer = GatefoldApplication::get()
+                        let answer = JewelcaseApplication::get()
                             .spotify()
                             .call(move |client| {
-                                client.search_tracks(&query, gatefold_spotify::MAX_SEARCH_RESULTS)
+                                client.search_tracks(&query, jewelcase_spotify::MAX_SEARCH_RESULTS)
                             })
                             .await;
                         if panel.imp().spotify_generation.get() == generation {
@@ -721,7 +721,7 @@ impl PlaylistPanel {
     fn show_spotify_songs(
         &self,
         playlist_id: i64,
-        answer: Result<Vec<gatefold_spotify::Track>, gatefold_spotify::Error>,
+        answer: Result<Vec<jewelcase_spotify::Track>, jewelcase_spotify::Error>,
         listed: &[i64],
     ) {
         let imp = self.imp();
@@ -737,7 +737,7 @@ impl PlaylistPanel {
                 return;
             }
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let index = library.match_index();
         let mut shown: std::collections::HashSet<i64> = listed.iter().copied().collect();
         let mut covers = Vec::new();
@@ -751,14 +751,14 @@ impl PlaylistPanel {
             let cover = Self::result_cover();
             // In the library? Then it's the library's song (§9.5).
             let local = index
-                .find(&gatefold_core::matching::RemoteTrack {
+                .find(&jewelcase_core::matching::RemoteTrack {
                     title: track.name.clone(),
                     artists: track.artists.clone(),
                     album: track.album.clone(),
                     duration_ms: track.duration_ms,
                     isrc: track.isrc.clone(),
                 })
-                .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
+                .filter(|(_, c)| *c == jewelcase_core::matching::Confidence::Sure)
                 .map(|(id, _)| id);
             let (id, spotify) = match local {
                 Some(id) => {
@@ -769,7 +769,7 @@ impl PlaylistPanel {
                 None => {
                     // A Spotify song (negative ID, §9.4).
                     let Some(id) = library.db().and_then(|mut db| {
-                        db.stream_track_id(&gatefold_core::db::StreamInfo {
+                        db.stream_track_id(&jewelcase_core::db::StreamInfo {
                             uri: track.uri.clone(),
                             title: track.name.clone(),
                             artist: Some(track.artist_line()),
@@ -818,7 +818,7 @@ impl PlaylistPanel {
     fn refresh(&self) {
         let imp = self.imp();
         let Some(id) = self.playlist_id() else { return };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(playlist) = library.playlist(id) else {
             imp.playlist.replace(None);
             self.emit_by_name::<()>("close", &[]);
@@ -848,11 +848,11 @@ impl PlaylistPanel {
         );
         // Spotify doesn't say what a followed playlist holds.
         imp.meta.set_visible(info.readable);
-        let sending = GatefoldApplication::get().spotify().is_sending(id);
+        let sending = JewelcaseApplication::get().spotify().is_sending(id);
         imp.source.set_label(&source_line(info, sending));
         imp.source.set_visible(info.spotify_id.is_some());
         let editable = info.editable;
-        let connected = GatefoldApplication::get().spotify().is_connected();
+        let connected = JewelcaseApplication::get().spotify().is_connected();
         let linked = info.spotify_id.is_some();
         let mirror = info.source == "spotify";
         // Spotify playlists are renamed and reordered from the menu only,
@@ -896,8 +896,8 @@ impl PlaylistPanel {
         self.action_set_enabled("playlist.remove-spotify", linked && connected);
         self.action_set_enabled("playlist.delete", !mirror);
         let same_playlist = imp.shown.get() == Some(id);
-        // What every row shows (remove buttons, "only in Gatefold").
-        let kind = |p: &gatefold_core::db::Playlist| (p.editable, p.spotify_id.is_some());
+        // What every row shows (remove buttons, "only in Jewelcase").
+        let kind = |p: &jewelcase_core::db::Playlist| (p.editable, p.spotify_id.is_some());
         let kind_changed = imp
             .playlist
             .borrow()
@@ -1133,7 +1133,7 @@ impl PlaylistPanel {
         // case.
         let (icon, tooltip) = match entry.match_state.as_str() {
             "spotify_only" | "user_pinned_spotify" if entry.spotify_uri.is_some() => (
-                Some("gatefold-spotify-symbolic"),
+                Some("jewelcase-spotify-symbolic"),
                 Some(if entry.match_state == "user_pinned_spotify" {
                     gettext("Plays from Spotify")
                 } else {
@@ -1142,7 +1142,7 @@ impl PlaylistPanel {
             ),
             _ if linked && entry.spotify_uri.is_none() && track.is_some() => (
                 Some("computer-symbolic"),
-                Some(gettext("Only in Gatefold; not on Spotify")),
+                Some(gettext("Only in Jewelcase; not on Spotify")),
             ),
             _ => (None, None),
         };
@@ -1178,7 +1178,7 @@ impl PlaylistPanel {
                 .build();
             queue.connect_clicked(move |_| {
                 if let Some(track) = queueable_entry(&entry_ref) {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .player()
                         .add_to_queue(vec![track]);
                 }
@@ -1195,7 +1195,7 @@ impl PlaylistPanel {
                 .build();
             super::set_accessible_label(&remove, &gettext("Remove from Playlist"));
             remove.connect_clicked(move |_| {
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .library()
                     .remove_playlist_item(playlist_id, item_id);
             });
@@ -1213,7 +1213,7 @@ impl PlaylistPanel {
             .child(&content)
             .css_classes(["track-row"])
             .build();
-        let remote = GatefoldApplication::get().player().is_remote() && linked;
+        let remote = JewelcaseApplication::get().player().is_remote() && linked;
         let streamable = streamable(entry);
         if track.is_none() && !((remote || streamable) && entry.spotify_uri.is_some()) {
             // Not in the library: shown, but can't play here. Spotify songs
@@ -1230,7 +1230,7 @@ impl PlaylistPanel {
             let place = row.downgrade();
             let index = move || place.upgrade().map_or(0, |row| row.index().max(0) as u32);
             super::reorder::attach(&row, index, move |from, to| {
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .library()
                     .move_playlist_item(playlist_id, from, to);
             });
@@ -1247,7 +1247,7 @@ impl PlaylistPanel {
             .borrow()
             .get(index)
             .is_some_and(|e| e.track.is_none() && e.spotify_uri.is_some());
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         if only_on_spotify && !app.player().is_remote() && !app.spotify().can_stream() {
             app.library()
                 .emit_by_name::<()>("message", &[&only_on_spotify_hint()]);
@@ -1260,7 +1260,7 @@ impl PlaylistPanel {
     /// With a Spotify device in control, the Spotify playlist plays there.
     fn play(&self, start: Option<usize>, shuffle: bool) {
         let imp = self.imp();
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         // A followed playlist: its songs aren't known here, but Soloist can
         // play it whole (§9.4).
         let hidden = imp
@@ -1370,7 +1370,7 @@ impl PlaylistPanel {
             .as_ref()
             .map(|p| p.playlist().name.clone());
         let tracks = playable.into_iter().map(|(_, t)| t).collect();
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .player()
             .play_tracks(tracks, start, shuffle, name);
     }
@@ -1424,7 +1424,7 @@ impl PlaylistPanel {
     /// Keeps the playlist's sort (`None`: the default from Preferences).
     fn store_sort(&self, sort: Option<(&str, bool)>) {
         let Some(id) = self.playlist_id() else { return };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         if let Some(mut db) = library.db()
             && let Err(err) = db.set_playlist_sort(id, sort)
         {
@@ -1450,7 +1450,7 @@ impl PlaylistPanel {
     /// The entries that can go to the queue, in order: library songs, and
     /// Spotify songs when they can play (streaming, or a Spotify device).
     fn queueable(&self) -> Vec<TrackObject> {
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         let spotify_plays = app.player().is_remote() || app.spotify().can_stream();
         let entries = self.imp().entries.borrow().clone();
         let wanted: Vec<PlaylistItem> = entries
@@ -1485,7 +1485,7 @@ impl PlaylistPanel {
         if imp.arranging.replace(true) {
             return;
         }
-        GatefoldApplication::get().spotify().hold_changes(id, true);
+        JewelcaseApplication::get().spotify().hold_changes(id, true);
         imp.arrange_banner.set_revealed(true);
         // Every song shows while arranging.
         imp.add_toggle.set_active(false);
@@ -1506,7 +1506,9 @@ impl PlaylistPanel {
         }
         imp.arrange_banner.set_revealed(false);
         if let Some(id) = self.playlist_id() {
-            GatefoldApplication::get().spotify().hold_changes(id, false);
+            JewelcaseApplication::get()
+                .spotify()
+                .hold_changes(id, false);
         }
         imp.rebuild.set(true);
         self.refresh();
@@ -1525,7 +1527,7 @@ impl PlaylistPanel {
         )
         .await
         {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .library()
                 .rename_playlist(playlist.id(), &name);
         }
@@ -1543,7 +1545,7 @@ impl PlaylistPanel {
         )
         .await
         {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .library()
                 .rename_playlist(playlist.id(), &name);
         }
@@ -1565,7 +1567,7 @@ impl PlaylistPanel {
         let Ok(file) = dialog.open_future(window.as_ref()).await else {
             return;
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let result = match file.load_bytes_future().await {
             Ok((bytes, _)) => library.set_playlist_cover(id, bytes.to_vec()).await,
             Err(err) => Err(err.to_string()),
@@ -1601,7 +1603,7 @@ impl PlaylistPanel {
             return;
         };
         let Some(path) = file.path() else { return };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let message = match library.export_playlist(playlist.id(), path).await {
             Ok(()) => gettext("Playlist exported"),
             Err(err) => {
@@ -1633,7 +1635,7 @@ impl PlaylistPanel {
         ]);
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         if dialog.choose_future(Some(self)).await == "delete" {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .library()
                 .delete_playlist(playlist.id());
         }
@@ -1654,7 +1656,7 @@ impl PlaylistPanel {
             .iter()
             .filter_map(|e| e.track.as_ref().map(|t| t.record.id))
             .collect();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         // Translators: {} is a playlist name.
         let name = gettext("{} (Copy)").replace("{}", &playlist.playlist().name);
         if let Some(id) = library.create_playlist(&name, &tracks) {
@@ -1673,7 +1675,7 @@ impl PlaylistPanel {
             return;
         };
         let info = playlist.playlist();
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         let published = info.source == "local";
         let own = published
             || (info.editable
@@ -1701,7 +1703,7 @@ impl PlaylistPanel {
             .body(if published {
                 format!(
                     "{body} {}",
-                    gettext("It stays in Gatefold as a local playlist.")
+                    gettext("It stays in Jewelcase as a local playlist.")
                 )
             } else {
                 body
@@ -1712,7 +1714,7 @@ impl PlaylistPanel {
         // A mirror can stay as a local playlist (when its songs are known).
         let keep = (!published && info.readable).then(|| {
             gtk::CheckButton::builder()
-                .label(gettext("_Keep It in Gatefold as a Local Playlist"))
+                .label(gettext("_Keep It in Jewelcase as a Local Playlist"))
                 .use_underline(true)
                 .active(own)
                 .build()
@@ -1754,7 +1756,7 @@ impl PlaylistPanel {
             ("unlink", &gettext("_Stop Syncing")),
         ]);
         if dialog.choose_future(Some(self)).await == "unlink" {
-            let library = GatefoldApplication::get().library();
+            let library = JewelcaseApplication::get().library();
             if let Some(mut db) = library.db() {
                 let _ = db.unlink_playlist(id);
             }
@@ -1814,7 +1816,7 @@ fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
             entries.sort_by_cached_key(|e| (artist(e), album(e), place(e), e.position));
         }
         "album" => entries.sort_by_cached_key(|e| (album(e), place(e), e.position)),
-        // Unknown dates (entries from before Gatefold kept them) first.
+        // Unknown dates (entries from before Jewelcase kept them) first.
         "added" => entries.sort_by_key(|e| (e.added.unwrap_or(0), e.position)),
         "duration" => entries.sort_by_key(|e| (duration(e), e.position)),
         _ => entries.sort_by_key(|e| e.position),
@@ -1864,7 +1866,7 @@ fn entry_object(entry: &PlaylistItem) -> Option<TrackObject> {
 /// `entry_track_id` for many entries at once (one database use), in
 /// order; `None` for entries without a song.
 fn entry_track_ids(entries: &[PlaylistItem]) -> Vec<Option<i64>> {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let mut db = library.db();
     entries
         .iter()
@@ -1891,7 +1893,7 @@ fn entry_objects(entries: &[PlaylistItem]) -> Vec<TrackObject> {
         .filter(|(e, _)| e.track.is_none())
         .filter_map(|(_, id)| *id)
         .collect();
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     let mut found = app.library().tracks(&streams);
     if !streams.is_empty() {
         app.spotify().fetch_stream_covers(streams);
@@ -1909,7 +1911,7 @@ fn entry_objects(entries: &[PlaylistItem]) -> Vec<TrackObject> {
 /// One entry for the queue, or a hint when it's a Spotify song that
 /// can't play here.
 fn queueable_entry(entry: &PlaylistItem) -> Option<TrackObject> {
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     if entry.track.is_none() && !app.player().is_remote() && !app.spotify().can_stream() {
         app.library()
             .emit_by_name::<()>("message", &[&only_on_spotify_hint()]);
@@ -1938,7 +1940,7 @@ fn same_but_place(old: &PlaylistItem, new: &PlaylistItem) -> bool {
 }
 
 /// "Spotify playlist by Max · 2 changes waiting".
-fn source_line(info: &gatefold_core::db::Playlist, sending: bool) -> String {
+fn source_line(info: &jewelcase_core::db::Playlist, sending: bool) -> String {
     let mut parts = Vec::new();
     let owner = info.spotify_owner.clone().unwrap_or_default();
     parts.push(match (info.source.as_str(), info.editable) {
@@ -1970,7 +1972,7 @@ fn streamable(entry: &PlaylistItem) -> bool {
         .as_deref()
         .is_some_and(|uri| uri.starts_with("spotify:track:"))
         && entry.match_state != "unavailable"
-        && GatefoldApplication::get().spotify().can_stream()
+        && JewelcaseApplication::get().spotify().can_stream()
 }
 
 /// What Yes or No does.
@@ -1997,12 +1999,12 @@ fn suggestion(playlist_id: i64, entry: &PlaylistItem, editable: bool) -> Option<
                 // Translators: {} is "Song — Artist — Album" from the library.
                 gettext("Play “{}” from your library?").replace("{}", &label),
                 Box::new(move || {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .choose_local_match(item, Some(track_id));
                 }),
                 Box::new(move || {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .dismiss_suggestion(item, None, false);
                 }),
@@ -2018,12 +2020,12 @@ fn suggestion(playlist_id: i64, entry: &PlaylistItem, editable: bool) -> Option<
                 // Translators: {} is "Song — Artist" on Spotify.
                 gettext("On Spotify as “{}”?").replace("{}", &format!("{title} — {artist}")),
                 Box::new(move || {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .accept_spotify_suggestion(playlist_id, item, &uri);
                 }),
                 Box::new(move || {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .dismiss_suggestion(item, track_id, true);
                 }),
@@ -2090,7 +2092,7 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         let for_next = entry.clone();
         play_next.connect_activate(move |_, _| {
             if let Some(track) = queueable_entry(&for_next) {
-                GatefoldApplication::get().player().play_next(vec![track]);
+                JewelcaseApplication::get().player().play_next(vec![track]);
             }
         });
         actions.add_action(&play_next);
@@ -2122,9 +2124,9 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         choose.connect_activate(move |_, _| {
             let query = query.clone();
             glib::spawn_future_local(async move {
-                let window = GatefoldApplication::get().active_window();
+                let window = JewelcaseApplication::get().active_window();
                 if let Some(track) = choose_library_song(window.as_ref(), &query).await {
-                    GatefoldApplication::get()
+                    JewelcaseApplication::get()
                         .library()
                         .choose_local_match(item, Some(track));
                 }
@@ -2138,7 +2140,7 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         if entry.match_state == "user_pinned_spotify" || entry.match_state == "user_matched" {
             let auto = gio::SimpleAction::new("auto", None);
             auto.connect_activate(move |_, _| {
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .library()
                     .choose_local_match(item, None);
             });
@@ -2150,7 +2152,7 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
         if entry.match_state != "user_pinned_spotify" && track.is_some() {
             let pin = gio::SimpleAction::new("pin", None);
             pin.connect_activate(move |_, _| {
-                GatefoldApplication::get().library().pin_spotify(item)
+                JewelcaseApplication::get().library().pin_spotify(item)
             });
             actions.add_action(&pin);
             versions.append(
@@ -2176,7 +2178,7 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
                 Some(&album.to_variant()),
             )),
         );
-        let artist = GatefoldApplication::get()
+        let artist = JewelcaseApplication::get()
             .library()
             .album_artists(album)
             .first()
@@ -2255,7 +2257,7 @@ async fn choose_library_song(parent: Option<&gtk::Window>, query: &str) -> Optio
         chosen,
         move |text: &str| {
             results.remove_all();
-            let library = GatefoldApplication::get().library();
+            let library = JewelcaseApplication::get().library();
             let ids = library.search(text, 10).tracks;
             let tracks = library.tracks(&ids);
             for id in ids {

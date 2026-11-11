@@ -1,8 +1,8 @@
 use std::cell::{OnceCell, RefCell};
 
-use gatefold_core::db::Playlist;
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::Playlist;
 
 mod imp {
     use super::*;
@@ -16,7 +16,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlaylistObject {
-        const NAME: &'static str = "GatefoldPlaylistObject";
+        const NAME: &'static str = "JewelcasePlaylistObject";
         type Type = super::PlaylistObject;
     }
 

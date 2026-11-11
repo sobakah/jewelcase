@@ -12,7 +12,7 @@ use gtk::glib::subclass::Signal;
 
 use super::album_tile::artist_or_unknown;
 use super::{CoverBackdrop, CoverImage, TrackRow};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::format;
 use crate::objects::{AlbumObject, TrackObject};
 
@@ -20,7 +20,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/album_panel.ui")]
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/album_panel.ui")]
     pub struct AlbumPanel {
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
@@ -52,12 +52,12 @@ mod imp {
         pub rows: RefCell<Vec<TrackRow>>,
         pub versions_handler: RefCell<Option<glib::SignalHandlerId>>,
         /// A Spotify album shown instead of a library one (§9.8).
-        pub spotify: RefCell<Option<gatefold_core::db::SpotifyAlbum>>,
+        pub spotify: RefCell<Option<jewelcase_core::db::SpotifyAlbum>>,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for AlbumPanel {
-        const NAME: &'static str = "GatefoldAlbumPanel";
+        const NAME: &'static str = "JewelcaseAlbumPanel";
         type Type = super::AlbumPanel;
         type ParentType = adw::Bin;
 
@@ -75,7 +75,7 @@ mod imp {
             });
             klass.install_action("panel.play-next", None, |panel, _, _| {
                 let tracks = panel.imp().track_objects.borrow().clone();
-                GatefoldApplication::get().player().play_next(tracks);
+                JewelcaseApplication::get().player().play_next(tracks);
             });
             klass.install_action("panel.add-to-playlist", None, |panel, _, _| {
                 let ids: Vec<i64> = panel
@@ -89,16 +89,16 @@ mod imp {
             });
             klass.install_action("panel.edit-tags", None, |panel, _, _| {
                 let files = panel.track_paths();
-                GatefoldApplication::get().tools().edit_tags(files);
+                JewelcaseApplication::get().tools().edit_tags(files);
             });
             klass.install_action("panel.find-lyrics", None, |panel, _, _| {
                 if let Some(dir) = panel.album_dir() {
-                    GatefoldApplication::get().tools().find_lyrics(&dir);
+                    JewelcaseApplication::get().tools().find_lyrics(&dir);
                 }
             });
             klass.install_action("panel.lyrembed", None, |panel, _, _| {
                 if let Some(dir) = panel.album_dir() {
-                    GatefoldApplication::get().tools().lyrembed_page(&dir);
+                    JewelcaseApplication::get().tools().lyrembed_page(&dir);
                 }
             });
             klass.install_action("panel.open-spotify", None, |panel, _, _| {
@@ -108,7 +108,7 @@ mod imp {
             });
             klass.install_action("panel.add-to-queue", None, |panel, _, _| {
                 let tracks = panel.imp().track_objects.borrow().clone();
-                GatefoldApplication::get().player().add_to_queue(tracks);
+                JewelcaseApplication::get().player().add_to_queue(tracks);
             });
         }
 
@@ -127,7 +127,7 @@ mod imp {
             self.parent_constructed();
             self.backdrop.follow(&self.cover);
             let obj = self.obj();
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             let id = player.connect_current_track_notify(glib::clone!(
                 #[weak]
                 obj,
@@ -148,7 +148,7 @@ mod imp {
                 }
             ));
             self.title.add_controller(click);
-            let spotify = GatefoldApplication::get().spotify();
+            let spotify = JewelcaseApplication::get().spotify();
             let id = spotify.connect_local(
                 "library-changed",
                 false,
@@ -222,7 +222,7 @@ impl AlbumPanel {
     /// Saved on Spotify or not, for a Spotify album (hidden otherwise).
     fn update_save_button(&self) {
         let imp = self.imp();
-        let spotify = GatefoldApplication::get().spotify();
+        let spotify = JewelcaseApplication::get().spotify();
         let Some(item) = self.library_item().filter(|_| spotify.is_connected()) else {
             imp.save_button.set_visible(false);
             return;
@@ -247,7 +247,7 @@ impl AlbumPanel {
         let Some(item) = self.library_item() else {
             return;
         };
-        let spotify = GatefoldApplication::get().spotify();
+        let spotify = JewelcaseApplication::get().spotify();
         if spotify.library_pending(&item) {
             return;
         }
@@ -257,7 +257,7 @@ impl AlbumPanel {
 
     /// Spotify's own answer whether the shown album is saved.
     fn check_saved(&self) {
-        let spotify = GatefoldApplication::get().spotify();
+        let spotify = JewelcaseApplication::get().spotify();
         if let Some(item) = self.library_item().filter(|_| spotify.is_connected()) {
             glib::spawn_future_local(async move { spotify.check_in_library(item).await });
         }
@@ -269,7 +269,7 @@ impl AlbumPanel {
             return;
         }
         self.clipboard().set_text(&title);
-        if let Some(window) = self.root().and_downcast::<crate::window::GatefoldWindow>() {
+        if let Some(window) = self.root().and_downcast::<crate::window::JewelcaseWindow>() {
             window.show_toast(&gettext("Title copied"));
         }
     }
@@ -295,13 +295,13 @@ impl AlbumPanel {
         self.action_set_enabled("panel.open-spotify", spotify);
     }
 
-    pub fn spotify_album(&self) -> Option<gatefold_core::db::SpotifyAlbum> {
+    pub fn spotify_album(&self) -> Option<jewelcase_core::db::SpotifyAlbum> {
         self.imp().spotify.borrow().clone()
     }
 
     /// A Spotify album (§9.8): its songs play from the library where it has
     /// them and stream otherwise.
-    pub fn set_spotify_album(&self, album: &gatefold_core::db::SpotifyAlbum) {
+    pub fn set_spotify_album(&self, album: &jewelcase_core::db::SpotifyAlbum) {
         let imp = self.imp();
         imp.album.replace(None);
         imp.spotify.replace(Some(album.clone()));
@@ -342,7 +342,10 @@ impl AlbumPanel {
             #[weak(rename_to = panel)]
             self,
             async move {
-                let tracks = GatefoldApplication::get().spotify().album_tracks(&id).await;
+                let tracks = JewelcaseApplication::get()
+                    .spotify()
+                    .album_tracks(&id)
+                    .await;
                 let still = panel
                     .imp()
                     .spotify
@@ -377,10 +380,10 @@ impl AlbumPanel {
     /// The album's artists: links to library artists of that name.
     /// Each artist links to their page: the library's when they're in it,
     /// else their Spotify page.
-    fn fill_spotify_artists(&self, album: &gatefold_core::db::SpotifyAlbum) {
+    fn fill_spotify_artists(&self, album: &jewelcase_core::db::SpotifyAlbum) {
         let imp = self.imp();
         imp.artists.remove_all();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         for (name, spotify_id) in spotify_credits(album) {
             let local = library.artist_for_spotify(spotify_id.unwrap_or_default(), &name);
             let (action, target) = match (local, spotify_id) {
@@ -458,7 +461,7 @@ impl AlbumPanel {
             meta.push(year.to_string());
         }
         meta.push(release_type_name(info));
-        let genres = GatefoldApplication::get().library().genres_of(&album);
+        let genres = JewelcaseApplication::get().library().genres_of(&album);
         if !genres.is_empty() {
             meta.push(genres.into_iter().take(3).collect::<Vec<_>>().join(", "));
         }
@@ -466,7 +469,7 @@ impl AlbumPanel {
         meta.push(format::length(info.duration_ms));
         imp.meta.set_label(&meta.join(" · "));
 
-        let tracks = GatefoldApplication::get().library().album_tracks(info.id);
+        let tracks = JewelcaseApplication::get().library().album_tracks(info.id);
         self.fill_tracks(&tracks, &info.artist_credit);
         imp.track_objects.replace(tracks);
         self.update_playing();
@@ -486,13 +489,15 @@ impl AlbumPanel {
     fn album_dir(&self) -> Option<std::path::PathBuf> {
         let tracks = self.imp().track_objects.borrow();
         let path = &tracks.first()?.track().record.path;
-        Some(gatefold_core::library::grouping::album_folder(path).to_path_buf())
+        Some(jewelcase_core::library::grouping::album_folder(path).to_path_buf())
     }
 
-    fn fill_artists(&self, album: &gatefold_core::db::Album) {
+    fn fill_artists(&self, album: &jewelcase_core::db::Album) {
         let imp = self.imp();
         imp.artists.remove_all();
-        let linked = GatefoldApplication::get().library().album_artists(album.id);
+        let linked = JewelcaseApplication::get()
+            .library()
+            .album_artists(album.id);
         if linked.is_empty() {
             // Compilations and unknown artists have no page.
             imp.artists.append(
@@ -595,7 +600,7 @@ impl AlbumPanel {
     }
 
     fn update_playing(&self) {
-        let current = GatefoldApplication::get()
+        let current = JewelcaseApplication::get()
             .player()
             .current_track()
             .map(|t| t.id());
@@ -608,7 +613,7 @@ impl AlbumPanel {
         let imp = self.imp();
         if let Some(album) = imp.spotify.borrow().as_ref() {
             let tracks = imp.track_objects.borrow().clone();
-            GatefoldApplication::get().player().play_tracks(
+            JewelcaseApplication::get().player().play_tracks(
                 tracks,
                 start,
                 shuffle,
@@ -620,14 +625,14 @@ impl AlbumPanel {
         let Some(info) = album.versions().get(*imp.version.borrow()) else {
             return;
         };
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .player()
             .play_album(info.id, start, shuffle);
     }
 }
 
-fn release_type_name(album: &gatefold_core::db::Album) -> String {
-    use gatefold_core::library::titles::ReleaseType;
+fn release_type_name(album: &jewelcase_core::db::Album) -> String {
+    use jewelcase_core::library::titles::ReleaseType;
     if album.soundtrack {
         return gettext("Soundtrack");
     }
@@ -645,7 +650,7 @@ fn release_type_name(album: &gatefold_core::db::Album) -> String {
 /// names joined with ", "; a name with a comma in it ("Tyler, the
 /// Creator") keeps the IDs from lining up, so then only a sole artist
 /// gets one.
-fn spotify_credits(album: &gatefold_core::db::SpotifyAlbum) -> Vec<(String, Option<&str>)> {
+fn spotify_credits(album: &jewelcase_core::db::SpotifyAlbum) -> Vec<(String, Option<&str>)> {
     let names: Vec<&str> = album.artist.split(", ").filter(|n| !n.is_empty()).collect();
     if names.len() == album.artist_ids.len() {
         names

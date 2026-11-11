@@ -1,9 +1,9 @@
 //! Spotify Soloist (CONCEPT.md §9.4): Spotify's official headless Connect
-//! client. Gatefold starts it with the user's own API key and drives it over
+//! client. Jewelcase starts it with the user's own API key and drives it over
 //! its local WebSocket API (bound to 127.0.0.1); Soloist plays the audio
 //! itself.
 //!
-//! Soloist isn't shipped with Gatefold (Spotify doesn't allow that): the
+//! Soloist isn't shipped with Jewelcase (Spotify doesn't allow that): the
 //! user downloads it from Spotify. Builds expire after 90 days.
 //!
 //! Threads: one reads Soloist's output into the log, one waits for it to
@@ -47,7 +47,7 @@ pub struct Config {
     pub api_key: String,
     /// The name in Spotify's device lists.
     pub device_name: String,
-    /// Gatefold's own data and cache folders, so the user's own Soloist
+    /// Jewelcase's own data and cache folders, so the user's own Soloist
     /// (if any) stays separate.
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
@@ -220,7 +220,7 @@ pub enum Event {
         is_active: Option<bool>,
         options: Option<Options>,
     },
-    /// Shuffle or repeat changed (in Gatefold or the Spotify app).
+    /// Shuffle or repeat changed (in Jewelcase or the Spotify app).
     Options(Options),
     /// Soloist became (or stopped being) the active Connect device.
     Device {
@@ -242,12 +242,12 @@ pub enum Event {
         code: Option<i32>,
         expired: bool,
     },
-    /// The WebSocket closed (a Soloist Gatefold didn't start went away).
+    /// The WebSocket closed (a Soloist Jewelcase didn't start went away).
     Disconnected,
 }
 
 impl Event {
-    /// A server message, or `None` for ones Gatefold doesn't need.
+    /// A server message, or `None` for ones Jewelcase doesn't need.
     pub fn parse(text: &str) -> Option<Self> {
         let value: Value = serde_json::from_str(text).ok()?;
         let volume = |v: &Value| v.as_u64().map(|n| n.min(100) as u8);
@@ -343,7 +343,7 @@ impl Soloist {
         for name in ["ws.port", "ws.addr"] {
             let _ = std::fs::remove_file(config.data_dir.join(name));
         }
-        // The key in a file only Gatefold's user can read, once Soloist
+        // The key in a file only Jewelcase's user can read, once Soloist
         // takes one; on its command line, other local users could read it
         // (spotify/soloist issues #12, #24). Removed once Soloist listens.
         let key_file = supports_key_file(&config.binary)
@@ -351,7 +351,7 @@ impl Soloist {
             .map(|path| write_key_file(&path, &config.api_key).map(|()| path))
             .transpose()?;
         let mut command = Command::new(&config.binary);
-        // If Gatefold dies without stopping it, so does Soloist (Linux).
+        // If Jewelcase dies without stopping it, so does Soloist (Linux).
         // SAFETY: prctl is async-signal-safe; nothing else runs here.
         unsafe {
             command.pre_exec(|| {
@@ -537,7 +537,7 @@ impl Soloist {
 
     /// A Soloist that was already running (not started here).
     /// Done with Soloist: what's queued is sent (a last pause), a Soloist
-    /// Gatefold started stops; waits at most `max` for the sending.
+    /// Jewelcase started stops; waits at most `max` for the sending.
     pub fn close(self, max: Duration) {
         let thread = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take();
         // Dropping the command sender ends the thread after it sent the rest.
@@ -554,7 +554,7 @@ impl Soloist {
         self.child.lock().map(|c| c.is_none()).unwrap_or(true)
     }
 
-    /// Stops Soloist (Gatefold quits or streaming is turned off).
+    /// Stops Soloist (Jewelcase quits or streaming is turned off).
     pub fn shutdown(&self) {
         let child = self.child.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(mut child) = child {
@@ -820,7 +820,7 @@ fn connect_to(addr: &str, port: u16) -> Option<WebSocket<TcpStream>> {
 /// and its WebSocket address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
-    /// "soloistd", "soloist", or "gatefold" (one Gatefold started earlier).
+    /// "soloistd", "soloist", or "jewelcase" (one Jewelcase started earlier).
     pub source: &'static str,
     pub addr: String,
     pub port: u16,

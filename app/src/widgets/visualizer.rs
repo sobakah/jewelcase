@@ -14,7 +14,7 @@ use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 
 /// How fast a bar falls back (its full height per second).
@@ -68,7 +68,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Visualizer {
-        const NAME: &'static str = "GatefoldVisualizer";
+        const NAME: &'static str = "JewelcaseVisualizer";
         type Type = super::Visualizer;
         type ParentType = gtk::Widget;
 
@@ -84,7 +84,7 @@ mod imp {
             self.parent_constructed();
             let obj = self.obj();
             obj.add_css_class("visualizer");
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             let playing = player.connect_playing_notify(glib::clone!(
                 #[weak]
                 obj,
@@ -236,7 +236,7 @@ impl Visualizer {
             return;
         }
         if !imp.using.replace(true) {
-            GatefoldApplication::get().player().use_spectrum(true);
+            JewelcaseApplication::get().player().use_spectrum(true);
         }
         if imp.tick.borrow().is_some() {
             return;
@@ -252,7 +252,7 @@ impl Visualizer {
             id.remove();
         }
         if imp.using.replace(false) {
-            GatefoldApplication::get().player().use_spectrum(false);
+            JewelcaseApplication::get().player().use_spectrum(false);
         }
         imp.levels.borrow_mut().fill(0.0);
     }
@@ -265,7 +265,7 @@ impl Visualizer {
         } else {
             ((frame_time - last) as f32 / 1_000_000.0).min(0.1)
         };
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         let count = imp.bars.get() as usize;
         let targets = player.spectrum_bars(count);
         let mut moving = false;

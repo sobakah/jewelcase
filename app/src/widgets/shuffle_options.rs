@@ -3,15 +3,15 @@
 //! and the repeat modes.
 
 use adw::prelude::*;
-use gatefold_core::queue::RepeatMode;
 use gettextrs::gettext;
 use gtk::{gio, glib};
+use jewelcase_core::queue::RepeatMode;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 
 /// Shuffle's options; all settings, so they apply right away.
 pub fn shuffle_popover() -> gtk::Popover {
-    let player = GatefoldApplication::get().player();
+    let player = JewelcaseApplication::get().player();
     let settings = player.settings().clone();
 
     let content = gtk::Box::builder()
@@ -114,7 +114,7 @@ pub fn shuffle_popover() -> gtk::Popover {
         }
     ));
     options.append(&start_analysis);
-    let analyzer = GatefoldApplication::get().analyzer();
+    let analyzer = JewelcaseApplication::get().analyzer();
     let update_note = glib::clone!(
         #[weak]
         analysis_note,
@@ -176,7 +176,7 @@ pub fn shuffle_popover() -> gtk::Popover {
 
 /// Repeat Off / All / One, as radio buttons.
 pub fn repeat_popover() -> gtk::Popover {
-    let player = GatefoldApplication::get().player();
+    let player = JewelcaseApplication::get().player();
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(6)

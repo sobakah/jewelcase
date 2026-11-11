@@ -6,16 +6,16 @@
 
 use std::collections::HashMap;
 
-use gatefold_core::db::{SpotifyAlbum, SpotifyArtist, StreamInfo};
-use gatefold_core::matching::{Confidence, RemoteTrack};
-use gatefold_spotify::Error;
 use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::{SpotifyAlbum, SpotifyArtist, StreamInfo};
+use jewelcase_core::matching::{Confidence, RemoteTrack};
+use jewelcase_spotify::Error;
 
 use super::Spotify;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::objects::TrackObject;
 
 /// Discographies are read again after this long: a week, as Spotify
@@ -76,7 +76,7 @@ pub struct LibraryState {
     /// predates those permissions; connecting again grants them.
     pub needs_permission: bool,
     /// Songs of albums opened this session.
-    albums: HashMap<String, Vec<gatefold_spotify::AlbumTrack>>,
+    albums: HashMap<String, Vec<jewelcase_spotify::AlbumTrack>>,
     /// Spotify IDs found by name for library artists (`None`: not found).
     artist_ids: HashMap<String, Option<String>>,
     /// Where the pages of songs played this session are, by URI.
@@ -91,7 +91,7 @@ pub struct TrackLinks {
     pub artists: Vec<(String, String)>,
 }
 
-pub fn album_from(album: &gatefold_spotify::Album) -> SpotifyAlbum {
+pub fn album_from(album: &jewelcase_spotify::Album) -> SpotifyAlbum {
     SpotifyAlbum {
         spotify_id: album.id.clone(),
         name: album.name.clone(),
@@ -109,7 +109,7 @@ pub fn album_from(album: &gatefold_spotify::Album) -> SpotifyAlbum {
     }
 }
 
-fn artist_from(artist: &gatefold_spotify::Artist) -> SpotifyArtist {
+fn artist_from(artist: &jewelcase_spotify::Artist) -> SpotifyArtist {
     SpotifyArtist {
         spotify_id: artist.id.clone(),
         name: artist.name.clone(),
@@ -137,7 +137,7 @@ impl Spotify {
         }
         let denied = |err: Option<&Error>| matches!(err, Some(Error::Status { status: 403, .. }));
         let needs_permission = denied(albums.as_ref().err()) || denied(artists.as_ref().err());
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let mut urls = Vec::new();
         if let Some(mut db) = library.db() {
             match &albums {
@@ -165,7 +165,7 @@ impl Spotify {
         self.emit_by_name::<()>("library-changed", &[]);
         // Only covers not downloaded yet: each batch that arrives shows the
         // sections again, which is wasted work for covers already there.
-        let covers = gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+        let covers = jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
         urls.retain(|url| !covers.has(&super::image_cover_key(url)));
         let spotify = self.downgrade();
         super::fetch_covers_in_batches(urls, move |_| {
@@ -180,7 +180,7 @@ impl Spotify {
     /// (the page's Refresh button). Stored ones also stand in when Spotify
     /// can't be asked.
     pub async fn discography(&self, artist_id: &str, refresh: bool) -> Result<Discography, String> {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let cached = library
             .db()
             .and_then(|db| db.discography(artist_id).ok().flatten());
@@ -231,7 +231,7 @@ impl Spotify {
     /// A Spotify artist: stored, else asked for (a page for an artist that
     /// isn't followed).
     pub async fn spotify_artist(&self, artist_id: &str) -> Option<SpotifyArtist> {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         if let Some(artist) = library
             .db()
             .and_then(|db| db.spotify_artist(artist_id).ok().flatten())
@@ -265,7 +265,7 @@ impl Spotify {
         let query = name.to_owned();
         let found = match self.call(move |client| client.search_artists(&query)).await {
             Ok(artists) => {
-                let aliases = GatefoldApplication::get().library().aliases().clone();
+                let aliases = JewelcaseApplication::get().library().aliases().clone();
                 let wanted = aliases.identity(name).to_lowercase();
                 artists
                     .into_iter()
@@ -311,10 +311,10 @@ impl Spotify {
                 }
             }
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let index = library.match_index();
         let mut db = library.db()?;
-        let ids: Vec<(i64, &gatefold_spotify::AlbumTrack)> = tracks
+        let ids: Vec<(i64, &jewelcase_spotify::AlbumTrack)> = tracks
             .iter()
             .filter_map(|entry| {
                 let track = &entry.track;
@@ -416,9 +416,9 @@ impl Spotify {
         }
     }
 
-    /// Saved or followed, as Gatefold last knew.
+    /// Saved or followed, as Jewelcase last knew.
     pub fn in_library(&self, item: &LibraryItem) -> bool {
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .db()
             .and_then(|db| match item {
@@ -487,7 +487,7 @@ impl Spotify {
     }
 
     fn store_in_library(&self, item: &LibraryItem, on: bool) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(mut db) = library.db() else {
             return;
         };
@@ -502,14 +502,14 @@ impl Spotify {
 
     /// Spotify albums by Spotify ID, from the database.
     pub fn stored_album(&self, album_id: &str) -> Option<SpotifyAlbum> {
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .db()
             .and_then(|db| db.spotify_album(album_id).ok().flatten())
     }
 
     pub fn saved_albums(&self) -> Vec<SpotifyAlbum> {
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .db()
             .and_then(|db| db.saved_albums().ok())
@@ -517,7 +517,7 @@ impl Spotify {
     }
 
     pub fn followed_artists(&self) -> Vec<SpotifyArtist> {
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .db()
             .and_then(|db| db.followed_artists().ok())
@@ -527,7 +527,7 @@ impl Spotify {
 
 impl Spotify {
     /// Why saving or following didn't work, for the user; a login from
-    /// before Gatefold asked for the permission can connect again.
+    /// before Jewelcase asked for the permission can connect again.
     fn library_error(&self, err: &Error) {
         if matches!(err, Error::Status { status: 403, .. }) {
             let spotify = self.clone();

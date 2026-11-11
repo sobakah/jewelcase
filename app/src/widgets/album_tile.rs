@@ -41,7 +41,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for AlbumTile {
-        const NAME: &'static str = "GatefoldAlbumTile";
+        const NAME: &'static str = "JewelcaseAlbumTile";
         type Type = super::AlbumTile;
         type ParentType = gtk::Box;
     }

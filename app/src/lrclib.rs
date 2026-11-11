@@ -1,5 +1,5 @@
 //! Lyrics for Spotify songs that aren't in the library, from LRCLIB
-//! (CONCEPT.md §5): shown only, never written anywhere but Gatefold's
+//! (CONCEPT.md §5): shown only, never written anywhere but Jewelcase's
 //! cache. Gentle on LRCLIB's servers:
 //!
 //! - only for the song that plays, and only while the lyrics are shown
@@ -8,18 +8,18 @@
 //! - after LRCLIB asks to wait (429) or fails (5xx), nothing is asked
 //!   for an hour at least (`Retry-After` if longer); offline, 10 minutes
 //! - one request at a time (a second one without the album if the first
-//!   found nothing), with Gatefold's User-Agent
+//!   found nothing), with Jewelcase's User-Agent
 
 use std::cell::{Cell, RefCell};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use gatefold_core::db::OnlineLyricsRow;
-use gatefold_lyrics::LyricsState;
 use gtk::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_core::db::OnlineLyricsRow;
+use jewelcase_lyrics::LyricsState;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config;
 use crate::metadata::now;
 use crate::objects::TrackObject;
@@ -39,14 +39,14 @@ thread_local! {
     static ASKING: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-fn client() -> &'static gatefold_metadata::Client {
-    static CLIENT: OnceLock<gatefold_metadata::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| gatefold_metadata::Client::new(config::VERSION))
+fn client() -> &'static jewelcase_metadata::Client {
+    static CLIENT: OnceLock<jewelcase_metadata::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| jewelcase_metadata::Client::new(config::VERSION))
 }
 
 /// Online lookups and this source are on (Preferences).
 pub fn enabled() -> bool {
-    let settings = GatefoldApplication::get().player().settings().clone();
+    let settings = JewelcaseApplication::get().player().settings().clone();
     settings.boolean("online-metadata") && settings.boolean("lyrics-lrclib")
 }
 
@@ -59,8 +59,8 @@ pub async fn lyrics(track: &TrackObject, still_wanted: impl Fn() -> bool) -> Opt
     if !enabled() || !track.is_stand_in() {
         return None;
     }
-    let library = GatefoldApplication::get().library();
-    let uri = GatefoldApplication::get()
+    let library = JewelcaseApplication::get().library();
+    let uri = JewelcaseApplication::get()
         .spotify()
         .stand_in_uri(track.id())?;
     if let Some(known) = cached(&uri) {
@@ -114,7 +114,7 @@ pub async fn lyrics(track: &TrackObject, still_wanted: impl Fn() -> bool) -> Opt
             checked: now(),
             ..OnlineLyricsRow::default()
         },
-        Ok(Err(gatefold_metadata::Error::Busy(wait))) => {
+        Ok(Err(jewelcase_metadata::Error::Busy(wait))) => {
             tracing::info!("LRCLIB asks to wait; not asking for a while");
             PAUSED_UNTIL.set(Some(Instant::now() + wait.max(BUSY_PAUSE)));
             return None;
@@ -136,7 +136,7 @@ pub async fn lyrics(track: &TrackObject, still_wanted: impl Fn() -> bool) -> Opt
 
 /// The cached answer, while it holds ("not found" for 30 days).
 fn cached(uri: &str) -> Option<LyricsState> {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let row = library.db()?.online_lyrics(uri).ok()??;
     if row.found {
         Some(state(&row))
@@ -151,7 +151,7 @@ fn state(row: &OnlineLyricsRow) -> LyricsState {
     if !row.found {
         return LyricsState::None;
     }
-    gatefold_lyrics::from_online(
+    jewelcase_lyrics::from_online(
         row.synced.as_deref(),
         row.plain.as_deref(),
         row.instrumental,

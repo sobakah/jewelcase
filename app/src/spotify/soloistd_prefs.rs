@@ -6,9 +6,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gatefold_soloist::soloistd::{self, Config, ServiceState};
 use gettextrs::gettext;
 use gtk::{gio, glib};
+use jewelcase_soloist::soloistd::{self, Config, ServiceState};
 
 use super::Spotify;
 
@@ -36,7 +36,7 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title(gettext("soloistd"))
         .description(gettext(
-            "soloistd installs Spotify Soloist, keeps it up to date and runs it in the background; Gatefold then uses it.",
+            "soloistd installs Spotify Soloist, keeps it up to date and runs it in the background; Jewelcase then uses it.",
         ))
         .build();
     let project = gtk::Button::builder()
@@ -88,7 +88,7 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
 
     // Settings in its config.json.
     let websocket = adw::SwitchRow::builder()
-        .title(gettext("Control by Gatefold"))
+        .title(gettext("Control by Jewelcase"))
         .build();
     group.add(&websocket);
     let device = adw::EntryRow::builder()
@@ -457,7 +457,7 @@ pub fn group(spotify: &Spotify) -> adw::PreferencesGroup {
     group
 }
 
-/// After a restart, Gatefold attaches again (Soloist needs a moment).
+/// After a restart, Jewelcase attaches again (Soloist needs a moment).
 fn reconnect(spotify: &Spotify) {
     if !spotify.settings().boolean("spotify-streaming") {
         return;

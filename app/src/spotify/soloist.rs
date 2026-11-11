@@ -1,37 +1,37 @@
 //! Streaming with Spotify Soloist (CONCEPT.md §9.4): Spotify's official
 //! headless client plays Spotify songs that aren't in the library.
 //!
-//! Gatefold uses a Soloist that already runs (kept by soloistd, which also
+//! Jewelcase uses a Soloist that already runs (kept by soloistd, which also
 //! downloads and updates it), or starts one itself with the user's API key.
-//! Soloist plays the audio itself; Gatefold tells it what to play and
+//! Soloist plays the audio itself; Jewelcase tells it what to play and
 //! follows its reports.
 
 use std::rc::Rc;
 
-use gatefold_core::queue::RepeatMode;
-use gatefold_soloist::{Config, Event, Item, Options, Position, Repeat, Soloist, Status};
 use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use jewelcase_core::queue::RepeatMode;
+use jewelcase_soloist::{Config, Event, Item, Options, Position, Repeat, Soloist, Status};
 
 use super::remote::RemoteCommand;
 use super::stream::StreamNote;
 use super::{Spotify, keyring};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 
-/// The device name of a Soloist Gatefold starts; development builds
+/// The device name of a Soloist Jewelcase starts; development builds
 /// (the test Flatpak) get their own, next to the installed app's.
 pub fn own_device_name() -> &'static str {
     if crate::config::is_development() {
-        "Gatefold Devel"
+        "Jewelcase Devel"
     } else {
-        "Gatefold"
+        "Jewelcase"
     }
 }
 /// Quiet reconnects to a running Soloist, and the wait before each.
-/// Lets go of a Soloist off the main thread: stopping one Gatefold
+/// Lets go of a Soloist off the main thread: stopping one Jewelcase
 /// started waits for it to end (up to 3 s).
 fn drop_soloist(soloist: Rc<Soloist>) {
     if let Ok(soloist) = Rc::try_unwrap(soloist) {
@@ -50,7 +50,7 @@ const EXIT_WAIT_S: u32 = 3;
 #[derive(Default)]
 pub struct SoloistState {
     soloist: Option<Rc<Soloist>>,
-    /// "gatefold" (started here), "soloistd" or "soloist" (already running).
+    /// "jewelcase" (started here), "soloistd" or "soloist" (already running).
     pub(super) source: Option<&'static str>,
     /// Its name in Spotify's device lists (hidden from Play On…).
     pub(super) device_name: Option<String>,
@@ -59,19 +59,19 @@ pub struct SoloistState {
     /// after a restart, or when the phone played meanwhile).
     is_active: bool,
     told_pairing: bool,
-    /// What Gatefold asked to play, and whether it's playing now.
+    /// What Jewelcase asked to play, and whether it's playing now.
     wanted: Option<String>,
     started: bool,
-    /// Counts Gatefold's requests to play, so a start timeout belongs to
+    /// Counts Jewelcase's requests to play, so a start timeout belongs to
     /// one request (the same song asked for again gets its own time).
     loads: u64,
-    /// When Gatefold's song started (Soloist reports a start more than
+    /// When Jewelcase's song started (Soloist reports a start more than
     /// once).
     started_at: Option<std::time::Instant>,
-    /// Gatefold's songs that ended right after starting, in a row: a
+    /// Jewelcase's songs that ended right after starting, in a row: a
     /// loop, stopped (`RUNAWAY_ENDS`).
     quick_ends: u32,
-    /// Gatefold's Next made Soloist skip to this song in its queue, from
+    /// Jewelcase's Next made Soloist skip to this song in its queue, from
     /// the song that played then.
     skip_to: Option<(String, Option<String>)>,
     /// Loaded without playing (a restored queue): played on "play".
@@ -97,17 +97,17 @@ pub struct SoloistState {
     /// Showing what Soloist plays for someone else (started from the
     /// Spotify app, or a followed playlist): the receiver (§9.4).
     receiving: bool,
-    /// Soloist moving on right after Gatefold paused it isn't someone
+    /// Soloist moving on right after Jewelcase paused it isn't someone
     /// else playing.
     quiet_until: Option<std::time::Instant>,
-    /// Gatefold's next song when it's a Spotify song too: handed to
+    /// Jewelcase's next song when it's a Spotify song too: handed to
     /// Soloist's queue as soon as the current one plays, so it follows
     /// seamlessly and Next in the Spotify app skips to it.
     next_uri: Option<String>,
     queued_next: Option<String>,
-    /// Songs handed to Soloist's queue that Gatefold didn't need after all
+    /// Songs handed to Soloist's queue that Jewelcase didn't need after all
     /// (Next pressed, the queue changed): they're still in Soloist's queue
-    /// (it can't be emptied), so when Soloist gets to one, Gatefold's song
+    /// (it can't be emptied), so when Soloist gets to one, Jewelcase's song
     /// is over.
     stale_queue: Vec<String>,
     /// Left-overs that just left Soloist's queue report: when one starts
@@ -118,13 +118,13 @@ pub struct SoloistState {
     /// Muted for the last moment of a song followed by a local one, so
     /// Soloist's own next song isn't heard before it's paused.
     ducked: bool,
-    /// When Gatefold last paused Soloist: a pause it didn't ask for at the
+    /// When Jewelcase last paused Soloist: a pause it didn't ask for at the
     /// very end is the song ending.
     pause_asked: Option<std::time::Instant>,
     /// Counts reschedules of the end timers; an older timer does nothing
     /// (removing one that already ran would panic).
     end_generation: u64,
-    /// Gatefold's volume (0 to 1), before the Spotify offset.
+    /// Jewelcase's volume (0 to 1), before the Spotify offset.
     volume: f64,
 }
 
@@ -133,17 +133,17 @@ const DUCK_BEFORE_MS: u64 = 400;
 /// Soloist pausing this close to the end (Spotify with autoplay off stops
 /// on the song) is the song ending.
 const PAUSED_AT_END_MS: u64 = 2_500;
-/// Soloist changing songs with more than this left of Gatefold's song was
+/// Soloist changing songs with more than this left of Jewelcase's song was
 /// someone choosing in the Spotify app, not the song ending.
 const CHOSEN_ELSEWHERE_MS: u64 = 15_000;
 /// A left-over that left Soloist's queue report is still recognised
 /// this long (the report can come before the song starts).
 const PRUNED_KEPT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Gatefold's song ending this soon after it started is suspicious ...
+/// Jewelcase's song ending this soon after it started is suspicious ...
 const QUICK_END: std::time::Duration = std::time::Duration::from_secs(2);
-/// ... and this many in a row are a loop: Gatefold stops.
+/// ... and this many in a row are a loop: Jewelcase stops.
 const RUNAWAY_ENDS: u32 = 4;
-/// A pause Gatefold asked for is reported within this.
+/// A pause Jewelcase asked for is reported within this.
 const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl SoloistState {
@@ -189,15 +189,15 @@ impl Spotify {
         let attempt = self.imp().stream.borrow().soloist.generation;
         let superseded =
             |spotify: &Self| spotify.imp().stream.borrow().soloist.generation != attempt;
-        // A running one: soloistd's or the user's own, or one Gatefold
+        // A running one: soloistd's or the user's own, or one Jewelcase
         // started before and that's still there.
         let own_dir = glib::user_data_dir().join(APP_ID).join("soloist");
         let running = gtk::gio::spawn_blocking(move || {
-            gatefold_soloist::find_running().or_else(|| {
-                let (addr, port) = gatefold_soloist::runtime_address(&own_dir)?;
+            jewelcase_soloist::find_running().or_else(|| {
+                let (addr, port) = jewelcase_soloist::runtime_address(&own_dir)?;
                 std::net::TcpStream::connect((addr.as_str(), port)).ok()?;
-                Some(gatefold_soloist::Running {
-                    source: "gatefold",
+                Some(jewelcase_soloist::Running {
+                    source: "jewelcase",
                     addr,
                     port,
                 })
@@ -224,12 +224,12 @@ impl Spotify {
                 let configured = self.settings().string("soloist-path");
                 let configured = (!configured.trim().is_empty())
                     .then(|| std::path::PathBuf::from(configured.trim()));
-                let Some(binary) = gatefold_soloist::find_binary(configured.as_deref()) else {
+                let Some(binary) = jewelcase_soloist::find_binary(configured.as_deref()) else {
                     self.set_stream_status("missing");
                     return;
                 };
                 // Development aid: headless tests have no keyring.
-                let test_key = std::env::var("GATEFOLD_SOLOIST_API_KEY")
+                let test_key = std::env::var("JEWELCASE_SOLOIST_API_KEY")
                     .ok()
                     .filter(|_| cfg!(debug_assertions));
                 let key = match test_key
@@ -257,7 +257,7 @@ impl Spotify {
                     device_name: own_device_name().into(),
                     data_dir: glib::user_data_dir().join(APP_ID).join("soloist"),
                     cache_dir: glib::user_cache_dir().join(APP_ID).join("soloist"),
-                    initial_volume: (GatefoldApplication::get().player().volume() * 100.0).round()
+                    initial_volume: (JewelcaseApplication::get().player().volume() * 100.0).round()
                         as u8,
                 };
                 // Asks the program for its options first: not on the main
@@ -269,7 +269,7 @@ impl Spotify {
                             drop_soloist(Rc::new(soloist));
                             return;
                         }
-                        (soloist, events, "gatefold")
+                        (soloist, events, "jewelcase")
                     }
                     Ok(Err(err)) => {
                         tracing::warn!("{err}");
@@ -306,8 +306,8 @@ impl Spotify {
         ));
     }
 
-    /// Gatefold quits: a Soloist it started stops (and waits for it); a
-    /// running one (soloistd's) gets its volume back and stops Gatefold's
+    /// Jewelcase quits: a Soloist it started stops (and waits for it); a
+    /// running one (soloistd's) gets its volume back and stops Jewelcase's
     /// song, so nothing plays on uncontrolled.
     pub fn shutdown_streaming(&self) {
         let (old, ours, ducked, volume) = {
@@ -335,7 +335,7 @@ impl Spotify {
         }
     }
 
-    /// Stops using Soloist (one Gatefold started is stopped too). The
+    /// Stops using Soloist (one Jewelcase started is stopped too). The
     /// receiver ends and a streamed song stops, so nothing waits for a
     /// Soloist that's gone.
     pub(super) fn soloist_stop(&self) {
@@ -344,7 +344,7 @@ impl Spotify {
         }
         let (ducked, volume, ours) = {
             let state = &self.imp().stream.borrow().soloist;
-            // Gatefold's own song, not one the phone plays through it.
+            // Jewelcase's own song, not one the phone plays through it.
             (
                 state.ducked,
                 state.volume,
@@ -384,7 +384,7 @@ impl Spotify {
         if self.stream_backend() == super::stream::Backend::Soloist {
             self.set_stream_status("off");
         }
-        GatefoldApplication::get().player().stream_gone();
+        JewelcaseApplication::get().player().stream_gone();
     }
 
     fn soloist_event(&self, event: Event) {
@@ -517,7 +517,7 @@ impl Spotify {
             Event::Volume(_) => {}
             Event::CommandError { command, message } => {
                 tracing::warn!("Soloist refused {command:?}: {message}");
-                // Gatefold's Next skipped in Soloist's queue and that was
+                // Jewelcase's Next skipped in Soloist's queue and that was
                 // refused: the song is started directly instead (its copy
                 // stays in the queue, as when a skip lands elsewhere).
                 if command.as_deref() == Some("skip_next") {
@@ -575,11 +575,11 @@ impl Spotify {
                 if self.soloist().is_none() {
                     return;
                 }
-                // One Gatefold started: its exit follows and says why
+                // One Jewelcase started: its exit follows and says why
                 // (expired or not); this says so only if it doesn't come.
                 let (own, generation) = {
                     let state = &self.imp().stream.borrow().soloist;
-                    (state.source == Some("gatefold"), state.generation)
+                    (state.source == Some("jewelcase"), state.generation)
                 };
                 if own {
                     glib::timeout_add_seconds_local_once(
@@ -608,7 +608,7 @@ impl Spotify {
                 let retry = {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
-                    let attached = state.source != Some("gatefold");
+                    let attached = state.source != Some("jewelcase");
                     let retry = attached && state.reconnects < RECONNECTS;
                     if retry {
                         state.reconnects += 1;
@@ -616,7 +616,7 @@ impl Spotify {
                     retry
                 };
                 if retry {
-                    GatefoldApplication::get().player().stream_gone();
+                    JewelcaseApplication::get().player().stream_gone();
                     self.soloist_stop();
                     self.set_stream_status("connecting");
                     glib::timeout_add_seconds_local_once(
@@ -663,12 +663,12 @@ impl Spotify {
             drop_soloist(old);
         }
         self.set_stream_status(status);
-        GatefoldApplication::get().player().stream_gone();
+        JewelcaseApplication::get().player().stream_gone();
     }
 
-    /// Soloist plays `uri`: Gatefold's song started, or Soloist moved on
+    /// Soloist plays `uri`: Jewelcase's song started, or Soloist moved on
     /// (the song ended and it continued, or someone skipped in the app).
-    /// How much of Gatefold's song was left (ms), while it plays.
+    /// How much of Jewelcase's song was left (ms), while it plays.
     fn ours_left(&self) -> Option<u64> {
         let state = &self.imp().stream.borrow().soloist;
         let wanted = state.wanted.as_deref()?;
@@ -684,7 +684,7 @@ impl Spotify {
         Some(duration.saturating_sub(position))
     }
 
-    /// Soloist plays `uri`; `left`: how much of Gatefold's song was left
+    /// Soloist plays `uri`; `left`: how much of Jewelcase's song was left
     /// just before.
     fn soloist_item(&self, uri: &str, left: Option<u64>) {
         let (wanted, started) = {
@@ -708,14 +708,14 @@ impl Spotify {
                 self.schedule_end();
             } else if self.started_a_while_ago() && self.take_stale(uri) {
                 // The same song again, from what was left in Soloist's
-                // queue: Gatefold's song is over. (Not Soloist reporting
+                // queue: Jewelcase's song is over. (Not Soloist reporting
                 // the start twice: the song was loaded while a copy of it
                 // waited in the queue.)
                 self.soloist_ended("the copy left in Soloist's queue plays");
             }
         } else if !started && let Some(target) = self.skip_missed(uri) {
-            // Gatefold's Next made Soloist skip, but a song Gatefold didn't
-            // know of was ahead in its queue: Gatefold's song is started
+            // Jewelcase's Next made Soloist skip, but a song Jewelcase didn't
+            // know of was ahead in its queue: Jewelcase's song is started
             // directly (its copy stays in the queue).
             tracing::info!("Soloist skipped to {uri} instead of {target}; playing it directly");
             if let Some(soloist) = self.soloist() {
@@ -730,11 +730,11 @@ impl Spotify {
                 )
             };
             if chained && !expected {
-                // Handed over, but Gatefold's queue changed meanwhile.
+                // Handed over, but Jewelcase's queue changed meanwhile.
                 self.imp().stream.borrow_mut().soloist.queued_next = None;
-                self.soloist_ended("the handed-over song, but Gatefold's queue changed");
+                self.soloist_ended("the handed-over song, but Jewelcase's queue changed");
             } else if chained {
-                // The handed-over song plays: it's Gatefold's next one.
+                // The handed-over song plays: it's Jewelcase's next one.
                 {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
@@ -746,15 +746,15 @@ impl Spotify {
                     // At its start until Soloist reports, so a song picked
                     // in the app meanwhile is seen as picked, not as this
                     // one ending.
-                    state.position = Some(gatefold_soloist::Position::at_start());
+                    state.position = Some(jewelcase_soloist::Position::at_start());
                 }
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .player()
                     .stream_note(StreamNote::Ended);
             } else if self.take_stale(uri) {
-                // What was left in Soloist's queue: Gatefold's song is over.
+                // What was left in Soloist's queue: Jewelcase's song is over.
                 self.soloist_ended("a song left in Soloist's queue plays");
-            } else if GatefoldApplication::get().player().playing()
+            } else if JewelcaseApplication::get().player().playing()
                 && left.is_some_and(|left| left > CHOSEN_ELSEWHERE_MS)
             {
                 // Long before the end: someone picked a song or skipped in
@@ -762,12 +762,12 @@ impl Spotify {
                 // charge (the receiver shows it).
                 tracing::info!("Another song was chosen in the Spotify app; it keeps playing");
                 self.soloist_release();
-            } else if GatefoldApplication::get().player().playing() {
-                // Soloist moved on at the end (its autoplay): Gatefold's
+            } else if JewelcaseApplication::get().player().playing() {
+                // Soloist moved on at the end (its autoplay): Jewelcase's
                 // next song.
                 self.soloist_ended("Soloist moved on by itself at the end");
             } else {
-                // Gatefold's song was paused and someone else plays now
+                // Jewelcase's song was paused and someone else plays now
                 // (cast from the phone): theirs is shown, not stopped.
                 self.soloist_release();
             }
@@ -779,8 +779,8 @@ impl Spotify {
         state.started_at.is_some_and(|at| at.elapsed() >= QUICK_END)
     }
 
-    /// Gatefold's Next skipped in Soloist's queue and Soloist didn't land
-    /// on Gatefold's song: the song, now known to wait behind others.
+    /// Jewelcase's Next skipped in Soloist's queue and Soloist didn't land
+    /// on Jewelcase's song: the song, now known to wait behind others.
     fn skip_missed(&self, uri: &str) -> Option<String> {
         let mut stream = self.imp().stream.borrow_mut();
         let state = &mut stream.soloist;
@@ -822,10 +822,10 @@ impl Spotify {
         }
     }
 
-    /// Gatefold leaves its song while its next one waits in Soloist's
+    /// Jewelcase leaves its song while its next one waits in Soloist's
     /// queue: Soloist skips to that one, muted, so it isn't left there
     /// (the queue can't be emptied otherwise; the song that follows is
-    /// started right after). Without a song of Gatefold's playing, it's
+    /// started right after). Without a song of Jewelcase's playing, it's
     /// a left-over.
     fn consume_queued(&self) {
         let queued = {
@@ -852,7 +852,7 @@ impl Spotify {
         }
     }
 
-    /// A song handed to Soloist's queue that Gatefold won't play next.
+    /// A song handed to Soloist's queue that Jewelcase won't play next.
     fn forget_queued(state: &mut SoloistState) {
         if let Some(uri) = state.queued_next.take() {
             state.stale_queue.push(uri);
@@ -861,7 +861,7 @@ impl Spotify {
         }
     }
 
-    /// Gatefold lets go of its song (someone else plays now): its player
+    /// Jewelcase lets go of its song (someone else plays now): its player
     /// stops the stream, Soloist plays on and the receiver shows it.
     fn soloist_release(&self) {
         {
@@ -873,7 +873,7 @@ impl Spotify {
             Self::forget_queued(state);
         }
         self.restore_volume();
-        GatefoldApplication::get().player().stream_gone();
+        JewelcaseApplication::get().player().stream_gone();
     }
 
     fn soloist_status(&self, status: Status) {
@@ -884,7 +884,7 @@ impl Spotify {
         if !playing_ours {
             return;
         }
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         match status {
             Status::Playing => {
                 // Muted for the end, then paused and played again: heard
@@ -906,7 +906,7 @@ impl Spotify {
         }
     }
 
-    /// Soloist paused by itself at the end of Gatefold's song (nothing in
+    /// Soloist paused by itself at the end of Jewelcase's song (nothing in
     /// its queue and no autoplay): not a pause, the song is over.
     fn soloist_paused_at_end(&self) -> bool {
         let state = &self.imp().stream.borrow().soloist;
@@ -924,12 +924,12 @@ impl Spotify {
             .as_ref()
             .filter(|c| state.wanted.as_deref() == Some(c.uri.as_str()))
             .and_then(|c| c.duration_ms)
-            .unwrap_or_else(|| GatefoldApplication::get().player().duration());
+            .unwrap_or_else(|| JewelcaseApplication::get().player().duration());
         let position = state.position.map_or(0, |p| p.now());
         duration > 0 && position + PAUSED_AT_END_MS >= duration
     }
 
-    /// Gatefold's song is over: Soloist is paused before it plays anything
+    /// Jewelcase's song is over: Soloist is paused before it plays anything
     /// else, and the queue moves on.
     fn soloist_ended(&self, why: &str) {
         let uri = self.imp().stream.borrow().soloist.wanted.clone();
@@ -959,33 +959,33 @@ impl Spotify {
             soloist.pause();
         }
         self.restore_volume();
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         if runaway {
             // Songs ending as soon as they start: something keeps Soloist
             // moving on. Stopped instead of racing through the queue.
             tracing::warn!("Soloist's songs keep ending right away; stopping");
             player.stop();
             self.message(&gettext(
-                "Soloist kept skipping songs, so Gatefold stopped. Play again to go on.",
+                "Soloist kept skipping songs, so Jewelcase stopped. Play again to go on.",
             ));
             return;
         }
         player.stream_note(StreamNote::Ended);
     }
 
-    /// Gatefold's next song: a Spotify song (handed over while the
+    /// Jewelcase's next song: a Spotify song (handed over while the
     /// current one plays) or not (Soloist is muted at the very end).
     pub(super) fn soloist_next(&self, uri: Option<&str>) {
         self.imp().stream.borrow_mut().soloist.next_uri = uri.map(str::to_owned);
         self.schedule_end();
     }
 
-    /// Gatefold's next Spotify song goes into Soloist's queue while the
+    /// Jewelcase's next Spotify song goes into Soloist's queue while the
     /// current one plays: it follows seamlessly, and the Spotify app's
-    /// Next skips to it (taken as Gatefold's next song, `soloist_item`).
+    /// Next skips to it (taken as Jewelcase's next song, `soloist_item`).
     /// Soloist's queue can't be emptied, so only one song at a time, and
-    /// none while a song Gatefold didn't need after all is still in it
-    /// (Soloist plays that one first; it ends Gatefold's song).
+    /// none while a song Jewelcase didn't need after all is still in it
+    /// (Soloist plays that one first; it ends Jewelcase's song).
     fn hand_over_next(&self) {
         let next = {
             let state = &self.imp().stream.borrow().soloist;
@@ -1024,7 +1024,7 @@ impl Spotify {
                 .as_ref()
                 .filter(|c| c.uri == wanted)
                 .and_then(|c| c.duration_ms)
-                .unwrap_or_else(|| GatefoldApplication::get().player().duration());
+                .unwrap_or_else(|| JewelcaseApplication::get().player().duration());
             let position = state.position.map_or(0, |p| p.now());
             if duration == 0 || position >= duration {
                 return;
@@ -1042,9 +1042,9 @@ impl Spotify {
                 #[weak(rename_to = spotify)]
                 self,
                 move || {
-                    // Muted unless Soloist goes on with Gatefold's next
+                    // Muted unless Soloist goes on with Jewelcase's next
                     // song: a local one follows, or Soloist would play a
-                    // song Gatefold doesn't want (or its own).
+                    // song Jewelcase doesn't want (or its own).
                     let follows = {
                         let state = &spotify.imp().stream.borrow().soloist;
                         state.next_uri.is_some()
@@ -1071,7 +1071,7 @@ impl Spotify {
         }
     }
 
-    /// Soloist's volume: Gatefold's, lowered by the offset for Spotify's
+    /// Soloist's volume: Jewelcase's, lowered by the offset for Spotify's
     /// louder songs (Preferences, default −4 dB).
     fn soloist_percent(&self, volume: f64) -> u8 {
         let offset_db = f64::from(self.settings().int("spotify-volume-offset"));
@@ -1081,7 +1081,7 @@ impl Spotify {
             .clamp(0.0, 100.0) as u8
     }
 
-    /// Gatefold gives up on the song; Soloist is paused, so it doesn't
+    /// Jewelcase gives up on the song; Soloist is paused, so it doesn't
     /// start it later after all.
     fn soloist_unavailable(&self) {
         {
@@ -1093,7 +1093,7 @@ impl Spotify {
             self.imp().stream.borrow_mut().soloist.pause_asked = Some(std::time::Instant::now());
             soloist.pause();
         }
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .player()
             .stream_note(StreamNote::Unavailable);
     }
@@ -1110,7 +1110,7 @@ impl Spotify {
             self.schedule_end();
             return;
         }
-        // Gatefold's Next to the song already in Soloist's queue: Soloist
+        // Jewelcase's Next to the song already in Soloist's queue: Soloist
         // skips to it, so it isn't left in the queue to play again later.
         let skip = {
             let mut stream = self.imp().stream.borrow_mut();
@@ -1134,7 +1134,7 @@ impl Spotify {
         }
         self.restore_volume();
         let Some(soloist) = self.soloist() else {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .player()
                 .stream_note(StreamNote::Unavailable);
             return;
@@ -1167,7 +1167,7 @@ impl Spotify {
         if !active {
             soloist.activate();
         }
-        // Gatefold's queue decides what comes next, not Soloist's.
+        // Jewelcase's queue decides what comes next, not Soloist's.
         if prepare {
             soloist.set_shuffle(false);
             soloist.set_repeat(Repeat::Off);
@@ -1222,7 +1222,7 @@ impl Spotify {
         }
     }
 
-    /// Gatefold plays something else: Soloist pauses.
+    /// Jewelcase plays something else: Soloist pauses.
     pub(super) fn soloist_stop_playback(&self) {
         self.restore_volume();
         // Not left in Soloist's queue (paused right after).
@@ -1282,7 +1282,7 @@ impl Spotify {
         state
             .device_name
             .clone()
-            .or_else(|| (state.source == Some("gatefold")).then(|| own_device_name().to_owned()))
+            .or_else(|| (state.source == Some("jewelcase")).then(|| own_device_name().to_owned()))
     }
 
     // The receiver (§9.4) ---------------------------------------------------
@@ -1291,7 +1291,7 @@ impl Spotify {
         self.imp().stream.borrow().soloist.receiving
     }
 
-    /// Soloist plays something Gatefold didn't start: show it, and let the
+    /// Soloist plays something Jewelcase didn't start: show it, and let the
     /// controls steer it.
     fn receiver_check(&self) {
         if self.soloist_receiving() {
@@ -1314,7 +1314,7 @@ impl Spotify {
     }
 
     fn start_receiver(&self) {
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         if player.is_remote() {
             // Already steering a Spotify device; that one is in charge.
             return;
@@ -1342,7 +1342,7 @@ impl Spotify {
         self.receiver_show(true);
     }
 
-    /// Back to Gatefold's own playback; `pause` stops Soloist.
+    /// Back to Jewelcase's own playback; `pause` stops Soloist.
     pub(super) fn end_receiver(&self, pause: bool) {
         {
             let mut stream = self.imp().stream.borrow_mut();
@@ -1352,7 +1352,7 @@ impl Spotify {
         if pause && let Some(soloist) = self.soloist() {
             soloist.pause();
         }
-        GatefoldApplication::get().player().leave_remote();
+        JewelcaseApplication::get().player().leave_remote();
     }
 
     /// Shows Soloist's song (as the library song when it matches), its
@@ -1376,7 +1376,7 @@ impl Spotify {
                     Some(item) => spotify.track_objects(&[as_track(item)]).await.pop(),
                     None => None,
                 };
-                let player = GatefoldApplication::get().player();
+                let player = JewelcaseApplication::get().player();
                 if !spotify.soloist_receiving() || !player.is_remote() {
                     return;
                 }
@@ -1392,7 +1392,7 @@ impl Spotify {
                     },
                 );
                 if queue {
-                    let next: Vec<gatefold_spotify::Track> =
+                    let next: Vec<jewelcase_spotify::Track> =
                         upcoming.iter().map(as_track).collect();
                     let mut tracks: Vec<_> = track.into_iter().collect();
                     tracks.extend(spotify.track_objects(&next).await);
@@ -1447,7 +1447,7 @@ impl Spotify {
                         let mut added = 0u32;
                         for id in ids {
                             let uri = match spotify.find_version(id).await {
-                                Ok(gatefold_core::db::SpotifyVersion {
+                                Ok(jewelcase_core::db::SpotifyVersion {
                                     uri: Some(uri), ..
                                 }) => uri,
                                 Ok(_) => continue,
@@ -1481,14 +1481,14 @@ impl Spotify {
                     }
                 ));
             }
-            // Gatefold plays its own queue: the receiver ends.
+            // Jewelcase plays its own queue: the receiver ends.
             RemoteCommand::Play(_) => {
                 glib::idle_add_local_once(glib::clone!(
                     #[weak(rename_to = spotify)]
                     self,
                     move || {
                         spotify.end_receiver(true);
-                        GatefoldApplication::get().player().play_current();
+                        JewelcaseApplication::get().player().play_current();
                     }
                 ));
             }
@@ -1501,7 +1501,7 @@ impl Spotify {
         let Some(soloist) = self.soloist() else {
             return false;
         };
-        // Gatefold's own Spotify song gives way; the receiver shows this.
+        // Jewelcase's own Spotify song gives way; the receiver shows this.
         if self.imp().stream.borrow().soloist.wanted.is_some() {
             self.soloist_release();
         }
@@ -1524,8 +1524,8 @@ impl Spotify {
 }
 
 /// Soloist's song in the shape remote mode shows.
-fn as_track(item: &Item) -> gatefold_spotify::Track {
-    gatefold_spotify::Track {
+fn as_track(item: &Item) -> jewelcase_spotify::Track {
+    jewelcase_spotify::Track {
         uri: item.uri.clone(),
         id: item.uri.strip_prefix("spotify:track:").map(str::to_owned),
         name: item.name.clone(),
@@ -1534,7 +1534,7 @@ fn as_track(item: &Item) -> gatefold_spotify::Track {
         duration_ms: item.duration_ms.unwrap_or(0),
         image_url: item.cover_url.clone(),
         is_playable: true,
-        ..gatefold_spotify::Track::default()
+        ..jewelcase_spotify::Track::default()
     }
 }
 

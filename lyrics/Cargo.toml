@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-lyrics"
-description = "Gatefold's lyrics: LRC parsing, embedded and sidecar sources, dual-line pairing"
+name = "jewelcase-lyrics"
+description = "Jewelcase's lyrics: LRC parsing, embedded and sidecar sources, dual-line pairing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

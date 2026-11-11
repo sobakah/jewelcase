@@ -20,10 +20,10 @@ pub use model::{
 const API: &str = "https://api.spotify.com/v1";
 
 /// Development aid: debug builds talk to a local stand-in for Spotify
-/// when `GATEFOLD_SPOTIFY_TEST_SERVER` is set (e.g. `http://127.0.0.1:8975`).
+/// when `JEWELCASE_SPOTIFY_TEST_SERVER` is set (e.g. `http://127.0.0.1:8975`).
 pub(crate) fn test_server() -> Option<String> {
     if cfg!(debug_assertions) {
-        std::env::var("GATEFOLD_SPOTIFY_TEST_SERVER").ok()
+        std::env::var("JEWELCASE_SPOTIFY_TEST_SERVER").ok()
     } else {
         None
     }
@@ -124,7 +124,7 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(Duration::from_secs(20)))
-        .user_agent("Gatefold ( https://github.com/sobakah/gatefold )")
+        .user_agent("Jewelcase ( https://github.com/sobakah/jewelcase )")
         .build()
         .into()
 }

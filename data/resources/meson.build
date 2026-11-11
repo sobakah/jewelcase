@@ -18,8 +18,8 @@ blueprints = custom_target(
 gresource_bundle = custom_target(
   'gresource',
   input: 'resources.gresource.xml',
-  output: 'gatefold.gresource',
-  depfile: 'gatefold.gresource.d',
+  output: 'jewelcase.gresource',
+  depfile: 'jewelcase.gresource.d',
   depends: blueprints,
   command: [
     glib_compile_resources,

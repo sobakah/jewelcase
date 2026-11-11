@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="gatefold">
+<schemalist gettext-domain="jewelcase">
   <schema id="@app_id@" path="@schema_path@">
     <key name="window-width" type="i">
       <default>1100</default>
@@ -31,7 +31,7 @@
       </choices>
       <default>"last"</default>
       <summary>View at start</summary>
-      <description>The library view Gatefold opens with; “last” is the one used last.</description>
+      <description>The library view Jewelcase opens with; “last” is the one used last.</description>
     </key>
     <key name="style" type="s">
       <choices>
@@ -41,7 +41,7 @@
       </choices>
       <default>"follow"</default>
       <summary>Light or dark style</summary>
-      <description>“follow” follows the desktop; where it doesn't tell (some desktops), a GTK theme whose name says dark makes Gatefold dark too.</description>
+      <description>“follow” follows the desktop; where it doesn't tell (some desktops), a GTK theme whose name says dark makes Jewelcase dark too.</description>
     </key>
     <key name="tile-size" type="i">
       <range min="120" max="280"/>
@@ -60,8 +60,8 @@
         <choice value="duration"/>
       </choices>
       <default>"custom"</default>
-      <summary>Default sort of Gatefold's playlists</summary>
-      <description>How the songs of a playlist made in Gatefold are listed while no sort was chosen for it: “custom” is its own order; “added-reversed” the newest first.</description>
+      <summary>Default sort of Jewelcase's playlists</summary>
+      <description>How the songs of a playlist made in Jewelcase are listed while no sort was chosen for it: “custom” is its own order; “added-reversed” the newest first.</description>
     </key>
     <key name="spotify-playlist-sort" type="s">
       <choices>
@@ -144,12 +144,12 @@
     <key name="check-updates" type="b">
       <default>true</default>
       <summary>Check for updates</summary>
-      <description>When Gatefold starts and twice a day: new Gatefold releases (the RPM build), new Soloist builds and soloistd releases. Nothing is installed without asking.</description>
+      <description>When Jewelcase starts and twice a day: new Jewelcase releases (the RPM build), new Soloist builds and soloistd releases. Nothing is installed without asking.</description>
     </key>
     <key name="skipped-updates" type="as">
       <default>[]</default>
       <summary>Updates skipped</summary>
-      <description>Updates the user chose to skip, e.g. “gatefold:v0.2.2” or “soloist:&lt;ETag&gt;”; not offered again.</description>
+      <description>Updates the user chose to skip, e.g. “jewelcase:v0.2.2” or “soloist:&lt;ETag&gt;”; not offered again.</description>
     </key>
     <key name="statistics-period" type="s">
       <choices>
@@ -304,7 +304,7 @@
       </choices>
       <default>"soloist"</default>
       <summary>How Spotify songs stream</summary>
-      <description>soloist: Spotify’s official Soloist (a running one, e.g. from soloistd, or started by Gatefold). librespot: unofficial, only in builds with the spotify-stream feature.</description>
+      <description>soloist: Spotify’s official Soloist (a running one, e.g. from soloistd, or started by Jewelcase). librespot: unofficial, only in builds with the spotify-stream feature.</description>
     </key>
     <key name="spotify-blocked" type="a{sx}">
       <default>{}</default>
@@ -340,7 +340,7 @@
     <key name="spotify-playlists" type="b">
       <default>true</default>
       <summary>Show Spotify playlists</summary>
-      <description>The user’s Spotify playlists next to the local ones. Playlists published from Gatefold stay linked either way.</description>
+      <description>The user’s Spotify playlists next to the local ones. Playlists published from Jewelcase stay linked either way.</description>
     </key>
     <key name="show-remaining-time" type="b">
       <default>false</default>

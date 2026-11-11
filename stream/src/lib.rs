@@ -1,6 +1,6 @@
 //! Spotify streaming (CONCEPT.md §9.4), optional and unofficial: librespot
 //! plays Spotify tracks, and its decoded samples go into a GStreamer
-//! pipeline with Gatefold's volume, on the same output as local songs.
+//! pipeline with Jewelcase's volume, on the same output as local songs.
 //!
 //! librespot needs Tokio; it runs on its own thread. Everything here can be
 //! called from the GTK main thread and never blocks it.

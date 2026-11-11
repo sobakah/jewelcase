@@ -7,13 +7,13 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gatefold_core::db::{PlayEntry, Ranked, Summary, Trend};
-use gatefold_core::library::covers::CoverSize;
 use gettextrs::{gettext, ngettext};
 use gtk::{gio, glib};
+use jewelcase_core::db::{PlayEntry, Ranked, Summary, Trend};
+use jewelcase_core::library::covers::CoverSize;
 
 use super::CoverImage;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::covers;
 use crate::format;
@@ -282,7 +282,7 @@ struct Span {
 
 /// The period's time, or the page saying there's nothing logged yet.
 fn span(period: Period) -> Result<Span, gtk::Widget> {
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     let library = app.library();
     let now = glib::DateTime::now_local().unwrap_or_else(|_| glib::DateTime::now_utc().unwrap());
     let (first_play, logging) = (
@@ -311,7 +311,7 @@ fn span(period: Period) -> Result<Span, gtk::Widget> {
 /// The plays from `from` to `to` (and as long before), on a worker
 /// thread with its own connection; `None` when there are none.
 fn load(period: Period, from: i64, to: i64) -> Option<Loaded> {
-    let db = match gatefold_core::db::Database::open(&crate::config::database_path()) {
+    let db = match jewelcase_core::db::Database::open(&crate::config::database_path()) {
         Ok(db) => db,
         Err(err) => {
             tracing::warn!("Cannot read the play log: {err}");
@@ -404,7 +404,7 @@ fn build(
         #[weak]
         dialog,
         move |_| {
-            let app = GatefoldApplication::get();
+            let app = JewelcaseApplication::get();
             let tracks = app.library().tracks(&ids);
             let objects: Vec<TrackObject> = ids
                 .iter()
@@ -757,7 +757,7 @@ fn tile(
 }
 
 fn artist_tiles(dialog: &adw::Dialog, artists: &[Ranked], since: &str) -> gtk::Widget {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let flow = flow_box();
     for ranked in artists {
         let id = library
@@ -783,7 +783,7 @@ fn artist_tiles(dialog: &adw::Dialog, artists: &[Ranked], since: &str) -> gtk::W
 }
 
 fn album_tiles(dialog: &adw::Dialog, albums: &[Ranked], since: &str) -> gtk::Widget {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let ids: Vec<i64> = albums.iter().map(|a| a.track_id).collect();
     let tracks = library.tracks(&ids);
     let flow = flow_box();
@@ -826,7 +826,7 @@ fn short_plays(plays: u32) -> String {
 }
 
 fn song_list(songs: &[Ranked], since: &str) -> gtk::Widget {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let ids: Vec<i64> = songs.iter().map(|s| s.track_id).collect();
     let tracks = Rc::new(RefCell::new(library.tracks(&ids)));
     let list = gtk::ListBox::builder()
@@ -877,7 +877,7 @@ fn song_list(songs: &[Ranked], since: &str) -> gtk::Widget {
         let Some(track) = tracks.borrow().get(&id).cloned() else {
             return;
         };
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .player()
             .play_now(TrackObject::new(track));
         if let Some(dialog) = list

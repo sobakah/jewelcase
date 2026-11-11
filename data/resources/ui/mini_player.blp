@@ -3,7 +3,7 @@ using Adw 1;
 // Bottom bar of the library window (CONCEPT.md §4.1): a compact, centered
 // player. Clicking the arrow (or swiping up) opens the full player; the
 // queue button opens the queue as a card.
-template $GatefoldMiniPlayer: Adw.Bin {
+template $JewelcaseMiniPlayer: Adw.Bin {
   styles [
     "mini-player",
   ]
@@ -19,7 +19,7 @@ template $GatefoldMiniPlayer: Adw.Bin {
     Gtk.Box {
       spacing: 12;
 
-      $GatefoldCoverImage cover {
+      $JewelcaseCoverImage cover {
         min-size: 68;
         natural-size: 68;
         valign: center;
@@ -34,7 +34,7 @@ template $GatefoldMiniPlayer: Adw.Bin {
           spacing: 6;
 
           Gtk.Image spotify_mark {
-            icon-name: "gatefold-spotify-symbolic";
+            icon-name: "jewelcase-spotify-symbolic";
             pixel-size: 14;
             valign: center;
             visible: false;
@@ -72,7 +72,7 @@ template $GatefoldMiniPlayer: Adw.Bin {
       Gtk.Box {
         hexpand: true;
 
-        $GatefoldVisualizer {
+        $JewelcaseVisualizer {
           slot: 7;
           fill: 0.6;
           min-bars: 4;

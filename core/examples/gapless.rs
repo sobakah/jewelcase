@@ -1,11 +1,11 @@
 //! Plays the last seconds of one file, then a second one gaplessly, and
-//! prints the position. Add GATEFOLD_SILENT=1 to play into a fakesink and
+//! prints the position. Add JEWELCASE_SILENT=1 to play into a fakesink and
 //! NO_SEEK=1 to play A from the start.
-//! `cargo run -p gatefold-core --example gapless -- A B`
+//! `cargo run -p jewelcase-core --example gapless -- A B`
 
 use std::time::Duration;
 
-use gatefold_core::playback::{Player, PlayerEvent, file_uri};
+use jewelcase_core::playback::{Player, PlayerEvent, file_uri};
 
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();

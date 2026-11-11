@@ -5,11 +5,11 @@ use adw::prelude::*;
 use gettextrs::gettext;
 use gtk::glib;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::objects::ArtistObject;
 
 pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let artist_id = artist.id();
 
     let entry = gtk::SearchEntry::builder()
@@ -90,7 +90,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
             let this = searches.get();
             let searches = searches.clone();
             glib::spawn_future_local(async move {
-                let library = GatefoldApplication::get().library();
+                let library = JewelcaseApplication::get().library();
                 let candidates = library.search_artists(&name).await;
                 if searches.get() != this {
                     return;
@@ -122,7 +122,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist: &ArtistObject) {
                                 #[weak]
                                 dialog,
                                 move |_| {
-                                    GatefoldApplication::get()
+                                    JewelcaseApplication::get()
                                         .library()
                                         .lookup_again(artist_id, Some(&mbid));
                                     dialog.close();

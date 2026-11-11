@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-metadata"
-description = "Gatefold's online artist metadata: MusicBrainz, Wikidata, Wikimedia Commons, fanart.tv"
+name = "jewelcase-metadata"
+description = "Jewelcase's online artist metadata: MusicBrainz, Wikidata, Wikimedia Commons, fanart.tv"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

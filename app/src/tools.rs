@@ -8,7 +8,7 @@
 //!
 //! cdport 1.3.0 and lyrembed 1.2.0 and newer are reached over D-Bus when
 //! their service is set up (`--install-dbus-service`): their runs then
-//! belong to them, not to Gatefold, and it's the only way from a Flatpak.
+//! belong to them, not to Jewelcase, and it's the only way from a Flatpak.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
@@ -18,15 +18,15 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_tools::editor::{self, Editor};
-use gatefold_tools::lyrembed::AutoResult;
-use gatefold_tools::{Version, cdport, find_program, lyrembed, parse_version};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_tools::editor::{self, Editor};
+use jewelcase_tools::lyrembed::AutoResult;
+use jewelcase_tools::{Version, cdport, find_program, lyrembed, parse_version};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::library_folders;
 
@@ -109,7 +109,7 @@ impl<C: Default> Companion<C> {
 }
 
 impl<C> Companion<C> {
-    /// Gatefold can use it.
+    /// Jewelcase can use it.
     pub fn usable(&self) -> bool {
         self.dbus || self.program.is_some()
     }
@@ -181,10 +181,10 @@ impl PageTool {
 /// A tool with a page, while it runs.
 #[derive(Debug, Clone)]
 pub enum PageRun {
-    /// Started by Gatefold: it ends with Gatefold.
+    /// Started by Jewelcase: it ends with Jewelcase.
     Process(gio::Subprocess),
     /// A run of the tool's D-Bus service (its ID; empty until the service
-    /// answered): it runs on without Gatefold.
+    /// answered): it runs on without Jewelcase.
     Service(String),
 }
 
@@ -266,7 +266,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Tools {
-        const NAME: &'static str = "GatefoldTools";
+        const NAME: &'static str = "JewelcaseTools";
         type Type = super::Tools;
     }
 
@@ -479,7 +479,7 @@ impl Tools {
                 #[weak(rename_to = tools)]
                 self,
                 move |line| {
-                    if let Some(url) = gatefold_tools::page_url(line)
+                    if let Some(url) = jewelcase_tools::page_url(line)
                         && tools.imp().page_url.borrow().is_none()
                     {
                         tools.imp().page_url.replace(Some(url));
@@ -497,7 +497,7 @@ impl Tools {
         self.page_opened(tool, PageRun::Process(process), None, status, job);
         if tool == PageTool::Lyrembed {
             // lyrembed's editor plays the track in the page (§10.0).
-            GatefoldApplication::get().player().pause();
+            JewelcaseApplication::get().player().pause();
         }
     }
 
@@ -532,7 +532,7 @@ impl Tools {
         imp.page_status.replace(String::new());
         self.notify_page_status();
         tracing::info!("{tool:?} page closed with {code}");
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         library.rescan();
         if tool == PageTool::Cdport {
             // cdport may have saved new settings (its folders on a first
@@ -560,7 +560,7 @@ impl Tools {
             ("replace", &gettext("_Close and Open New")),
         ]);
         dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
-        let window = GatefoldApplication::get().active_window();
+        let window = JewelcaseApplication::get().active_window();
         dialog.choose_future(window.as_ref()).await == "replace"
     }
 
@@ -597,11 +597,11 @@ impl Tools {
             return;
         };
         // Development aid for headless tests: never touch the real browser.
-        if std::env::var_os("GATEFOLD_NO_BROWSER").is_some() {
+        if std::env::var_os("JEWELCASE_NO_BROWSER").is_some() {
             tracing::info!("Tool page (not opened): {url}");
             return;
         }
-        let window = GatefoldApplication::get().active_window();
+        let window = JewelcaseApplication::get().active_window();
         gtk::UriLauncher::new(&url).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
             if let Err(err) = result {
                 tracing::warn!("Cannot open the tool page: {err}");
@@ -649,9 +649,9 @@ impl Tools {
         self.imp().page_run.borrow().is_some()
     }
 
-    /// The running page tool ends when Gatefold quits (one Gatefold
+    /// The running page tool ends when Jewelcase quits (one Jewelcase
     /// started; runs over D-Bus go on).
-    pub fn page_needs_gatefold(&self) -> bool {
+    pub fn page_needs_jewelcase(&self) -> bool {
         matches!(*self.imp().page_run.borrow(), Some(PageRun::Process(_)))
     }
 
@@ -756,7 +756,7 @@ impl Tools {
     }
 
     /// lyrembed's FetchLyrics. It only searches inside the music folder;
-    /// elsewhere the program does it, when Gatefold sees it.
+    /// elsewhere the program does it, when Jewelcase sees it.
     fn fetch_lyrics_over_dbus(&self, dir: PathBuf, program: Option<PathBuf>) {
         let options = glib::VariantDict::new(None).end();
         let args =
@@ -818,7 +818,7 @@ impl Tools {
             AutoResult::Other(_) => gettext("lyrembed failed"),
         };
         self.message(&text);
-        GatefoldApplication::get().library().rescan();
+        JewelcaseApplication::get().library().rescan();
     }
 
     // cdport (§10.2) ---------------------------------------------------------
@@ -1023,7 +1023,7 @@ impl Tools {
     }
 
     /// cdport's `Import` or `EditTags` (the page's address comes back,
-    /// Gatefold opens it) or lyrembed's `OpenPage` (it opens the page
+    /// Jewelcase opens it) or lyrembed's `OpenPage` (it opens the page
     /// itself).
     fn start_service_run(&self, tool: PageTool, folder: Option<PathBuf>, job: PageJob) {
         let status = match job {
@@ -1033,7 +1033,7 @@ impl Tools {
         self.page_opened(tool, PageRun::Service(String::new()), None, status, job);
         if tool == PageTool::Lyrembed {
             // lyrembed's editor plays the track in the page (§10.0).
-            GatefoldApplication::get().player().pause();
+            JewelcaseApplication::get().player().pause();
         }
         let generation = self.imp().page_generation.get();
         let folder_text = folder
@@ -1183,7 +1183,7 @@ impl Tools {
         }
     }
 
-    /// A page run still going (Gatefold was restarted meanwhile): shown in
+    /// A page run still going (Jewelcase was restarted meanwhile): shown in
     /// the status bar again, so it can be shown and stopped.
     fn adopt_service_run(&self, tool: PageTool) {
         if self.page_running() {
@@ -1646,7 +1646,7 @@ pub fn lyrembed_aliases_over_dbus() -> Option<String> {
     let reply =
         call_service_sync(PageTool::Lyrembed, "ArtistAliases", None, "(aas)", 20_000).ok()?;
     let (groups,) = reply.get::<(Vec<Vec<String>>,)>()?;
-    Some(gatefold_core::library::artists::Aliases::groups_to_text(
+    Some(jewelcase_core::library::artists::Aliases::groups_to_text(
         &groups,
     ))
 }

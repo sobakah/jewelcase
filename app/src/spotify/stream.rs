@@ -1,7 +1,7 @@
 //! Streaming Spotify songs that aren't in the library (CONCEPT.md §9.4),
 //! with one of two backends: Spotify Soloist (official, `soloist.rs`) or
 //! librespot (unofficial, only built with the `spotify-stream` feature;
-//! its songs play through Gatefold's own output).
+//! its songs play through Jewelcase's own output).
 //!
 //! Callers use the `stream_*` methods and don't need their own `cfg`s.
 
@@ -9,7 +9,7 @@ use gtk::gio::prelude::*;
 use gtk::subclass::prelude::*;
 
 use super::Spotify;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 
 /// What the stream tells the player.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum StreamNote {
 #[derive(Default)]
 pub struct StreamState {
     #[cfg(feature = "spotify-stream")]
-    player: Option<gatefold_stream::StreamPlayer>,
+    player: Option<jewelcase_stream::StreamPlayer>,
     ready: bool,
     /// The login just happened in the browser: store it once connected.
     #[cfg(feature = "spotify-stream")]
@@ -46,7 +46,7 @@ impl Spotify {
     /// Downloads the covers of streamed songs into the cover cache, in the
     /// background (their cache keys are known in advance).
     pub fn fetch_stream_covers(&self, ids: Vec<i64>) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let wanted: Vec<String> = library
             .db()
             .and_then(|db| db.stream_covers(&ids).ok())
@@ -55,14 +55,14 @@ impl Spotify {
             .map(|(_, url)| url)
             .collect();
         fetch_covers(wanted, || {
-            GatefoldApplication::get().player().covers_arrived()
+            JewelcaseApplication::get().player().covers_arrived()
         });
     }
 }
 
 /// The cache key of a Spotify image's cover.
 pub fn image_cover_key(url: &str) -> String {
-    gatefold_core::library::covers::cover_key('s', url.as_bytes())
+    jewelcase_core::library::covers::cover_key('s', url.as_bytes())
 }
 
 /// Downloads Spotify images in batches; `done` gets each batch's URLs
@@ -77,13 +77,13 @@ pub fn fetch_covers_in_batches(urls: Vec<String>, done: impl Fn(Vec<String>) + '
             let chunk = chunk.to_vec();
             let ready = gtk::gio::spawn_blocking(move || {
                 let covers =
-                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
                 chunk
                     .into_iter()
                     .filter(|url| {
                         let key = image_cover_key(url);
                         covers.has(&key)
-                            || gatefold_spotify::download_image(url)
+                            || jewelcase_spotify::download_image(url)
                                 .ok()
                                 .is_some_and(|data| covers.generate(&key, data).is_ok())
                     })
@@ -107,14 +107,14 @@ pub fn fetch_covers(urls: Vec<String>, done: impl FnOnce() + 'static) {
     gtk::glib::spawn_future_local(async move {
         let made = gtk::gio::spawn_blocking(move || {
             let covers =
-                gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
             let mut made = 0;
             for url in urls {
                 let key = image_cover_key(&url);
                 if covers.has(&key) {
                     continue;
                 }
-                match gatefold_spotify::download_image(&url) {
+                match jewelcase_spotify::download_image(&url) {
                     Ok(data) => made += usize::from(covers.generate(&key, data).is_ok()),
                     Err(err) => tracing::info!("Cannot load a cover: {err}"),
                 }
@@ -146,11 +146,11 @@ mod enabled {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    use gatefold_spotify::Error;
-    use gatefold_spotify::auth::{self, Callback, Pkce};
-    use gatefold_stream::{Credentials, Login, StreamEvent, StreamPlayer};
     use gettextrs::gettext;
     use gtk::glib;
+    use jewelcase_spotify::Error;
+    use jewelcase_spotify::auth::{self, Callback, Pkce};
+    use jewelcase_stream::{Credentials, Login, StreamEvent, StreamPlayer};
 
     use super::*;
     use crate::spotify::keyring;
@@ -182,14 +182,14 @@ mod enabled {
         /// Turns streaming on: a login in the browser (as librespot, the
         /// only client Spotify lets stream), then connects.
         pub(super) async fn librespot_enable(&self) {
-            let callback = match Callback::bind_at(gatefold_stream::REDIRECT_PORT, "/login") {
+            let callback = match Callback::bind_at(jewelcase_stream::REDIRECT_PORT, "/login") {
                 Ok(callback) => callback,
                 Err(err) => {
                     tracing::warn!("Cannot listen for the streaming login: {err}");
                     // Translators: {} is a port number.
                     self.message(
                         &gettext("Port {} is in use; close what uses it and try again")
-                            .replace("{}", &gatefold_stream::REDIRECT_PORT.to_string()),
+                            .replace("{}", &jewelcase_stream::REDIRECT_PORT.to_string()),
                     );
                     let _ = self.settings().set_boolean("spotify-streaming", false);
                     return;
@@ -198,9 +198,9 @@ mod enabled {
             self.set_stream_status("connecting");
             let pkce = Pkce::new();
             let url = auth::authorize_url_for(
-                gatefold_stream::CLIENT_ID,
-                gatefold_stream::REDIRECT_URI,
-                gatefold_stream::SCOPES,
+                jewelcase_stream::CLIENT_ID,
+                jewelcase_stream::REDIRECT_URI,
+                jewelcase_stream::SCOPES,
                 &pkce,
             );
             super::super::open_in_browser(&url);
@@ -227,9 +227,9 @@ mod enabled {
             self.settings().disconnect(watch);
             let token = match code {
                 Ok(code) => gtk::gio::spawn_blocking(move || {
-                    gatefold_spotify::exchange_code_for(
-                        gatefold_stream::CLIENT_ID,
-                        gatefold_stream::REDIRECT_URI,
+                    jewelcase_spotify::exchange_code_for(
+                        jewelcase_stream::CLIENT_ID,
+                        jewelcase_stream::REDIRECT_URI,
                         &code,
                         &pkce,
                     )
@@ -258,7 +258,7 @@ mod enabled {
             }
             self.imp().stream.borrow_mut().player = None;
             self.set_stream_status("off");
-            GatefoldApplication::get().player().stream_gone();
+            JewelcaseApplication::get().player().stream_gone();
             if forget && let Err(err) = keyring::delete_stream().await {
                 tracing::info!("Cannot remove the streaming login: {err}");
             }
@@ -267,10 +267,10 @@ mod enabled {
         fn stream_connect(&self, login: Login, fresh: bool) {
             self.set_stream_status("connecting");
             if self.imp().stream.borrow().player.is_none() {
-                let silent = std::env::var_os("GATEFOLD_SILENT").is_some();
+                let silent = std::env::var_os("JEWELCASE_SILENT").is_some();
                 match StreamPlayer::new(silent) {
                     Ok((player, events)) => {
-                        player.set_volume(GatefoldApplication::get().player().volume());
+                        player.set_volume(JewelcaseApplication::get().player().volume());
                         self.imp().stream.borrow_mut().player = Some(player);
                         glib::spawn_future_local(glib::clone!(
                             #[weak(rename_to = spotify)]
@@ -297,7 +297,7 @@ mod enabled {
         }
 
         async fn stream_event(&self, event: StreamEvent) {
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             match event {
                 StreamEvent::Connected(credentials) => {
                     tracing::info!("Streaming as {}", credentials.username);
@@ -379,7 +379,7 @@ impl Spotify {
     }
     pub(super) async fn librespot_disable(&self, _forget: bool) {}
     pub(super) fn librespot_load(&self, _uri: &str, _start_ms: u64, _play: bool) {
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .player()
             .stream_note(StreamNote::Unavailable);
     }
@@ -441,7 +441,7 @@ impl Spotify {
 
     /// Another backend was chosen: the old one stops, the new one starts.
     pub async fn switch_stream_backend(&self) {
-        GatefoldApplication::get().player().stream_gone();
+        JewelcaseApplication::get().player().stream_gone();
         self.soloist_stop();
         self.librespot_disable(false).await;
         self.set_stream_status("off");
@@ -455,7 +455,7 @@ impl Spotify {
         }
     }
 
-    /// Gatefold's next song while a song streams: a Spotify song (fetched
+    /// Jewelcase's next song while a song streams: a Spotify song (fetched
     /// or handed over early) or none (a local song follows).
     pub fn stream_next(&self, uri: Option<&str>) {
         match self.stream_backend() {

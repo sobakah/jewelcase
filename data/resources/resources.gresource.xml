@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
-  <gresource prefix="/io/github/sobakah/Gatefold">
+  <gresource prefix="/io/github/sobakah/Jewelcase">
     <!-- Compiled from .blp by blueprint-compiler into the build directory. -->
     <file compressed="true" preprocess="xml-stripblanks">ui/window.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">ui/album_panel.ui</file>
@@ -13,10 +13,10 @@
     <!-- Loaded automatically by AdwApplication. -->
     <file compressed="true">style.css</file>
     <!-- Added to the icon theme automatically by GtkApplication. -->
-    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/gatefold-lyrics-symbolic.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/gatefold-smart-shuffle-symbolic.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/gatefold-spotify-symbolic.svg</file>
-    <!-- Every other symbolic icon Gatefold uses, copied from adwaita-icon-theme
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-lyrics-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-smart-shuffle-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-spotify-symbolic.svg</file>
+    <!-- Every other symbolic icon Jewelcase uses, copied from adwaita-icon-theme
          51 (LGPL-3.0-only OR CC-BY-SA-3.0). The desktop's icon theme wins where
          it has the icon; these fill its gaps (KDE's Breeze lacks several), so
          no theme shows a missing icon. A test (icons.rs) keeps the list

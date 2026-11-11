@@ -7,16 +7,16 @@ version = "0.4.1"
 edition = "2024"
 rust-version = "1.95"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/sobakah/gatefold"
+repository = "https://github.com/sobakah/jewelcase"
 
 [workspace.dependencies]
-gatefold-core = { path = "core" }
-gatefold-lyrics = { path = "lyrics" }
-gatefold-metadata = { path = "metadata" }
-gatefold-soloist = { path = "soloist" }
-gatefold-spotify = { path = "spotify" }
-gatefold-stream = { path = "stream" }
-gatefold-tools = { path = "tools" }
+jewelcase-core = { path = "core" }
+jewelcase-lyrics = { path = "lyrics" }
+jewelcase-metadata = { path = "metadata" }
+jewelcase-soloist = { path = "soloist" }
+jewelcase-spotify = { path = "spotify" }
+jewelcase-stream = { path = "stream" }
+jewelcase-tools = { path = "tools" }
 
 adw = { package = "libadwaita", version = "0.9", features = ["v1_10"] }
 gettext-rs = { version = "0.8", features = ["gettext-system"] }
@@ -24,7 +24,7 @@ gtk = { package = "gtk4", version = "0.11", features = ["v4_24"] }
 async-channel = "2"
 base64 = "0.23"
 # Audio analysis for "sounds similar" (CONCEPT.md §7). Only the analysis:
-# Gatefold decodes with GStreamer, like playback; GPL-3.0-only.
+# Jewelcase decodes with GStreamer, like playback; GPL-3.0-only.
 bliss-audio = { version = "0.13", default-features = false, features = ["analysis"] }
 glycin = { version = "4", default-features = false, features = ["async-io"] }
 gst = { package = "gstreamer", version = "0.25", features = ["v1_28"] }

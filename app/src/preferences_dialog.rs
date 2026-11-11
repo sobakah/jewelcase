@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_core::library::folders::{FolderError, validate_new_folder};
 use gettextrs::gettext;
 use gtk::{gio, glib};
+use jewelcase_core::library::folders::{FolderError, validate_new_folder};
 
 use crate::config::APP_ID;
 use crate::library_folders;
@@ -27,7 +27,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/preferences_dialog.ui")]
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/preferences_dialog.ui")]
     pub struct PreferencesDialog {
         #[template_child]
         pub folders_group: TemplateChild<adw::PreferencesGroup>,
@@ -121,7 +121,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PreferencesDialog {
-        const NAME: &'static str = "GatefoldPreferencesDialog";
+        const NAME: &'static str = "JewelcasePreferencesDialog";
         type Type = super::PreferencesDialog;
         type ParentType = adw::PreferencesDialog;
 
@@ -278,7 +278,7 @@ mod imp {
                     ANALYSIS_MODES.get(index).map(|m| m.to_variant())
                 })
                 .build();
-            let analyzer = crate::application::GatefoldApplication::get().analyzer();
+            let analyzer = crate::application::JewelcaseApplication::get().analyzer();
             let row = self.analysis_progress_row.get();
             let bar = self.analysis_bar.get();
             let pause = self.analysis_pause.get();
@@ -400,7 +400,7 @@ mod imp {
                 .build();
 
             let obj = self.obj();
-            let tools = crate::application::GatefoldApplication::get().tools();
+            let tools = crate::application::JewelcaseApplication::get().tools();
             let detected = tools.connect_local(
                 "detected",
                 false,
@@ -472,7 +472,7 @@ impl PreferencesDialog {
                 #[weak(rename_to = preferences)]
                 self,
                 move |_, _| {
-                    let library = crate::application::GatefoldApplication::get().library();
+                    let library = crate::application::JewelcaseApplication::get().library();
                     let deleted = library.db().map(|mut db| db.delete_play_log());
                     match deleted {
                         Some(Ok(())) => {
@@ -599,7 +599,7 @@ impl PreferencesDialog {
     /// set it up (§10.0).
     fn show_tools(&self) {
         let imp = self.imp();
-        let detected = crate::application::GatefoldApplication::get()
+        let detected = crate::application::JewelcaseApplication::get()
             .tools()
             .detected();
         let flatpak = crate::config::is_flatpak();
@@ -759,7 +759,7 @@ fn bind_choice(
         .build();
 }
 
-/// A setup group: what to do so Gatefold can use a tool.
+/// A setup group: what to do so Jewelcase can use a tool.
 struct Setup {
     title: String,
     description: String,
@@ -786,7 +786,7 @@ impl Step {
 }
 
 /// "Version 1.3.0 · /home/…/cdport", or less when unknown.
-fn found(version: Option<gatefold_tools::Version>, path: Option<&Path>) -> String {
+fn found(version: Option<jewelcase_tools::Version>, path: Option<&Path>) -> String {
     match (version, path) {
         // Translators: {version} and {path} of a found program.
         (Some(version), Some(path)) => gettext("Version {version} · {path}")
@@ -801,7 +801,7 @@ fn found(version: Option<gatefold_tools::Version>, path: Option<&Path>) -> Strin
 
 /// Installing pipx and putting its programs on PATH (the first steps).
 fn pipx_steps() -> Vec<Step> {
-    use gatefold_tools::{PIPX_INSTALL_COMMAND, PIPX_PATH_COMMAND};
+    use jewelcase_tools::{PIPX_INSTALL_COMMAND, PIPX_PATH_COMMAND};
     vec![
         Step::command(
             gettext("Install pipx (on Fedora; other distributions have a pipx package too)"),
@@ -849,7 +849,7 @@ fn companion_status<C>(tool: &crate::tools::Companion<C>, name: &str, flatpak: b
 
 /// The steps to install lyrembed or set up its D-Bus service.
 fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Setup> {
-    use gatefold_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND, UPGRADE_COMMAND};
+    use jewelcase_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND, UPGRADE_COMMAND};
     const ACTION: &str = "app.set-up-lyrembed";
     let has_program = lyrembed.program.is_some();
     if lyrembed.dbus {
@@ -881,12 +881,12 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
         return Some(Setup {
             title: gettext("Update lyrembed"),
             description: gettext(
-                "From version 1.2.0 on, lyrembed has a D-Bus interface: its pages and lyrics searches keep running when Gatefold closes, and the Flatpak version of Gatefold can use it too. Until you update, Gatefold uses it as before. Its page offers the update too.",
+                "From version 1.2.0 on, lyrembed has a D-Bus interface: its pages and lyrics searches keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use it too. Until you update, Jewelcase uses it as before. Its page offers the update too.",
             ),
             steps: vec![
                 Step::command(gettext("Update lyrembed"), UPGRADE_COMMAND),
                 Step::command(
-                    gettext("Let Gatefold reach lyrembed through D-Bus"),
+                    gettext("Let Jewelcase reach lyrembed through D-Bus"),
                     SERVICE_COMMAND,
                 ),
             ],
@@ -896,7 +896,7 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
         return Some(Setup {
             title: gettext("Set Up lyrembed’s D-Bus Service"),
             description: gettext(
-                "Recommended. Gatefold starts lyrembed directly now. Through D-Bus, its pages and lyrics searches keep running when Gatefold closes, and the Flatpak version of Gatefold can use lyrembed too.",
+                "Recommended. Jewelcase starts lyrembed directly now. Through D-Bus, its pages and lyrics searches keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use lyrembed too.",
             ),
             steps: vec![set_up_step(
                 has_program,
@@ -908,11 +908,11 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
     }
     let description = if flatpak {
         gettext(
-            "In a terminal on your computer (not inside Gatefold). Gatefold, as a Flatpak, reaches lyrembed through its D-Bus service, the last step.",
+            "In a terminal on your computer (not inside Jewelcase). Jewelcase, as a Flatpak, reaches lyrembed through its D-Bus service, the last step.",
         )
     } else {
         gettext(
-            "In a terminal. Gatefold finds lyrembed by itself afterwards, or press Look Again above.",
+            "In a terminal. Jewelcase finds lyrembed by itself afterwards, or press Look Again above.",
         )
     };
     Some(Setup {
@@ -926,7 +926,7 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
                     INSTALL_COMMAND,
                 ),
                 Step::command(
-                    gettext("Let Gatefold reach lyrembed through D-Bus"),
+                    gettext("Let Jewelcase reach lyrembed through D-Bus"),
                     SERVICE_COMMAND,
                 ),
             ],
@@ -936,10 +936,10 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
 }
 
 fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
-    use gatefold_tools::cdport::{INSTALL_COMMAND, REMOVE_OLD_COMMAND, SERVICE_COMMAND};
+    use jewelcase_tools::cdport::{INSTALL_COMMAND, REMOVE_OLD_COMMAND, SERVICE_COMMAND};
     let service_step = || {
         Step::command(
-            gettext("Let Gatefold reach cdport through D-Bus"),
+            gettext("Let Jewelcase reach cdport through D-Bus"),
             SERVICE_COMMAND,
         )
     };
@@ -972,7 +972,7 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
         return Some(Setup {
             title: gettext("Update to cdport"),
             description: gettext(
-                "cdimport is now called cdport. From version 1.3.0 on, it has a D-Bus interface: imports keep running when Gatefold closes, and the Flatpak version of Gatefold can use it too. Until you update, Gatefold uses cdimport as before.",
+                "cdimport is now called cdport. From version 1.3.0 on, it has a D-Bus interface: imports keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use it too. Until you update, Jewelcase uses cdimport as before.",
             ),
             steps: vec![
                 Step::command(
@@ -988,7 +988,7 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
         return Some(Setup {
             title: gettext("Set Up cdport’s D-Bus Service"),
             description: gettext(
-                "Recommended. Gatefold starts cdport directly now. Through D-Bus, imports keep running when Gatefold closes, and the Flatpak version of Gatefold can use cdport too.",
+                "Recommended. Jewelcase starts cdport directly now. Through D-Bus, imports keep running when Jewelcase closes, and the Flatpak version of Jewelcase can use cdport too.",
             ),
             steps: vec![set_up_step(
                 cdport.program.is_some(),
@@ -1000,11 +1000,11 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
     }
     let description = if flatpak {
         gettext(
-            "In a terminal on your computer (not inside Gatefold). Gatefold, as a Flatpak, reaches cdport through its D-Bus service, the last step. cdport offers to install cyanrip, which it rips with, when it first needs it.",
+            "In a terminal on your computer (not inside Jewelcase). Jewelcase, as a Flatpak, reaches cdport through its D-Bus service, the last step. cdport offers to install cyanrip, which it rips with, when it first needs it.",
         )
     } else {
         gettext(
-            "In a terminal. cdport offers to install cyanrip, which it rips with, when it first needs it. Gatefold finds cdport by itself afterwards, or press Look Again above.",
+            "In a terminal. cdport offers to install cyanrip, which it rips with, when it first needs it. Jewelcase finds cdport by itself afterwards, or press Look Again above.",
         )
     };
     Some(Setup {
@@ -1022,7 +1022,7 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
 }
 
 /// `<tool> --install-dbus-service`, with a button (`action`) where
-/// Gatefold can run it (the program is visible: not from a Flatpak).
+/// Jewelcase can run it (the program is visible: not from a Flatpak).
 fn set_up_step(has_program: bool, text: String, command: &str, action: &'static str) -> Step {
     Step {
         text,

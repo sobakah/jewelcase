@@ -12,12 +12,12 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use gatefold_lyrics::Lyrics;
 use gtk::gio;
 use gtk::glib;
+use jewelcase_lyrics::Lyrics;
 use serde_json::{Value, json};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::metadata::now;
 
 /// The helper stops after this long without requests.
@@ -51,7 +51,10 @@ static HELPER: Mutex<Option<Helper>> = Mutex::new(None);
 /// Whether the installed lyrembed can do it (Preferences → Integrations
 /// says so too).
 pub fn available() -> bool {
-    GatefoldApplication::get().tools().detected().can_romanize()
+    JewelcaseApplication::get()
+        .tools()
+        .detected()
+        .can_romanize()
 }
 
 /// These lyrics with romanization under their non-Latin lines, from the
@@ -61,7 +64,7 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
     if !lyrics.needs_romanization() || !available() {
         return None;
     }
-    let tools = GatefoldApplication::get().tools();
+    let tools = JewelcaseApplication::get().tools();
     // Over D-Bus (`None`), or the program.
     let program = if tools.detected().lyrembed.dbus {
         None
@@ -70,11 +73,11 @@ pub async fn romanize(lyrics: &Lyrics) -> Option<Lyrics> {
     };
     let text = lyrics.to_text();
     let hint = lyrics.han_hint();
-    let key = gatefold_core::library::covers::cover_key(
+    let key = jewelcase_core::library::covers::cover_key(
         'r',
         format!("{}\n{text}", hint.unwrap_or("")).as_bytes(),
     );
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     if let Some(cached) = library
         .db()
         .and_then(|db| db.romanized(&key, now() - MISS_AGAIN_S).ok().flatten())
@@ -218,7 +221,7 @@ fn start(program: &Path) -> Result<Helper, String> {
 }
 
 /// Stops the helper after a while without requests (checked every
-/// minute), and when Gatefold quits.
+/// minute), and when Jewelcase quits.
 pub fn watch_idle() {
     glib::timeout_add_seconds_local(60, || {
         stop_if(|helper| helper.last_used.elapsed() >= IDLE);
@@ -248,7 +251,7 @@ mod tests {
     fn fake_lyrembed(name: &str, script: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let path =
-            std::env::temp_dir().join(format!("gatefold-test-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("jewelcase-test-{}-{name}", std::process::id()));
         std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path

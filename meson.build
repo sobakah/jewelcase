@@ -1,5 +1,5 @@
 project(
-  'gatefold',
+  'jewelcase',
   version: '0.4.1',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 1.4.0',
@@ -9,7 +9,7 @@ fs = import('fs')
 i18n = import('i18n')
 gnome = import('gnome')
 
-base_id = 'io.github.sobakah.Gatefold'
+base_id = 'io.github.sobakah.Jewelcase'
 
 # Fail early with a clear message when development headers are missing.
 dependency('gtk4', version: '>= 4.24')

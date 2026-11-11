@@ -1,7 +1,7 @@
 //! Formatting of durations and audio details for display.
 
-use gatefold_core::library::tags::TrackTags;
 use gettextrs::{gettext, ngettext};
+use jewelcase_core::library::tags::TrackTags;
 
 /// 3:12, or 1:02:03 for long tracks.
 pub fn duration(ms: u64) -> String {

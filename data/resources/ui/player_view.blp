@@ -4,7 +4,7 @@ using Adw 1;
 // Wide: lyrics and queue panes sit next to the cover. Narrow: a pane
 // replaces the cover, and a small cover moves into the header. The
 // breakpoints are added in player_view.rs.
-template $GatefoldPlayerView: Adw.Bin {
+template $JewelcasePlayerView: Adw.Bin {
   styles [
     "player-view",
   ]
@@ -41,7 +41,7 @@ template $GatefoldPlayerView: Adw.Bin {
             spacing: 9;
             visible: false;
 
-            $GatefoldCoverImage header_cover {
+            $JewelcaseCoverImage header_cover {
               min-size: 28;
               natural-size: 28;
               kind: "grid";
@@ -187,7 +187,7 @@ template $GatefoldPlayerView: Adw.Bin {
           }
 
           [cover]
-          $GatefoldCoverImage cover {
+          $JewelcaseCoverImage cover {
             min-size: 96;
             natural-size: 520;
             kind: "player";
@@ -195,13 +195,13 @@ template $GatefoldPlayerView: Adw.Bin {
           }
 
           [lyrics]
-          $GatefoldLyricsView lyrics_view {
+          $JewelcaseLyricsView lyrics_view {
             width-request: 320;
             hexpand: true;
           }
 
           [queue]
-          $GatefoldQueueView queue_view {
+          $JewelcaseQueueView queue_view {
             width-request: 340;
           }
 
@@ -214,7 +214,7 @@ template $GatefoldPlayerView: Adw.Bin {
             Adw.Clamp {
               maximum-size: 420;
 
-              child: $GatefoldVisualizer visualizer {
+              child: $JewelcaseVisualizer visualizer {
                 bars: 32;
                 height-request: 36;
               };
@@ -231,7 +231,7 @@ template $GatefoldPlayerView: Adw.Bin {
                   spacing: 8;
 
                   Gtk.Image spotify_mark {
-                    icon-name: "gatefold-spotify-symbolic";
+                    icon-name: "jewelcase-spotify-symbolic";
                     pixel-size: 20;
                     valign: center;
                     visible: false;
@@ -350,7 +350,7 @@ template $GatefoldPlayerView: Adw.Bin {
                 valign: center;
 
                 child: Adw.ButtonContent lyrics_content {
-                  icon-name: "gatefold-lyrics-symbolic";
+                  icon-name: "jewelcase-lyrics-symbolic";
                   label: _("Lyrics");
                 };
 

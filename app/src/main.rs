@@ -12,6 +12,7 @@ mod mpris;
 mod objects;
 mod player;
 mod preferences_dialog;
+mod rename;
 mod romanizer;
 mod spotify;
 mod style;
@@ -26,18 +27,20 @@ use gettextrs::{LocaleCategory, bind_textdomain_codeset, bindtextdomain, gettext
 use gtk::{gio, glib};
 use tracing_subscriber::EnvFilter;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::{GETTEXT_PACKAGE, LOCALEDIR};
 
-static GRESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/gatefold.gresource"));
+static GRESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/jewelcase.gresource"));
 
 fn main() -> glib::ExitCode {
     init_i18n();
     init_logging();
+    // Gatefold's library, settings and folders, before anything opens them.
+    rename::migrate();
     register_resources();
 
-    glib::set_application_name(&gettext("Gatefold"));
-    GatefoldApplication::new().run()
+    glib::set_application_name(&gettext("Jewelcase"));
+    JewelcaseApplication::new().run()
 }
 
 fn init_i18n() {
@@ -53,20 +56,20 @@ fn init_i18n() {
     }
 }
 
-/// Log level comes from `GATEFOLD_LOG` (e.g. `GATEFOLD_LOG=debug`).
+/// Log level comes from `JEWELCASE_LOG` (e.g. `JEWELCASE_LOG=debug`).
 fn init_logging() {
     // librespot's own messages say why streaming fails (CONCEPT.md §9.4).
     let default = if config::is_development() {
-        "gatefold=debug,gatefold_core=debug,gatefold_stream=debug,librespot_core=info,\
+        "jewelcase=debug,jewelcase_core=debug,jewelcase_stream=debug,librespot_core=info,\
          librespot_playback=info,librespot_audio=info,librespot_metadata=info"
     } else {
         // Soloist's decisions too: they explain a song cut short. And
         // the hourly count of Spotify requests: it explains a block.
-        "warn,gatefold::spotify::soloist=info,gatefold_spotify=info"
+        "warn,jewelcase::spotify::soloist=info,jewelcase_spotify=info"
     };
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_env("GATEFOLD_LOG").unwrap_or_else(|_| EnvFilter::new(default)),
+            EnvFilter::try_from_env("JEWELCASE_LOG").unwrap_or_else(|_| EnvFilter::new(default)),
         )
         .init();
 }
@@ -74,7 +77,7 @@ fn init_logging() {
 fn register_resources() {
     assert!(
         !GRESOURCE.is_empty(),
-        "built without resources; build Gatefold with Meson (see README.md)"
+        "built without resources; build Jewelcase with Meson (see README.md)"
     );
     let resource = gio::Resource::from_data(&glib::Bytes::from_static(GRESOURCE))
         .expect("embedded resource bundle is valid");

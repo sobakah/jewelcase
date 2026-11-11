@@ -67,3 +67,16 @@ install_data(
   install_dir: datadir / 'icons' / 'hicolor' / 'symbolic' / 'apps',
   rename: application_id + '-symbolic.svg',
 )
+# Flatpak's check of exported icons: it recognizes an SVG by `<svg` near
+# the file's start, so nothing long (a comment) may come before it.
+flatpak_validate_icon = find_program('flatpak-validate-icon',
+  dirs: ['/usr/libexec', '/usr/lib/flatpak'], required: false)
+if flatpak_validate_icon.found()
+  foreach icon : [
+    'icons/hicolor/scalable/apps' / base_id + '.svg',
+    'icons/hicolor/symbolic/apps' / base_id + '-symbolic.svg',
+  ]
+    test('validate-icon-' + icon.split('/')[2], flatpak_validate_icon,
+      args: ['--sandbox', '512', '512', files(icon)])
+  endforeach
+endif

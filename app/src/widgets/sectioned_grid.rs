@@ -17,7 +17,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use super::{ShelfItem, tile_content};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 
 /// The grid's padding on each side (style.css: .album-grid, .artist-grid).
@@ -81,7 +81,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SectionedGrid {
-        const NAME: &'static str = "GatefoldSectionedGrid";
+        const NAME: &'static str = "JewelcaseSectionedGrid";
         type Type = super::SectionedGrid;
         type ParentType = gtk::Widget;
     }
@@ -450,7 +450,7 @@ mod row_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for GridRow {
-        const NAME: &'static str = "GatefoldGridRow";
+        const NAME: &'static str = "JewelcaseGridRow";
         type Type = super::GridRow;
         type ParentType = gtk::Widget;
     }
@@ -688,7 +688,7 @@ impl GridRow {
         permission.append(
             &gtk::Label::builder()
                 .label(gettext(
-                    "Connect to Spotify again to allow Gatefold to read your saved albums and followed artists.",
+                    "Connect to Spotify again to allow Jewelcase to read your saved albums and followed artists.",
                 ))
                 .wrap(true)
                 .xalign(0.0)
@@ -703,7 +703,7 @@ impl GridRow {
             .css_classes(["pill"])
             .build();
         button.connect_clicked(|_| {
-            let spotify = GatefoldApplication::get().spotify();
+            let spotify = JewelcaseApplication::get().spotify();
             glib::spawn_future_local(async move { spotify.connect().await });
         });
         permission.append(&button);

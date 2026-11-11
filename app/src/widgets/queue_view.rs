@@ -6,12 +6,12 @@
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_core::queue::Origin;
 use gettextrs::{gettext, ngettext};
 use gtk::{gdk, glib};
+use jewelcase_core::queue::Origin;
 
 use super::CoverImage;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::format;
 use crate::objects::{QueueEntry, TrackObject};
 use crate::player::Player;
@@ -35,7 +35,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for QueueView {
-        const NAME: &'static str = "GatefoldQueueView";
+        const NAME: &'static str = "JewelcaseQueueView";
         type Type = super::QueueView;
         type ParentType = adw::Bin;
     }
@@ -60,7 +60,7 @@ glib::wrapper! {
 impl QueueView {
     fn setup(&self) {
         let imp = self.imp();
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         self.add_css_class("queue-view");
 
         let header = gtk::Box::builder()
@@ -353,12 +353,12 @@ impl QueueView {
 
     fn fill_history(&self) {
         let imp = self.imp();
-        let tracks = GatefoldApplication::get().player().history(HISTORY_SHOWN);
+        let tracks = JewelcaseApplication::get().player().history(HISTORY_SHOWN);
         imp.history.remove_all();
         for track in &tracks {
             imp.history.append(&history_row(track));
         }
-        let remote = GatefoldApplication::get().player().is_remote();
+        let remote = JewelcaseApplication::get().player().is_remote();
         imp.history_box.set_visible(!tracks.is_empty() && !remote);
         imp.history_tracks.replace(tracks);
     }
@@ -484,7 +484,7 @@ fn song_menu(
         action.connect_activate(move |_, _| activate());
         actions.add_action(&action);
     };
-    let player = GatefoldApplication::get().player();
+    let player = JewelcaseApplication::get().player();
     if let SongRow::Queued(offset) = kind {
         add(
             "remove",

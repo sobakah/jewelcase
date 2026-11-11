@@ -9,9 +9,9 @@
 
 use std::sync::OnceLock;
 
-use gatefold_spotify::Tokens;
 use gtk::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_spotify::Tokens;
 
 /// Keyring attributes; `application` is the app ID (CONCEPT.md §12), so
 /// the development build and the installed app keep their own logins;
@@ -21,8 +21,9 @@ fn attributes(kind: &'static str) -> [(&'static str, &'static str); 2] {
 }
 
 /// Where both builds kept their logins before: read once by the
-/// development build when it has none of its own.
-const SHARED_APPLICATION: &str = "io.github.sobakah.Gatefold";
+/// development build when it has none of its own (under the old name too).
+const SHARED_APPLICATIONS: [&str; 2] =
+    ["io.github.sobakah.Jewelcase", "io.github.sobakah.Gatefold"];
 
 /// Once the build has keyring entries of its own (or chose to have none,
 /// by disconnecting), the shared ones aren't looked at again.
@@ -30,6 +31,23 @@ fn own_entry_marker(kind: &str) -> std::path::PathBuf {
     gtk::glib::user_data_dir()
         .join(crate::config::APP_ID)
         .join(format!("keyring-own-{kind}"))
+}
+
+/// Once Gatefold's entries (the old name, `rename.rs`) were looked for, or
+/// the build saved or removed its own, they aren't looked at again (a
+/// disconnect mustn't bring the old login back).
+fn renamed_marker(kind: &str) -> std::path::PathBuf {
+    gtk::glib::user_data_dir()
+        .join(crate::config::APP_ID)
+        .join(format!("keyring-renamed-{kind}"))
+}
+
+fn mark_renamed(kind: &str) {
+    let marker = renamed_marker(kind);
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(marker, b"");
 }
 
 fn mark_own_entry(kind: &str) {
@@ -51,7 +69,7 @@ pub async fn load() -> Result<Option<Tokens>, String> {
 }
 
 pub async fn save(tokens: Tokens) -> Result<(), String> {
-    save_text(LOGIN, "Gatefold: Spotify login", tokens.to_json()).await
+    save_text(LOGIN, "Jewelcase: Spotify login", tokens.to_json()).await
 }
 
 pub async fn delete() -> Result<(), String> {
@@ -63,7 +81,7 @@ pub async fn load_stream() -> Result<Option<String>, String> {
 }
 
 pub async fn save_stream(text: String) -> Result<(), String> {
-    save_text(STREAM_LOGIN, "Gatefold: Spotify streaming login", text).await
+    save_text(STREAM_LOGIN, "Jewelcase: Spotify streaming login", text).await
 }
 
 pub async fn delete_stream() -> Result<(), String> {
@@ -91,24 +109,45 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
                 String::from_utf8_lossy(secret.as_bytes()).into_owned(),
             ));
         }
-        if crate::config::APP_ID == SHARED_APPLICATION || own_entry_marker(kind).exists() {
+        // This build's login under the old name (Gatefold): copied once;
+        // Gatefold's entry stays as it was.
+        let former = crate::rename::former_app_id();
+        let renamed = renamed_marker(kind);
+        if !renamed.exists() {
+            let old = keyring
+                .search_items(&[("application", former.as_str()), ("kind", kind)])
+                .await?;
+            mark_renamed(kind);
+            if let Some(item) = old.first() {
+                let text = String::from_utf8_lossy(item.secret().await?.as_bytes()).into_owned();
+                let label = item.label().await?.replacen("Gatefold", "Jewelcase", 1);
+                keyring
+                    .create_item(&label, &attributes(kind), text.clone(), true)
+                    .await?;
+                return Ok(Some(text));
+            }
+        }
+        if SHARED_APPLICATIONS.contains(&crate::config::APP_ID) || own_entry_marker(kind).exists() {
             return Ok(None);
         }
         // The development build's login from before it had its own: copied,
         // the installed app's stays as it is.
-        let shared = keyring
-            .search_items(&[("application", SHARED_APPLICATION), ("kind", kind)])
-            .await?;
-        let Some(item) = shared.first() else {
-            return Ok(None);
-        };
-        let text = String::from_utf8_lossy(item.secret().await?.as_bytes()).into_owned();
-        let label = item.label().await?;
-        keyring
-            .create_item(&label, &attributes(kind), text.clone(), true)
-            .await?;
-        mark_own_entry(kind);
-        Ok(Some(text))
+        for shared in SHARED_APPLICATIONS {
+            let found = keyring
+                .search_items(&[("application", shared), ("kind", kind)])
+                .await?;
+            let Some(item) = found.first() else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(item.secret().await?.as_bytes()).into_owned();
+            let label = item.label().await?;
+            keyring
+                .create_item(&label, &attributes(kind), text.clone(), true)
+                .await?;
+            mark_own_entry(kind);
+            return Ok(Some(text));
+        }
+        Ok(None)
     })
     .await?;
     Ok(found)
@@ -116,6 +155,7 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
 
 async fn save_text(kind: &'static str, label: &'static str, text: String) -> Result<(), String> {
     mark_own_entry(kind);
+    mark_renamed(kind);
     if uses_file().await {
         return file_store::save(kind, &text);
     }
@@ -140,6 +180,7 @@ async fn save_text(kind: &'static str, label: &'static str, text: String) -> Res
 
 async fn delete_kind(kind: &'static str) -> Result<(), String> {
     mark_own_entry(kind);
+    mark_renamed(kind);
     // Both places, whatever the other says: a login must not survive a
     // disconnect because one of them failed.
     let in_file = file_store::delete(kind);
@@ -342,7 +383,7 @@ mod file_store {
 
 /// Headless tests (build-aux/headless.sh) never touch a keyring.
 pub fn disabled() -> bool {
-    std::env::var_os("GATEFOLD_NO_KEYRING").is_some()
+    std::env::var_os("JEWELCASE_NO_KEYRING").is_some()
 }
 
 async fn run<T, F, Fut>(job: F) -> Result<T, String>
@@ -352,7 +393,7 @@ where
     Fut: std::future::Future<Output = oo7::Result<T>>,
 {
     if disabled() {
-        return Err("the keyring is disabled (GATEFOLD_NO_KEYRING)".into());
+        return Err("the keyring is disabled (JEWELCASE_NO_KEYRING)".into());
     }
     gio::spawn_blocking(move || futures_lite::future::block_on(job()))
         .await
@@ -368,7 +409,7 @@ pub async fn load_soloist_key() -> Result<Option<String>, String> {
 }
 
 pub async fn save_soloist_key(key: String) -> Result<(), String> {
-    save_text(SOLOIST_KEY, "Gatefold: Spotify Soloist API key", key).await
+    save_text(SOLOIST_KEY, "Jewelcase: Spotify Soloist API key", key).await
 }
 
 pub async fn delete_soloist_key() -> Result<(), String> {

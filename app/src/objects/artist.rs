@@ -1,8 +1,8 @@
 use std::cell::OnceCell;
 
-use gatefold_core::db::Artist;
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::Artist;
 
 mod imp {
     use super::*;
@@ -14,7 +14,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for ArtistObject {
-        const NAME: &'static str = "GatefoldArtistObject";
+        const NAME: &'static str = "JewelcaseArtistObject";
         type Type = super::ArtistObject;
     }
 

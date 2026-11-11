@@ -1,8 +1,8 @@
 use std::cell::OnceCell;
 
-use gatefold_core::db::Track;
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::Track;
 
 mod imp {
     use super::*;
@@ -14,7 +14,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for TrackObject {
-        const NAME: &'static str = "GatefoldTrackObject";
+        const NAME: &'static str = "JewelcaseTrackObject";
         type Type = super::TrackObject;
     }
 

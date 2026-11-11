@@ -1,7 +1,7 @@
 # Files with translatable strings, relative to the project root.
-data/io.github.sobakah.Gatefold.desktop.in.in
-data/io.github.sobakah.Gatefold.gschema.xml.in
-data/io.github.sobakah.Gatefold.metainfo.xml.in.in
+data/io.github.sobakah.Jewelcase.desktop.in.in
+data/io.github.sobakah.Jewelcase.gschema.xml.in
+data/io.github.sobakah.Jewelcase.metainfo.xml.in.in
 data/resources/ui/album_panel.blp
 data/resources/ui/artist_page.blp
 data/resources/ui/mini_player.blp

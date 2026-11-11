@@ -2,9 +2,9 @@
 //! covers) and name (CONCEPT.md §4.1).
 
 use adw::prelude::*;
-use gatefold_core::library::covers::CoverSize;
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::library::covers::CoverSize;
 
 use super::CoverImage;
 use crate::covers;
@@ -37,7 +37,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for ArtistTile {
-        const NAME: &'static str = "GatefoldArtistTile";
+        const NAME: &'static str = "JewelcaseArtistTile";
         type Type = super::ArtistTile;
         type ParentType = gtk::Box;
     }

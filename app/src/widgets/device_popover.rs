@@ -2,14 +2,14 @@
 //! device, and the banner while a device plays.
 
 use adw::prelude::*;
-use gatefold_spotify::Device;
 use gettextrs::gettext;
 use gtk::glib;
+use jewelcase_spotify::Device;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 
 pub fn setup(button: &gtk::MenuButton, popover: &gtk::Popover, banner: &adw::Banner) {
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     let spotify = app.spotify();
     let player = app.player();
 
@@ -64,9 +64,9 @@ pub fn setup(button: &gtk::MenuButton, popover: &gtk::Popover, banner: &adw::Ban
 
 /// Back to this computer; a library song continues here where it was.
 fn continue_here() {
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     let player = app.player();
-    // From Soloist's playback back to Gatefold's own queue, paused.
+    // From Soloist's playback back to Jewelcase's own queue, paused.
     if player.remote_receiver() {
         app.spotify().play_here(true);
         return;
@@ -105,7 +105,7 @@ fn fill(popover: &gtk::Popover) {
         .css_classes(["boxed-list"])
         .build();
     content.append(&list);
-    let player = GatefoldApplication::get().player();
+    let player = JewelcaseApplication::get().player();
     let here = device_row(
         "computer-symbolic",
         &gettext("This Computer"),
@@ -138,7 +138,7 @@ fn fill(popover: &gtk::Popover) {
         #[weak]
         content,
         async move {
-            let spotify = GatefoldApplication::get().spotify();
+            let spotify = JewelcaseApplication::get().spotify();
             let result = spotify.devices().await;
             loading.set_visible(false);
             let devices = match result {
@@ -155,7 +155,7 @@ fn fill(popover: &gtk::Popover) {
                 )));
             }
             let current = spotify.remote_device_id();
-            // Soloist streams for Gatefold: it's "This Computer" already.
+            // Soloist streams for Jewelcase: it's "This Computer" already.
             let own = spotify.soloist_device_name();
             for device in devices
                 .into_iter()
@@ -186,7 +186,7 @@ fn fill(popover: &gtk::Popover) {
 
 fn play_on(device: Device) {
     glib::spawn_future_local(async move {
-        GatefoldApplication::get().spotify().play_on(device).await;
+        JewelcaseApplication::get().spotify().play_on(device).await;
     });
 }
 

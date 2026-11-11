@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-tools"
-description = "Gatefold's companion tools: lyrembed, cdimport and tag editors (detection, commands, configs)"
+name = "jewelcase-tools"
+description = "Jewelcase's companion tools: lyrembed, cdimport and tag editors (detection, commands, configs)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

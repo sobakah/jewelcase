@@ -6,7 +6,7 @@ use adw::subclass::prelude::*;
 use gettextrs::gettext;
 use gtk::{gio, glib};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::{self, APP_ID};
 use crate::objects::PlaylistObject;
 use crate::objects::{AlbumObject, ArtistObject};
@@ -19,8 +19,8 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/window.ui")]
-    pub struct GatefoldWindow {
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/window.ui")]
+    pub struct JewelcaseWindow {
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
         /// Albums of the current cdport import already announced: each
@@ -113,9 +113,9 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for GatefoldWindow {
-        const NAME: &'static str = "GatefoldWindow";
-        type Type = super::GatefoldWindow;
+    impl ObjectSubclass for JewelcaseWindow {
+        const NAME: &'static str = "JewelcaseWindow";
+        type Type = super::JewelcaseWindow;
         type ParentType = adw::ApplicationWindow;
 
         fn class_init(klass: &mut Self::Class) {
@@ -167,7 +167,7 @@ mod imp {
                 "win.show-spotify-album",
                 Some(glib::VariantTy::STRING),
                 |win, _, param| {
-                    let spotify = GatefoldApplication::get().spotify();
+                    let spotify = JewelcaseApplication::get().spotify();
                     if let Some(album) = param
                         .and_then(|p| p.get::<String>())
                         .and_then(|id| spotify.stored_album(&id))
@@ -189,7 +189,7 @@ mod imp {
                 "win.show-album",
                 Some(glib::VariantTy::INT64),
                 |win, _, param| {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     if let Some(album) = param
                         .and_then(|p| p.get::<i64>())
                         .and_then(|id| library.album_group(id))
@@ -204,7 +204,7 @@ mod imp {
                 "win.show-playlist",
                 Some(glib::VariantTy::INT64),
                 |win, _, param| {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     if let Some(playlist) = param
                         .and_then(|p| p.get::<i64>())
                         .and_then(|id| library.playlist(id))
@@ -222,7 +222,7 @@ mod imp {
                 )
                 .await;
                 if let Some(name) = name {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     if let Some(playlist) = library
                         .create_playlist(&name, &[])
                         .and_then(|id| library.playlist(id))
@@ -270,7 +270,7 @@ mod imp {
         }
     }
 
-    impl ObjectImpl for GatefoldWindow {
+    impl ObjectImpl for JewelcaseWindow {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
@@ -298,7 +298,7 @@ mod imp {
                 obj.setup_screenshot();
             }
 
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             obj.insert_action_group("player", Some(player.actions()));
             obj.setup_shortcuts();
             obj.setup_albums();
@@ -325,9 +325,9 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for GatefoldWindow {}
+    impl WidgetImpl for JewelcaseWindow {}
 
-    impl WindowImpl for GatefoldWindow {
+    impl WindowImpl for JewelcaseWindow {
         fn close_request(&self) -> glib::Propagation {
             if let Err(err) = self.obj().save_window_state() {
                 tracing::warn!("Failed to save window state: {err}");
@@ -336,19 +336,19 @@ mod imp {
         }
     }
 
-    impl ApplicationWindowImpl for GatefoldWindow {}
-    impl AdwApplicationWindowImpl for GatefoldWindow {}
+    impl ApplicationWindowImpl for JewelcaseWindow {}
+    impl AdwApplicationWindowImpl for JewelcaseWindow {}
 }
 
 glib::wrapper! {
-    pub struct GatefoldWindow(ObjectSubclass<imp::GatefoldWindow>)
+    pub struct JewelcaseWindow(ObjectSubclass<imp::JewelcaseWindow>)
         @extends gtk::Widget, gtk::Window, gtk::ApplicationWindow, adw::ApplicationWindow,
         @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible, gtk::Buildable,
                     gtk::ConstraintTarget, gtk::Native, gtk::Root, gtk::ShortcutManager;
 }
 
-impl GatefoldWindow {
-    pub fn new(app: &GatefoldApplication) -> Self {
+impl JewelcaseWindow {
+    pub fn new(app: &JewelcaseApplication) -> Self {
         glib::Object::builder().property("application", app).build()
     }
 
@@ -379,7 +379,7 @@ impl GatefoldWindow {
 
     fn setup_albums(&self) {
         let imp = self.imp();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
 
         imp.album_sort
             .replace(self.settings().string("album-sort").into());
@@ -406,7 +406,7 @@ impl GatefoldWindow {
                     return true;
                 };
                 let album = item.downcast_ref::<AlbumObject>().expect("albums");
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .library()
                     .genres_of(album)
                     .iter()
@@ -515,7 +515,7 @@ impl GatefoldWindow {
 
     fn setup_artists(&self) {
         let imp = self.imp();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
 
         imp.artist_grid.setup(
             library.artists(),
@@ -530,7 +530,7 @@ impl GatefoldWindow {
                 ) {
                     tile.bind(artist);
                     // Lookups run lazily, for artists that are shown (§8).
-                    GatefoldApplication::get().library().request_lookup(artist);
+                    JewelcaseApplication::get().library().request_lookup(artist);
                 }
             },
             glib::clone!(
@@ -562,7 +562,7 @@ impl GatefoldWindow {
 
     fn setup_playlists(&self) {
         let imp = self.imp();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         // Own playlists, and below them, collapsed by default, followed
         // Spotify playlists (Spotify doesn't show their songs, §9.5).
         let settings = self.settings();
@@ -614,7 +614,7 @@ impl GatefoldWindow {
                 else {
                     return;
                 };
-                if let Some(window) = grid.root().and_downcast::<GatefoldWindow>() {
+                if let Some(window) = grid.root().and_downcast::<JewelcaseWindow>() {
                     window.show_playlist(&playlist);
                 }
             });
@@ -729,7 +729,7 @@ impl GatefoldWindow {
             return;
         };
         let Some(path) = file.path() else { return };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let message = match library.import_playlist(path).await {
             Ok((id, matched, total)) => {
                 if let Some(playlist) = library.playlist(id) {
@@ -758,7 +758,7 @@ impl GatefoldWindow {
         // Translators: {} is a number of artists.
         imp.artist_grid
             .setup_spotify(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         let spotify = app.spotify();
         spotify.connect_local(
             "library-changed",
@@ -799,7 +799,7 @@ impl GatefoldWindow {
     fn refresh_spotify_shelves(&self) {
         use crate::widgets::ShelfItem;
         let imp = self.imp();
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         let spotify = app.spotify();
         let library = app.library();
         if !spotify.is_connected() {
@@ -880,7 +880,7 @@ impl GatefoldWindow {
     }
 
     /// A Spotify album in the album panel (§9.8).
-    pub fn show_spotify_album(&self, album: &gatefold_core::db::SpotifyAlbum) {
+    pub fn show_spotify_album(&self, album: &jewelcase_core::db::SpotifyAlbum) {
         let imp = self.imp();
         imp.bottom_sheet.set_open(false);
         imp.search_bar.set_search_mode(false);
@@ -1036,7 +1036,7 @@ impl GatefoldWindow {
 
     fn update_artists_page(&self) {
         let imp = self.imp();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let page = if !self.settings().boolean("online-metadata-asked") {
             "ask"
         } else if library.artists().n_items() == 0 {
@@ -1153,7 +1153,7 @@ impl GatefoldWindow {
             #[weak(rename_to = window)]
             self,
             move || {
-                let total = GatefoldApplication::get().analyzer().total();
+                let total = JewelcaseApplication::get().analyzer().total();
                 // About 1.3 s per song in the background.
                 let minutes = (u64::from(total) * 13 / 10 / 60).max(1);
                 // Translators: {} is a number of minutes.
@@ -1167,7 +1167,7 @@ impl GatefoldWindow {
         );
         update_label();
         let on_total = update_label.clone();
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .analyzer()
             .connect_total_notify(move |_| on_total());
         let off = settings.string("analysis-mode") == "off";
@@ -1222,7 +1222,7 @@ impl GatefoldWindow {
     }
 
     fn setup_tools(&self) {
-        let tools = GatefoldApplication::get().tools();
+        let tools = JewelcaseApplication::get().tools();
         let update = glib::clone!(
             #[weak(rename_to = window)]
             self,
@@ -1252,12 +1252,12 @@ impl GatefoldWindow {
         );
         self.update_tool_banners(&tools);
         crate::updates::start(self);
-        // A CD import or lyrembed page needs Gatefold while it runs (its
-        // output comes through Gatefold): closing asks first, then stops it
+        // A CD import or lyrembed page needs Jewelcase while it runs (its
+        // output comes through Jewelcase): closing asks first, then stops it
         // cleanly and closes when it's done.
         self.connect_close_request(|window| {
-            let tools = GatefoldApplication::get().tools();
-            if !tools.page_needs_gatefold() || window.imp().closing_after_tool.get() {
+            let tools = JewelcaseApplication::get().tools();
+            if !tools.page_needs_jewelcase() || window.imp().closing_after_tool.get() {
                 return glib::Propagation::Proceed;
             }
             window.ask_stop_tool();
@@ -1269,7 +1269,7 @@ impl GatefoldWindow {
         let dialog = adw::AlertDialog::new(
             Some(&gettext("A Tool Is Still Running")),
             Some(&gettext(
-                "Closing Gatefold stops it. A CD import stops cleanly and can be continued later.",
+                "Closing Jewelcase stops it. A CD import stops cleanly and can be continued later.",
             )),
         );
         dialog.add_responses(&[
@@ -1292,10 +1292,10 @@ impl GatefoldWindow {
 
     fn close_after_tool(&self) {
         self.imp().closing_after_tool.set(true);
-        let tools = GatefoldApplication::get().tools();
+        let tools = JewelcaseApplication::get().tools();
         // The tool may have finished while the question was shown: then
         // nothing changes any more to wait for.
-        if !tools.page_needs_gatefold() {
+        if !tools.page_needs_jewelcase() {
             self.close();
             return;
         }
@@ -1307,11 +1307,11 @@ impl GatefoldWindow {
         );
         let when_done = close.clone();
         tools.connect_page_status_notify(move |tools| {
-            if !tools.page_needs_gatefold() {
+            if !tools.page_needs_jewelcase() {
                 when_done();
             }
         });
-        // Should it hang, Gatefold still closes.
+        // Should it hang, Jewelcase still closes.
         glib::timeout_add_seconds_local_once(30, close);
     }
 
@@ -1387,11 +1387,11 @@ impl GatefoldWindow {
 
     /// After a cdport run: "New album: <title> — Show" (§10.2).
     fn announce_imported_albums(&self) {
-        let tools = GatefoldApplication::get().tools();
+        let tools = JewelcaseApplication::get().tools();
         let Some(since) = tools.import_started() else {
             return;
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let albums = library.albums();
         let new: Vec<AlbumObject> = {
             let mut announced = self.imp().announced.borrow_mut();
@@ -1420,7 +1420,7 @@ impl GatefoldWindow {
     }
 
     fn setup_messages(&self) {
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         for source in [
             app.library().upcast::<glib::Object>(),
             app.player().upcast(),
@@ -1526,7 +1526,7 @@ impl GatefoldWindow {
         all.append(Some(&gettext("All Genres")), Some("win.album-genre::"));
         menu.append_section(None, &all);
         let genres = gio::Menu::new();
-        let library_genres = GatefoldApplication::get().library().all_genres();
+        let library_genres = JewelcaseApplication::get().library().all_genres();
         for genre in &library_genres {
             let item = gio::MenuItem::new(Some(genre), None);
             item.set_action_and_target_value(Some("win.album-genre"), Some(&genre.to_variant()));
@@ -1573,7 +1573,7 @@ impl GatefoldWindow {
         self.announce_imported_albums();
         // Leave the page of an artist that's no longer in the library
         // (a Spotify artist's page never was).
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         if let Some(page) = self.artist_page()
             && page.spotify_artist_id().is_none()
             && library.artist(page.artist_id()).is_none()
@@ -1584,7 +1584,7 @@ impl GatefoldWindow {
         self.update_artists_page();
         // Show the reloaded version of the open album, or close the panel.
         if let Some(open) = imp.album_panel.album() {
-            let library = GatefoldApplication::get().library();
+            let library = JewelcaseApplication::get().library();
             let albums = library.albums();
             let reloaded = (0..albums.n_items())
                 .filter_map(|i| albums.item(i).and_downcast::<AlbumObject>())
@@ -1599,7 +1599,7 @@ impl GatefoldWindow {
 
     fn update_albums_page(&self) {
         let imp = self.imp();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let page = if library.albums().n_items() == 0 && library.scanning() {
             "scanning"
         } else if library.albums().n_items() == 0 {
@@ -1616,39 +1616,39 @@ impl GatefoldWindow {
         banner.set_revealed(library.scanning());
     }
 
-    /// Development aid: `GATEFOLD_SCREENSHOT=out.png` renders the window to
-    /// a PNG after `GATEFOLD_SCREENSHOT_DELAY` seconds (default 8) and quits.
+    /// Development aid: `JEWELCASE_SCREENSHOT=out.png` renders the window to
+    /// a PNG after `JEWELCASE_SCREENSHOT_DELAY` seconds (default 8) and quits.
     /// The steps below run after 2 seconds.
-    /// `GATEFOLD_SCREENSHOT_ACTIONS` lists actions to run first, separated
+    /// `JEWELCASE_SCREENSHOT_ACTIONS` lists actions to run first, separated
     /// by spaces, with an optional `::target` (GVariant text; integers are
     /// passed as int64 IDs), e.g. `win.open-player win.show-playlist::1`.
-    /// `GATEFOLD_SCREENSHOT_ALBUM=N` (or a title) opens that album and
-    /// `GATEFOLD_SCREENSHOT_PLAY=1` plays it; `GATEFOLD_SCREENSHOT_ARTIST=name`
-    /// opens an artist page (`GATEFOLD_SCREENSHOT_ARTIST_ALBUM=1` then opens
-    /// its first album); `GATEFOLD_SCREENSHOT_PANEL_ACTIONS` runs album
+    /// `JEWELCASE_SCREENSHOT_ALBUM=N` (or a title) opens that album and
+    /// `JEWELCASE_SCREENSHOT_PLAY=1` plays it; `JEWELCASE_SCREENSHOT_ARTIST=name`
+    /// opens an artist page (`JEWELCASE_SCREENSHOT_ARTIST_ALBUM=1` then opens
+    /// its first album); `JEWELCASE_SCREENSHOT_PANEL_ACTIONS` runs album
     /// panel actions (`panel.add-to-playlist`);
-    /// `GATEFOLD_SCREENSHOT_PREFS=<page>` opens Preferences;
-    /// `GATEFOLD_SCREENSHOT_SEARCH=text` searches;
-    /// `GATEFOLD_SCREENSHOT_ADD_SONGS=text` searches songs to add in the
-    /// playlist panel (`GATEFOLD_SCREENSHOT_FILTER_SONGS`: its own songs);
-    /// `GATEFOLD_SCREENSHOT_SETTINGS="key=value …"` sets GSettings first;
-    /// `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
-    /// Without `GATEFOLD_SCREENSHOT`, only that album step runs.
+    /// `JEWELCASE_SCREENSHOT_PREFS=<page>` opens Preferences;
+    /// `JEWELCASE_SCREENSHOT_SEARCH=text` searches;
+    /// `JEWELCASE_SCREENSHOT_ADD_SONGS=text` searches songs to add in the
+    /// playlist panel (`JEWELCASE_SCREENSHOT_FILTER_SONGS`: its own songs);
+    /// `JEWELCASE_SCREENSHOT_SETTINGS="key=value …"` sets GSettings first;
+    /// `JEWELCASE_SCREENSHOT_IMPORT=file.m3u8` imports and shows a playlist.
+    /// Without `JEWELCASE_SCREENSHOT`, only that album step runs.
     fn setup_screenshot(&self) {
-        // Without GATEFOLD_SCREENSHOT, only the album and actions steps run
+        // Without JEWELCASE_SCREENSHOT, only the album and actions steps run
         // (for playback tests); the app keeps running.
-        let path = std::env::var_os("GATEFOLD_SCREENSHOT");
-        if path.is_none() && std::env::var_os("GATEFOLD_SCREENSHOT_ALBUM").is_none() {
+        let path = std::env::var_os("JEWELCASE_SCREENSHOT");
+        if path.is_none() && std::env::var_os("JEWELCASE_SCREENSHOT_ALBUM").is_none() {
             return;
         }
-        let delay = std::env::var("GATEFOLD_SCREENSHOT_DELAY")
+        let delay = std::env::var("JEWELCASE_SCREENSHOT_DELAY")
             .ok()
             .and_then(|d| d.parse().ok())
             .unwrap_or(8);
-        let actions = std::env::var("GATEFOLD_SCREENSHOT_ACTIONS").unwrap_or_default();
-        // `GATEFOLD_SCREENSHOT_SETTINGS="mix-similar=true mix-every=1"`:
+        let actions = std::env::var("JEWELCASE_SCREENSHOT_ACTIONS").unwrap_or_default();
+        // `JEWELCASE_SCREENSHOT_SETTINGS="mix-similar=true mix-every=1"`:
         // GSettings values (GVariant text), set first.
-        if let Ok(values) = std::env::var("GATEFOLD_SCREENSHOT_SETTINGS") {
+        if let Ok(values) = std::env::var("JEWELCASE_SCREENSHOT_SETTINGS") {
             let settings = self.settings();
             for pair in values.split_whitespace() {
                 let Some((key, value)) = pair.split_once('=') else {
@@ -1661,8 +1661,8 @@ impl GatefoldWindow {
                 }
             }
         }
-        // `GATEFOLD_SCREENSHOT_SIZE=400x760`: the window size.
-        if let Some((w, h)) = std::env::var("GATEFOLD_SCREENSHOT_SIZE")
+        // `JEWELCASE_SCREENSHOT_SIZE=400x760`: the window size.
+        if let Some((w, h)) = std::env::var("JEWELCASE_SCREENSHOT_SIZE")
             .ok()
             .and_then(|size| {
                 let (w, h) = size.split_once('x')?;
@@ -1687,7 +1687,7 @@ impl GatefoldWindow {
                 }
             }
             // An index into the grid, or an album title.
-            let album = std::env::var("GATEFOLD_SCREENSHOT_ALBUM")
+            let album = std::env::var("JEWELCASE_SCREENSHOT_ALBUM")
                 .ok()
                 .and_then(|wanted| {
                     let model = window.imp().album_grid.local_model()?;
@@ -1697,10 +1697,10 @@ impl GatefoldWindow {
                         .find(|(i, a)| wanted == i.to_string() || wanted == a.album().title)
                         .map(|(_, a)| a)
                 });
-            let artist = std::env::var("GATEFOLD_SCREENSHOT_ARTIST")
+            let artist = std::env::var("JEWELCASE_SCREENSHOT_ARTIST")
                 .ok()
                 .and_then(|name| {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     let artists = library.artists();
                     (0..artists.n_items())
                         .filter_map(|i| artists.item(i).and_downcast::<ArtistObject>())
@@ -1711,25 +1711,25 @@ impl GatefoldWindow {
             }
             if let Some(album) = album {
                 window.show_album(&album);
-                if std::env::var_os("GATEFOLD_SCREENSHOT_PLAY").is_some() {
-                    GatefoldApplication::get()
+                if std::env::var_os("JEWELCASE_SCREENSHOT_PLAY").is_some() {
+                    JewelcaseApplication::get()
                         .player()
                         .play_album(album.album().id, None, false);
-                    // `GATEFOLD_SCREENSHOT_SEEK_END=5000`: 2 s later, jump to
+                    // `JEWELCASE_SCREENSHOT_SEEK_END=5000`: 2 s later, jump to
                     // that long before the end (crossfade tests).
-                    if let Some(before) = std::env::var("GATEFOLD_SCREENSHOT_SEEK_END")
+                    if let Some(before) = std::env::var("JEWELCASE_SCREENSHOT_SEEK_END")
                         .ok()
                         .and_then(|v| v.parse::<u64>().ok())
                     {
                         glib::timeout_add_seconds_local_once(2, move || {
-                            let player = GatefoldApplication::get().player();
+                            let player = JewelcaseApplication::get().player();
                             player.seek(player.duration().saturating_sub(before));
                         });
                     }
                 }
                 // e.g. `panel.lyrembed`: actions of the album panel.
                 let panel_actions =
-                    std::env::var("GATEFOLD_SCREENSHOT_PANEL_ACTIONS").unwrap_or_default();
+                    std::env::var("JEWELCASE_SCREENSHOT_PANEL_ACTIONS").unwrap_or_default();
                 for action in panel_actions.split_whitespace() {
                     let panel = window.imp().album_panel.get();
                     if let Err(err) = WidgetExt::activate_action(&panel, action, None) {
@@ -1737,11 +1737,11 @@ impl GatefoldWindow {
                     }
                 }
             }
-            // `GATEFOLD_SCREENSHOT_PAGE_ACTIONS="panel.toggle-saved"`: 4 s
+            // `JEWELCASE_SCREENSHOT_PAGE_ACTIONS="panel.toggle-saved"`: 4 s
             // later, actions of the album panel or the artist page (also
             // one opened by the actions above).
             let page_actions =
-                std::env::var("GATEFOLD_SCREENSHOT_PAGE_ACTIONS").unwrap_or_default();
+                std::env::var("JEWELCASE_SCREENSHOT_PAGE_ACTIONS").unwrap_or_default();
             if !page_actions.is_empty() {
                 let window = window.clone();
                 glib::timeout_add_seconds_local_once(4, move || {
@@ -1758,9 +1758,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_ARTIST_ALBUM=1`: 3 s later, the artist
+            // `JEWELCASE_SCREENSHOT_ARTIST_ALBUM=1`: 3 s later, the artist
             // page opens its first album.
-            if std::env::var_os("GATEFOLD_SCREENSHOT_ARTIST_ALBUM").is_some() {
+            if std::env::var_os("JEWELCASE_SCREENSHOT_ARTIST_ALBUM").is_some() {
                 let window = window.clone();
                 glib::timeout_add_seconds_local_once(3, move || {
                     if let Some(page) = window.artist_page() {
@@ -1768,24 +1768,24 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_SEARCH=text`: search for it.
-            if let Ok(text) = std::env::var("GATEFOLD_SCREENSHOT_SEARCH") {
+            // `JEWELCASE_SCREENSHOT_SEARCH=text`: search for it.
+            if let Ok(text) = std::env::var("JEWELCASE_SCREENSHOT_SEARCH") {
                 window.imp().search_bar.set_search_mode(true);
                 window.imp().search_entry.set_text(&text);
             }
-            // `GATEFOLD_SCREENSHOT_ADD_SONGS=text`: search songs to add in
-            // the playlist panel; `GATEFOLD_SCREENSHOT_FILTER_SONGS=text`:
+            // `JEWELCASE_SCREENSHOT_ADD_SONGS=text`: search songs to add in
+            // the playlist panel; `JEWELCASE_SCREENSHOT_FILTER_SONGS=text`:
             // its own songs. 2 s in, once the playlist is open (opening one
             // clears its search).
-            let add = std::env::var("GATEFOLD_SCREENSHOT_ADD_SONGS").ok();
-            let filter = std::env::var("GATEFOLD_SCREENSHOT_FILTER_SONGS").ok();
+            let add = std::env::var("JEWELCASE_SCREENSHOT_ADD_SONGS").ok();
+            let filter = std::env::var("JEWELCASE_SCREENSHOT_FILTER_SONGS").ok();
             if add.is_some() || filter.is_some() {
                 let window = window.clone();
                 glib::timeout_add_seconds_local_once(2, move || {
                     let panel = &window.imp().playlist_panel;
                     if let Some(text) = &add {
-                        // `GATEFOLD_SCREENSHOT_ADD_SPOTIFY=1`: Spotify too.
-                        if std::env::var_os("GATEFOLD_SCREENSHOT_ADD_SPOTIFY").is_some() {
+                        // `JEWELCASE_SCREENSHOT_ADD_SPOTIFY=1`: Spotify too.
+                        if std::env::var_os("JEWELCASE_SCREENSHOT_ADD_SPOTIFY").is_some() {
                             panel.search_spotify_too();
                         }
                         panel.search_for_songs(text);
@@ -1795,11 +1795,11 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_IMPORT=file.m3u8`: import and show a playlist.
-            if let Ok(path) = std::env::var("GATEFOLD_SCREENSHOT_IMPORT") {
+            // `JEWELCASE_SCREENSHOT_IMPORT=file.m3u8`: import and show a playlist.
+            if let Ok(path) = std::env::var("JEWELCASE_SCREENSHOT_IMPORT") {
                 let window = window.clone();
                 glib::spawn_future_local(async move {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     match library.import_playlist(path.into()).await {
                         Ok((id, matched, total)) => {
                             tracing::info!("Imported {matched} of {total}");
@@ -1811,27 +1811,27 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_STREAM=1`: start streaming (the settings
+            // `JEWELCASE_SCREENSHOT_STREAM=1`: start streaming (the settings
             // above came after the app's start).
-            if std::env::var_os("GATEFOLD_SCREENSHOT_STREAM").is_some() {
-                GatefoldApplication::get().spotify().start_streaming();
+            if std::env::var_os("JEWELCASE_SCREENSHOT_STREAM").is_some() {
+                JewelcaseApplication::get().spotify().start_streaming();
             }
-            // `GATEFOLD_SCREENSHOT_SPOTIFY=1`: connect (with the stand-in
-            // server of GATEFOLD_SPOTIFY_TEST_SERVER).
-            if std::env::var_os("GATEFOLD_SCREENSHOT_SPOTIFY").is_some() {
-                let spotify = GatefoldApplication::get().spotify();
+            // `JEWELCASE_SCREENSHOT_SPOTIFY=1`: connect (with the stand-in
+            // server of JEWELCASE_SPOTIFY_TEST_SERVER).
+            if std::env::var_os("JEWELCASE_SCREENSHOT_SPOTIFY").is_some() {
+                let spotify = JewelcaseApplication::get().spotify();
                 glib::spawn_future_local(async move { spotify.connect().await });
             }
-            // `GATEFOLD_SCREENSHOT_PLAYLIST=name`: open it once it exists.
-            if let Ok(name) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST") {
-                let library = GatefoldApplication::get().library();
+            // `JEWELCASE_SCREENSHOT_PLAYLIST=name`: open it once it exists.
+            if let Ok(name) = std::env::var("JEWELCASE_SCREENSHOT_PLAYLIST") {
+                let library = JewelcaseApplication::get().library();
                 let open = glib::clone!(
                     #[weak]
                     window,
                     #[upgrade_or]
                     false,
                     move || {
-                        let library = GatefoldApplication::get().library();
+                        let library = JewelcaseApplication::get().library();
                         let store = library.playlists();
                         let found = (0..store.n_items())
                             .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
@@ -1851,10 +1851,10 @@ impl GatefoldWindow {
                     });
                 }
             }
-            // `GATEFOLD_SCREENSHOT_EDITS="move:0:2 remove:1 add:Title
+            // `JEWELCASE_SCREENSHOT_EDITS="move:0:2 remove:1 add:Title
             // rename:Name cover:/path.jpg unspotify:keep|drop"`: edits of the
             // open playlist, 3 s in.
-            if let Ok(edits) = std::env::var("GATEFOLD_SCREENSHOT_EDITS") {
+            if let Ok(edits) = std::env::var("JEWELCASE_SCREENSHOT_EDITS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(3, move || {
                     let Some(window) = window.upgrade() else {
@@ -1863,7 +1863,7 @@ impl GatefoldWindow {
                     let Some(id) = window.imp().playlist_panel.playlist_id() else {
                         return;
                     };
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     for edit in edits.split_whitespace() {
                         let parts: Vec<&str> = edit.split(':').collect();
                         match parts.as_slice() {
@@ -1886,7 +1886,7 @@ impl GatefoldWindow {
                             ["rename", name] => {
                                 library.rename_playlist(id, &name.replace('_', " "))
                             }
-                            ["unspotify", keep] => GatefoldApplication::get()
+                            ["unspotify", keep] => JewelcaseApplication::get()
                                 .spotify()
                                 .remove_from_spotify(id, *keep == "keep"),
                             ["cover", path] => {
@@ -1902,24 +1902,24 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_QUEUE=title`: add that song to the queue
+            // `JEWELCASE_SCREENSHOT_QUEUE=title`: add that song to the queue
             // 5 s in (after a device took over, it goes to the device).
-            if let Ok(title) = std::env::var("GATEFOLD_SCREENSHOT_QUEUE") {
+            if let Ok(title) = std::env::var("JEWELCASE_SCREENSHOT_QUEUE") {
                 glib::timeout_add_seconds_local_once(5, move || {
-                    let library = GatefoldApplication::get().library();
+                    let library = JewelcaseApplication::get().library();
                     let ids = library.search(&title, 1).tracks;
                     let tracks = library
                         .tracks(&ids)
                         .into_values()
                         .map(crate::objects::TrackObject::new)
                         .collect();
-                    GatefoldApplication::get().player().add_to_queue(tracks);
+                    JewelcaseApplication::get().player().add_to_queue(tracks);
                 });
             }
-            // `GATEFOLD_SCREENSHOT_PUBLISH=1`: "Create on Spotify" for the
+            // `JEWELCASE_SCREENSHOT_PUBLISH=1`: "Create on Spotify" for the
             // open playlist once connected, without asking.
-            if std::env::var_os("GATEFOLD_SCREENSHOT_PUBLISH").is_some() {
-                let spotify = GatefoldApplication::get().spotify();
+            if std::env::var_os("JEWELCASE_SCREENSHOT_PUBLISH").is_some() {
+                let spotify = JewelcaseApplication::get().spotify();
                 let window = window.downgrade();
                 spotify.connect_status_notify(move |spotify| {
                     let Some(window) = window.upgrade() else {
@@ -1934,9 +1934,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_TIMED_ACTIONS="8:player.play-pause 30:…"`:
+            // `JEWELCASE_SCREENSHOT_TIMED_ACTIONS="8:player.play-pause 30:…"`:
             // window actions at those seconds.
-            if let Ok(list) = std::env::var("GATEFOLD_SCREENSHOT_TIMED_ACTIONS") {
+            if let Ok(list) = std::env::var("JEWELCASE_SCREENSHOT_TIMED_ACTIONS") {
                 for entry in list.split_whitespace() {
                     let Some((at, action)) = entry.split_once(':') else {
                         continue;
@@ -1958,9 +1958,9 @@ impl GatefoldWindow {
                     });
                 }
             }
-            // `GATEFOLD_SCREENSHOT_CLICK_TILE=1`: the first tile of the grids
+            // `JEWELCASE_SCREENSHOT_CLICK_TILE=1`: the first tile of the grids
             // clicked 9 s in.
-            if std::env::var_os("GATEFOLD_SCREENSHOT_CLICK_TILE").is_some() {
+            if std::env::var_os("JEWELCASE_SCREENSHOT_CLICK_TILE").is_some() {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(9, move || {
                     if let Some(window) = window.upgrade() {
@@ -1971,9 +1971,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_SCROLL_END=1`: the grids scrolled to their
+            // `JEWELCASE_SCREENSHOT_SCROLL_END=1`: the grids scrolled to their
             // end 9 s in (Spotify's section).
-            if std::env::var_os("GATEFOLD_SCREENSHOT_SCROLL_END").is_some() {
+            if std::env::var_os("JEWELCASE_SCREENSHOT_SCROLL_END").is_some() {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(9, move || {
                     if let Some(window) = window.upgrade() {
@@ -1982,9 +1982,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_LATE_PANEL_ACTIONS=panel.play`: album panel
+            // `JEWELCASE_SCREENSHOT_LATE_PANEL_ACTIONS=panel.play`: album panel
             // actions 11 s in (after late actions opened an album).
-            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_LATE_PANEL_ACTIONS") {
+            if let Ok(actions) = std::env::var("JEWELCASE_SCREENSHOT_LATE_PANEL_ACTIONS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(11, move || {
                     let Some(window) = window.upgrade() else {
@@ -1998,9 +1998,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_LATE_ACTIONS=player.shuffle::true`: window
+            // `JEWELCASE_SCREENSHOT_LATE_ACTIONS=player.shuffle::true`: window
             // actions 8 s in (after playback started).
-            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_LATE_ACTIONS") {
+            if let Ok(actions) = std::env::var("JEWELCASE_SCREENSHOT_LATE_ACTIONS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(8, move || {
                     let Some(window) = window.upgrade() else {
@@ -2018,11 +2018,11 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_SONG_MENU=picker`: 10 s in, the player's
+            // `JEWELCASE_SCREENSHOT_SONG_MENU=picker`: 10 s in, the player's
             // "Add to Playlist…"; `=history:N`: the menu of the Nth
             // Recently Played song, `=history:N:song.add-to-queue` one of its
             // actions.
-            if let Ok(which) = std::env::var("GATEFOLD_SCREENSHOT_SONG_MENU") {
+            if let Ok(which) = std::env::var("JEWELCASE_SCREENSHOT_SONG_MENU") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(10, move || {
                     if let Some(window) = window.upgrade() {
@@ -2030,9 +2030,9 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS=playlist.play`: actions of
+            // `JEWELCASE_SCREENSHOT_PLAYLIST_ACTIONS=playlist.play`: actions of
             // the playlist panel, 4 s in.
-            if let Ok(actions) = std::env::var("GATEFOLD_SCREENSHOT_PLAYLIST_ACTIONS") {
+            if let Ok(actions) = std::env::var("JEWELCASE_SCREENSHOT_PLAYLIST_ACTIONS") {
                 let window = window.downgrade();
                 glib::timeout_add_seconds_local_once(4, move || {
                     let Some(window) = window.upgrade() else {
@@ -2046,10 +2046,10 @@ impl GatefoldWindow {
                     }
                 });
             }
-            // `GATEFOLD_SCREENSHOT_DEVICE=name`: play on that Spotify device
+            // `JEWELCASE_SCREENSHOT_DEVICE=name`: play on that Spotify device
             // once connected.
-            if let Ok(name) = std::env::var("GATEFOLD_SCREENSHOT_DEVICE") {
-                let spotify = GatefoldApplication::get().spotify();
+            if let Ok(name) = std::env::var("JEWELCASE_SCREENSHOT_DEVICE") {
+                let spotify = JewelcaseApplication::get().spotify();
                 spotify.connect_status_notify(move |spotify| {
                     if !spotify.is_connected() {
                         return;
@@ -2063,8 +2063,8 @@ impl GatefoldWindow {
                     });
                 });
             }
-            // `GATEFOLD_SCREENSHOT_PREFS=integrations`: a Preferences page.
-            if let Ok(page) = std::env::var("GATEFOLD_SCREENSHOT_PREFS") {
+            // `JEWELCASE_SCREENSHOT_PREFS=integrations`: a Preferences page.
+            if let Ok(page) = std::env::var("JEWELCASE_SCREENSHOT_PREFS") {
                 let dialog = crate::preferences_dialog::PreferencesDialog::new();
                 dialog.set_visible_page_name(&page);
                 dialog.present(Some(&window));
@@ -2118,7 +2118,7 @@ impl GatefoldWindow {
 
 /// A message toast: short confirmations ("Added to Queue") go quickly,
 /// longer messages stay a bit longer.
-fn imp_toast(window: &GatefoldWindow, message: &str) {
+fn imp_toast(window: &JewelcaseWindow, message: &str) {
     let toast = adw::Toast::new(message);
     // Song titles like "A & B" are text, not markup.
     toast.set_use_markup(false);
@@ -2133,9 +2133,9 @@ pub fn undo_toast(message: &str, undo: impl Fn() + 'static) {
 
 /// A toast with a button in the active window.
 pub fn button_toast(message: &str, label: &str, timeout: u32, clicked: impl Fn() + 'static) {
-    let Some(window) = GatefoldApplication::get()
+    let Some(window) = JewelcaseApplication::get()
         .active_window()
-        .and_downcast::<GatefoldWindow>()
+        .and_downcast::<JewelcaseWindow>()
     else {
         return;
     };

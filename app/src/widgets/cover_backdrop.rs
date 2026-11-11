@@ -37,7 +37,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for CoverBackdrop {
-        const NAME: &'static str = "GatefoldCoverBackdrop";
+        const NAME: &'static str = "JewelcaseCoverBackdrop";
         type Type = super::CoverBackdrop;
         type ParentType = adw::Bin;
     }

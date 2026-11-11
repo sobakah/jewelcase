@@ -16,7 +16,7 @@ use crate::{config_path, expand_home, read_json};
 pub const INSTALL_COMMAND: &str = "pipx install git+https://github.com/sobakah/cdport.git";
 /// Switching from cdimport 1.2.x: both install a `cdimport` command.
 pub const REMOVE_OLD_COMMAND: &str = "pipx uninstall cdimport";
-/// Lets the session bus start cdport when Gatefold calls it.
+/// Lets the session bus start cdport when Jewelcase calls it.
 pub const SERVICE_ARG: &str = "--install-dbus-service";
 pub const SERVICE_COMMAND: &str = "cdport --install-dbus-service";
 

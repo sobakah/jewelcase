@@ -21,7 +21,7 @@ use crate::{Error, Result};
 pub const REDIRECT_PORT: u16 = 8974;
 pub const REDIRECT_URI: &str = "http://127.0.0.1:8974/callback";
 
-/// Everything Gatefold does: the player (§9.3), reading and editing
+/// Everything Jewelcase does: the player (§9.3), reading and editing
 /// playlists (§9.5, §9.6) and their covers.
 pub const SCOPES: &[&str] = &[
     "user-read-playback-state",
@@ -250,11 +250,11 @@ fn answer(stream: TcpStream, state: &str, expected: &str) -> Option<Result<Strin
     let (title, text) = match &result {
         Ok(_) => (
             "Connected to Spotify",
-            "Gatefold is connected. You can close this tab.",
+            "Jewelcase is connected. You can close this tab.",
         ),
         Err(_) => (
             "Not connected",
-            "Gatefold couldn't connect to Spotify. You can close this tab and try again.",
+            "Jewelcase couldn't connect to Spotify. You can close this tab and try again.",
         ),
     };
     let body = format!(

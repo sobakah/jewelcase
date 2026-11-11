@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-soloist"
-description = "Gatefold's Spotify Soloist control: starts Spotify's official headless client and drives it over its local WebSocket API"
+name = "jewelcase-soloist"
+description = "Jewelcase's Spotify Soloist control: starts Spotify's official headless client and drives it over its local WebSocket API"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

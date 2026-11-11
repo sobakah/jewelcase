@@ -7,7 +7,7 @@ use gtk::glib;
 use gtk::prelude::*;
 
 use super::{CoverImage, QueueView};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::format;
 use crate::player::Player;
 
@@ -15,7 +15,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate, glib::Properties)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/mini_player.ui")]
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/mini_player.ui")]
     #[properties(wrapper_type = super::MiniPlayer)]
     pub struct MiniPlayer {
         /// On narrow windows: only the essentials (no shuffle, repeat or
@@ -52,7 +52,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for MiniPlayer {
-        const NAME: &'static str = "GatefoldMiniPlayer";
+        const NAME: &'static str = "JewelcaseMiniPlayer";
         type Type = super::MiniPlayer;
         type ParentType = adw::Bin;
 
@@ -72,7 +72,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             player.connect_current_track_notify(glib::clone!(
                 #[weak]
                 obj,
@@ -130,7 +130,7 @@ mod imp {
                 glib::clone!(
                     #[weak]
                     obj,
-                    move || obj.update_progress(&GatefoldApplication::get().player())
+                    move || obj.update_progress(&JewelcaseApplication::get().player())
                 ),
             );
             // Compact (narrow windows): a smaller cover, a title that may
@@ -211,7 +211,7 @@ impl MiniPlayer {
 /// switches between the song's length and the remaining time (a shared
 /// setting).
 pub(super) fn make_end_time_toggle(label: &gtk::Label, on_change: impl Fn() + 'static) {
-    let player = GatefoldApplication::get().player();
+    let player = JewelcaseApplication::get().player();
     let settings = player.settings().clone();
     label.set_tooltip_text(Some(&gettext("Show Remaining Time")));
     label.set_cursor_from_name(Some("pointer"));
@@ -247,7 +247,7 @@ pub(super) fn make_end_time_toggle(label: &gtk::Label, on_change: impl Fn() + 's
 }
 
 pub(super) fn show_remaining() -> bool {
-    GatefoldApplication::get()
+    JewelcaseApplication::get()
         .player()
         .settings()
         .boolean("show-remaining-time")
@@ -274,16 +274,16 @@ pub(super) fn update_repeat_button(button: &gtk::Button, player: &Player) {
 /// Smart shuffle (mixing in similar songs, §7) shows on the shuffle
 /// button: its own icon, highlighted even while plain shuffle is off.
 pub(super) fn show_mixing(button: &gtk::ToggleButton) {
-    let settings = GatefoldApplication::get().player().settings().clone();
+    let settings = JewelcaseApplication::get().player().settings().clone();
     let update = glib::clone!(
         #[weak]
         button,
         move |settings: &gtk::gio::Settings| {
             let mixing = settings.boolean("mix-similar");
-            // Only Gatefold's own icon for mixing gets a tooltip.
+            // Only Jewelcase's own icon for mixing gets a tooltip.
             if mixing {
                 let text = gettext("Shuffle (Mixing In Similar Songs)");
-                button.set_icon_name("gatefold-smart-shuffle-symbolic");
+                button.set_icon_name("jewelcase-smart-shuffle-symbolic");
                 button.set_tooltip_text(Some(&text));
                 super::set_accessible_label(&button, &text);
                 button.add_css_class("smart-shuffle");

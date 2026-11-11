@@ -9,11 +9,11 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_lyrics::{Line, LyricsState};
 use gettextrs::gettext;
 use gtk::{gio, glib};
+use jewelcase_lyrics::{Line, LyricsState};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::objects::TrackObject;
 
@@ -79,7 +79,7 @@ mod imp {
                     .margin_bottom(24)
                     .build(),
                 status: adw::StatusPage::builder()
-                    .icon_name("gatefold-lyrics-symbolic")
+                    .icon_name("jewelcase-lyrics-symbolic")
                     .css_classes(["compact"])
                     .build(),
                 source: gtk::Label::builder()
@@ -114,7 +114,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for LyricsView {
-        const NAME: &'static str = "GatefoldLyricsView";
+        const NAME: &'static str = "JewelcaseLyricsView";
         type Type = super::LyricsView;
         type ParentType = adw::Bin;
 
@@ -145,7 +145,7 @@ impl LyricsView {
         let imp = self.imp();
         self.connect_map(|view| {
             if view.imp().online_pending.take()
-                && let Some(track) = GatefoldApplication::get().player().current_track()
+                && let Some(track) = JewelcaseApplication::get().player().current_track()
                 && Some(track.id()) == view.imp().track_id.get()
             {
                 view.load_online(track);
@@ -169,7 +169,7 @@ impl LyricsView {
             self,
             move |_| {
                 if let Some(dir) = view.imp().album_dir.borrow().clone() {
-                    GatefoldApplication::get().tools().find_lyrics(&dir);
+                    JewelcaseApplication::get().tools().find_lyrics(&dir);
                 }
             }
         ));
@@ -207,7 +207,7 @@ impl LyricsView {
                 }
             ));
 
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         player.connect_current_track_notify(glib::clone!(
             #[weak(rename_to = view)]
             self,
@@ -241,7 +241,7 @@ impl LyricsView {
                     #[weak(rename_to = view)]
                     self,
                     move |_, _| {
-                        let track = GatefoldApplication::get().player().current_track();
+                        let track = JewelcaseApplication::get().player().current_track();
                         if track.as_ref().is_some_and(TrackObject::is_stand_in) {
                             view.imp().track_id.set(None);
                             view.set_track(track);
@@ -251,7 +251,7 @@ impl LyricsView {
             );
         }
         // Tools write lyrics into the files; rescans bring them here live.
-        GatefoldApplication::get().library().connect_local(
+        JewelcaseApplication::get().library().connect_local(
             "reloaded",
             false,
             glib::clone!(
@@ -265,7 +265,7 @@ impl LyricsView {
                 }
             ),
         );
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .tools()
             .connect_lyrics_jobs_notify(glib::clone!(
                 #[weak(rename_to = view)]
@@ -292,7 +292,7 @@ impl LyricsView {
             self,
             move |_| {
                 if let Some(dir) = view.imp().album_dir.borrow().clone() {
-                    GatefoldApplication::get().tools().lyrembed_page(&dir);
+                    JewelcaseApplication::get().tools().lyrembed_page(&dir);
                 }
             }
         ));
@@ -301,7 +301,7 @@ impl LyricsView {
 
     /// Reloads the current track's lyrics, keeping the view if unchanged.
     fn reload(&self) {
-        let Some(track) = GatefoldApplication::get().player().current_track() else {
+        let Some(track) = JewelcaseApplication::get().player().current_track() else {
             return;
         };
         // A Spotify song has no file: its lyrics (LRCLIB's) stay.
@@ -316,7 +316,7 @@ impl LyricsView {
             self,
             async move {
                 let state =
-                    gio::spawn_blocking(move || gatefold_lyrics::load(&path, title.as_deref()))
+                    gio::spawn_blocking(move || jewelcase_lyrics::load(&path, title.as_deref()))
                         .await
                         .unwrap_or(LyricsState::None);
                 let imp = view.imp();
@@ -345,11 +345,11 @@ impl LyricsView {
         imp.lines.replace(Vec::new());
         imp.state.replace(None);
         imp.album_dir.replace(track.as_ref().map(|t| {
-            gatefold_core::library::grouping::album_folder(&t.track().record.path).to_path_buf()
+            jewelcase_core::library::grouping::album_folder(&t.track().record.path).to_path_buf()
         }));
         self.rebuild();
         let Some(track) = track else {
-            self.show_status("gatefold-lyrics-symbolic", &gettext("No Lyrics"), None);
+            self.show_status("jewelcase-lyrics-symbolic", &gettext("No Lyrics"), None);
             return;
         };
         imp.online_pending.set(false);
@@ -357,7 +357,7 @@ impl LyricsView {
         if track.is_stand_in() && crate::lrclib::enabled() {
             imp.status_actions.set_visible(false);
             self.show_status(
-                "gatefold-lyrics-symbolic",
+                "jewelcase-lyrics-symbolic",
                 &gettext("Looking for Lyrics…"),
                 Some(&gettext("On LRCLIB")),
             );
@@ -384,7 +384,7 @@ impl LyricsView {
             self,
             async move {
                 let state =
-                    gio::spawn_blocking(move || gatefold_lyrics::load(&path, title.as_deref()))
+                    gio::spawn_blocking(move || jewelcase_lyrics::load(&path, title.as_deref()))
                         .await
                         .unwrap_or(LyricsState::None);
                 // The track may have changed while loading.
@@ -397,7 +397,7 @@ impl LyricsView {
 
     /// Non-Latin lyrics without romanization get it from lyrembed (§5.1),
     /// shown once it's there; not with the "original only" layout.
-    fn add_romanization(&self, lyrics: gatefold_lyrics::Lyrics) {
+    fn add_romanization(&self, lyrics: jewelcase_lyrics::Lyrics) {
         let imp = self.imp();
         if imp.settings.string("lyrics-layout") == "original-only"
             || !lyrics.needs_romanization()
@@ -420,7 +420,7 @@ impl LyricsView {
                 }
                 imp.lines.replace(romanized.lines);
                 view.rebuild();
-                view.set_position(GatefoldApplication::get().player().position());
+                view.set_position(JewelcaseApplication::get().player().position());
             }
         ));
     }
@@ -462,13 +462,13 @@ impl LyricsView {
     fn show_lyrics(&self, state: LyricsState) {
         let imp = self.imp();
         imp.state.replace(Some(state.clone()));
-        let tools = GatefoldApplication::get().tools();
+        let tools = JewelcaseApplication::get().tools();
         let has_lyrembed = tools.lyrembed_usable();
         imp.status_actions
             .set_visible(state == LyricsState::None && has_lyrembed && tools.lyrics_jobs() == 0);
         if state == LyricsState::None && tools.lyrics_jobs() > 0 {
             return self.show_status(
-                "gatefold-lyrics-symbolic",
+                "jewelcase-lyrics-symbolic",
                 &gettext("Looking for Lyrics…"),
                 Some(&gettext("lyrembed is searching for this album's lyrics")),
             );
@@ -480,7 +480,7 @@ impl LyricsView {
                 imp.lines.replace(lyrics.lines.clone());
                 self.rebuild();
                 imp.stack.set_visible_child_name("lyrics");
-                let player = GatefoldApplication::get().player();
+                let player = JewelcaseApplication::get().player();
                 self.set_position(player.position());
                 self.add_romanization(lyrics);
             }
@@ -488,7 +488,7 @@ impl LyricsView {
                 self.show_status("folder-music-symbolic", &gettext("Instrumental"), None)
             }
             LyricsState::None => self.show_status(
-                "gatefold-lyrics-symbolic",
+                "jewelcase-lyrics-symbolic",
                 &gettext("No Lyrics"),
                 Some(&gettext(
                     "This song has no lyrics in its tags or next to the file",
@@ -498,8 +498,8 @@ impl LyricsView {
     }
 
     /// The corner label: where these lyrics come from.
-    fn show_source(&self, source: gatefold_lyrics::Source) {
-        use gatefold_lyrics::Source;
+    fn show_source(&self, source: jewelcase_lyrics::Source) {
+        use jewelcase_lyrics::Source;
         let (label, tooltip) = match source {
             Source::Embedded => (
                 gettext("In the File"),
@@ -598,7 +598,7 @@ impl LyricsView {
                 button.add_css_class("synced");
                 if let Some(time) = line.time_ms {
                     button.connect_clicked(move |_| {
-                        GatefoldApplication::get().player().seek(time);
+                        JewelcaseApplication::get().player().seek(time);
                     });
                 }
             } else {
@@ -608,7 +608,7 @@ impl LyricsView {
             rows.push((line.time_ms, button));
         }
         imp.rows.replace(rows);
-        if !imp.lines.borrow().is_empty() && GatefoldApplication::get().tools().lyrembed_usable() {
+        if !imp.lines.borrow().is_empty() && JewelcaseApplication::get().tools().lyrembed_usable() {
             let button = self.lyrembed_button();
             button.set_margin_top(24);
             button.add_css_class("flat");

@@ -1,8 +1,8 @@
 use std::cell::OnceCell;
 
-use gatefold_core::queue::Origin;
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::queue::Origin;
 
 use super::TrackObject;
 
@@ -24,7 +24,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for QueueEntry {
-        const NAME: &'static str = "GatefoldQueueEntry";
+        const NAME: &'static str = "JewelcaseQueueEntry";
         type Type = super::QueueEntry;
     }
 

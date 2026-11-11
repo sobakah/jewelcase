@@ -1,5 +1,5 @@
 [package]
-name = "gatefold"
+name = "jewelcase"
 description = "A local-first music player for albums, artists and playlists"
 version.workspace = true
 edition.workspace = true
@@ -10,16 +10,16 @@ repository.workspace = true
 [features]
 # librespot streaming (CONCEPT.md §9.4). Off by default: without it the
 # build contains no librespot code.
-spotify-stream = ["dep:gatefold-stream"]
+spotify-stream = ["dep:jewelcase-stream"]
 
 [dependencies]
-gatefold-core.workspace = true
-gatefold-lyrics.workspace = true
-gatefold-metadata.workspace = true
-gatefold-soloist.workspace = true
-gatefold-spotify.workspace = true
-gatefold-stream = { workspace = true, optional = true }
-gatefold-tools.workspace = true
+jewelcase-core.workspace = true
+jewelcase-lyrics.workspace = true
+jewelcase-metadata.workspace = true
+jewelcase-soloist.workspace = true
+jewelcase-spotify.workspace = true
+jewelcase-stream = { workspace = true, optional = true }
+jewelcase-tools.workspace = true
 
 adw.workspace = true
 async-channel.workspace = true

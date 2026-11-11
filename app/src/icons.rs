@@ -1,4 +1,4 @@
-//! Gatefold's icons (data/resources/icons): every symbolic icon it uses is
+//! Jewelcase's icons (data/resources/icons): every symbolic icon it uses is
 //! bundled, so icon themes that lack one (KDE's Breeze lacks several)
 //! don't show a missing icon. The desktop's theme still wins where it has
 //! the icon.

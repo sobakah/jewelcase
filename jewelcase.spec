@@ -3,20 +3,24 @@
 # rpmbuild --with spotify_stream enables librespot streaming (CONCEPT.md §9.4).
 %bcond spotify_stream 0
 
-%global app_id io.github.sobakah.Gatefold
+%global app_id io.github.sobakah.Jewelcase
 
-Name:           gatefold
+Name:           jewelcase
 Version:        0.4.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
-# Gatefold's own code is GPL-3.0-or-later; bliss-audio (smart shuffle) is
+# Jewelcase's own code is GPL-3.0-or-later; bliss-audio (smart shuffle) is
 # GPL-3.0-only, so the built program is GPL-3.0-only. The vendored crates'
 # licenses are listed in LICENSE.dependencies; add them here before
 # publishing this anywhere. The bundled Adwaita icons are
 # LGPL-3.0-only OR CC-BY-SA-3.0 (data/resources/icons/README.md).
 License:        GPL-3.0-only AND (LGPL-3.0-only OR CC-BY-SA-3.0)
-URL:            https://github.com/sobakah/gatefold
+URL:            https://github.com/sobakah/jewelcase
+# Jewelcase was called Gatefold until 0.4.1: this package replaces it
+# (Jewelcase moves Gatefold's library and settings over on its first start).
+Provides:       gatefold = %{version}-%{release}
+Obsoletes:      gatefold < %{version}-%{release}
 Source0:        %{name}-%{version}.tar.xz
 # Rust dependencies: `cargo vendor` output, created by `make tarballs`.
 Source1:        %{name}-%{version}-vendor.tar.xz
@@ -57,7 +61,7 @@ Recommends:     gstreamer1-plugins-ugly-free
 Recommends:     flatpak
 
 %description
-Gatefold is a local-first music player for people who listen to albums,
+Jewelcase is a local-first music player for people who listen to albums,
 follow artists and curate playlists. Cover art is the main way around the
 library; lyrics, the queue and details open when you want them.
 
@@ -79,6 +83,9 @@ library; lyrics, the queue and details open when you want them.
 
 %install
 %meson_install
+# Gatefold 0.4.1 restarts itself as `gatefold` after installing an update;
+# that start now opens Jewelcase.
+ln -s %{name} %{buildroot}%{_bindir}/gatefold
 # Once po/LINGUAS lists a language: add `%%find_lang %%{name}` here and
 # `-f %%{name}.lang` to %%files (find_lang fails while there are none).
 
@@ -91,6 +98,7 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %license LICENSE LICENSE.dependencies cargo-vendor.txt
 %doc README.md
 %{_bindir}/%{name}
+%{_bindir}/gatefold
 %{_datadir}/applications/%{app_id}.desktop
 %{_metainfodir}/%{app_id}.metainfo.xml
 %{_datadir}/glib-2.0/schemas/%{app_id}.gschema.xml
@@ -132,13 +140,13 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
   week, month, year or all time, with listening time and trends
 - A visualizer for songs from the library, in the player and the mini
   player
-- Update notices for Gatefold, Soloist and soloistd, installed only
+- Update notices for Jewelcase, Soloist and soloistd, installed only
   when asked
-- Next in the Spotify app skips to Gatefold's next song while Soloist
+- Next in the Spotify app skips to Jewelcase's next song while Soloist
   plays; the Pre-Amp setting is gone (fixed at +4 dB)
 
 * Sun Nov 08 2026 sobakah - 0.2.1-1
-- Recently Played has the Spotify songs that played in Gatefold, with a
+- Recently Played has the Spotify songs that played in Jewelcase, with a
   menu to queue them again or add them to a playlist
 - "Add to Playlist…" for the playing song (+ next to its title, and in
   the queue); playlists that have the song come first and choosing one

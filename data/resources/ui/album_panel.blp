@@ -1,7 +1,7 @@
 using Gtk 4.0;
 using Adw 1;
 // The album detail side panel (CONCEPT.md §4.1).
-template $GatefoldAlbumPanel: Adw.Bin {
+template $JewelcaseAlbumPanel: Adw.Bin {
   styles [
     "album-panel",
   ]
@@ -10,7 +10,7 @@ template $GatefoldAlbumPanel: Adw.Bin {
   // the panel (CONCEPT.md §4.1).
   child: Gtk.Overlay {
     // The cover, blurred, behind the top of the panel (like the player).
-    child: $GatefoldCoverBackdrop backdrop {
+    child: $JewelcaseCoverBackdrop backdrop {
       child: Adw.ToolbarView {
         [top]
         Adw.HeaderBar {
@@ -44,7 +44,7 @@ template $GatefoldAlbumPanel: Adw.Bin {
                 maximum-size: 360;
                 margin-bottom: 12;
 
-                child: $GatefoldCoverImage cover {
+                child: $JewelcaseCoverImage cover {
                   min-size: 160;
                   natural-size: 360;
                   kind: "panel";

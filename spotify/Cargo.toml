@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-spotify"
-description = "Gatefold's Spotify account: OAuth PKCE login and the Web API (player, playlists, search)"
+name = "jewelcase-spotify"
+description = "Jewelcase's Spotify account: OAuth PKCE login and the Web API (player, playlists, search)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

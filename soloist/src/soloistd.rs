@@ -1,6 +1,6 @@
 //! soloistd (github.com/MopigamesYT/soloistd): a small helper that installs
 //! and updates Soloist and keeps it running as a systemd user service.
-//! Gatefold can read and change its config.json, control the service and
+//! Jewelcase can read and change its config.json, control the service and
 //! start an update.
 //!
 //! Everything here blocks briefly (it runs commands); call it from a worker
@@ -15,14 +15,14 @@ use serde_json::{Map, Value};
 
 /// The systemd user unit soloistd installs.
 pub const SERVICE: &str = "soloistd.service";
-/// The WebSocket address Gatefold suggests (local only).
+/// The WebSocket address Jewelcase suggests (local only).
 pub const DEFAULT_WEBSOCKET: &str = "127.0.0.1:9090";
 pub const PROJECT_URL: &str = "https://github.com/MopigamesYT/soloistd";
 
-/// soloistd's config.json (`GATEFOLD_SOLOISTD_CONFIG` for tests, which
+/// soloistd's config.json (`JEWELCASE_SOLOISTD_CONFIG` for tests, which
 /// must never reach the user's own).
 pub fn config_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("GATEFOLD_SOLOISTD_CONFIG") {
+    if let Some(path) = std::env::var_os("JEWELCASE_SOLOISTD_CONFIG") {
         return PathBuf::from(path);
     }
     host_xdg("XDG_CONFIG_HOME", ".config").join("soloistd/config.json")
@@ -72,7 +72,7 @@ pub fn soloist_version() -> Option<String> {
     binary.is_file().then(|| crate::version(&binary)).flatten()
 }
 
-/// soloistd's settings, keeping keys Gatefold doesn't know.
+/// soloistd's settings, keeping keys Jewelcase doesn't know.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     path: PathBuf,
@@ -151,7 +151,7 @@ impl Config {
         }
         let text = serde_json::to_string_pretty(&Value::Object(self.values.clone()))
             .map_err(std::io::Error::other)?;
-        let temporary = self.path.with_extension("json.gatefold");
+        let temporary = self.path.with_extension("json.jewelcase");
         {
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn config_edits_keep_unknown_keys_and_stay_private() {
-        let dir = std::env::temp_dir().join(format!("gatefold-soloistd-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("jewelcase-soloistd-{}", std::process::id()));
         let path = dir.join("config.json");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(

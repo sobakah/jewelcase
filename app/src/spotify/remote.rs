@@ -4,19 +4,19 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use gatefold_core::db::{SpotifyVersion, StreamInfo, Track};
-use gatefold_core::library::TrackRecord;
-use gatefold_core::library::tags::TrackTags;
-use gatefold_core::matching::{Confidence, RemoteTrack};
-use gatefold_core::queue::RepeatMode;
-use gatefold_spotify::{Device, Error, PlayRequest};
 use gettextrs::{gettext, ngettext};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::{SpotifyVersion, StreamInfo, Track};
+use jewelcase_core::library::TrackRecord;
+use jewelcase_core::library::tags::TrackTags;
+use jewelcase_core::matching::{Confidence, RemoteTrack};
+use jewelcase_core::queue::RepeatMode;
+use jewelcase_spotify::{Device, Error, PlayRequest};
 
 use super::Spotify;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::objects::TrackObject;
 
 /// Songs sent in one play request (a sorted playlist); Spotify refuses
@@ -81,14 +81,14 @@ pub struct RemoteState {
     polls: u32,
     /// The device's last state and queue as Spotify gave them, to show
     /// them again (covers arrived) without asking again.
-    last_state: Option<gatefold_spotify::PlaybackState>,
-    last_queue: Vec<gatefold_spotify::Track>,
+    last_state: Option<jewelcase_spotify::PlaybackState>,
+    last_queue: Vec<jewelcase_spotify::Track>,
     /// Stand-in track ID → Spotify URI, for the player's links.
     stand_ins: HashMap<i64, String>,
 }
 
 impl Spotify {
-    pub async fn devices(&self) -> gatefold_spotify::Result<Vec<Device>> {
+    pub async fn devices(&self) -> jewelcase_spotify::Result<Vec<Device>> {
         self.call(|client| client.devices()).await
     }
 
@@ -102,7 +102,7 @@ impl Spotify {
         let Some(device_id) = device.id.clone() else {
             return;
         };
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         let previous = self
             .imp()
             .remote
@@ -145,7 +145,7 @@ impl Spotify {
             state.generation += 1;
             state.generation
         };
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let title_of = |id: i64| {
             library
                 .tracks(&[id])
@@ -196,7 +196,7 @@ impl Spotify {
             .await;
         if let Err(err) = result {
             tracing::warn!("Cannot play on the device: {err}");
-            let device = GatefoldApplication::get()
+            let device = JewelcaseApplication::get()
                 .player()
                 .remote_device()
                 .unwrap_or_default();
@@ -260,7 +260,7 @@ impl Spotify {
                 }
             }
         }
-        let device = GatefoldApplication::get()
+        let device = JewelcaseApplication::get()
             .player()
             .remote_device()
             .unwrap_or_default();
@@ -334,7 +334,7 @@ impl Spotify {
             self.end_receiver(pause);
             return;
         }
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         let was_remote = player.is_remote();
         {
             let mut state = self.imp().remote.borrow_mut();
@@ -427,7 +427,7 @@ impl Spotify {
     /// A player call, then a quick report.
     fn send(
         &self,
-        job: impl FnOnce(&gatefold_spotify::Client) -> gatefold_spotify::Result<()> + Send + 'static,
+        job: impl FnOnce(&jewelcase_spotify::Client) -> jewelcase_spotify::Result<()> + Send + 'static,
     ) {
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = spotify)]
@@ -435,7 +435,7 @@ impl Spotify {
             async move {
                 if let Err(err) = spotify.call(job).await {
                     tracing::warn!("Spotify player command failed: {err}");
-                    let device = GatefoldApplication::get()
+                    let device = JewelcaseApplication::get()
                         .player()
                         .remote_device()
                         .unwrap_or_default();
@@ -466,7 +466,7 @@ impl Spotify {
 
     /// Asks Spotify what plays and shows it.
     async fn poll(&self) {
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         if !player.is_remote() {
             return;
         }
@@ -545,7 +545,7 @@ impl Spotify {
     /// The device's song and queue again, from the last answers (their
     /// covers arrived): no new requests.
     async fn show_remote_again(&self) {
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         let (state, queue) = {
             let remote = self.imp().remote.borrow();
             (remote.last_state.clone(), remote.last_queue.clone())
@@ -574,10 +574,10 @@ impl Spotify {
     /// else stand-ins with Spotify's covers.
     pub(super) async fn track_objects(
         &self,
-        tracks: &[gatefold_spotify::Track],
+        tracks: &[jewelcase_spotify::Track],
     ) -> Vec<TrackObject> {
-        let library = GatefoldApplication::get().library();
-        let unknown: Vec<&gatefold_spotify::Track> = tracks
+        let library = JewelcaseApplication::get().library();
+        let unknown: Vec<&jewelcase_spotify::Track> = tracks
             .iter()
             .filter(|t| !self.imp().remote.borrow().matches.contains_key(&t.uri))
             .collect();
@@ -663,7 +663,7 @@ impl Spotify {
         if let Some(uri) = self.imp().remote.borrow().stand_ins.get(&track_id) {
             return Some(uri.clone());
         }
-        GatefoldApplication::get()
+        JewelcaseApplication::get()
             .library()
             .db()?
             .stream_uri(track_id)
@@ -694,7 +694,7 @@ impl Spotify {
             isrc: tags.isrc.clone(),
             image_url: None,
         };
-        let id = GatefoldApplication::get()
+        let id = JewelcaseApplication::get()
             .library()
             .db()?
             .stream_track_id(&info);
@@ -761,7 +761,7 @@ impl Spotify {
                         let key = super::stream::image_cover_key(&job_url);
                         let covers = cover_cache();
                         covers.has(&key)
-                            || gatefold_spotify::download_image(&job_url)
+                            || jewelcase_spotify::download_image(&job_url)
                                 .ok()
                                 .is_some_and(|data| covers.generate(&key, data).is_ok())
                     })
@@ -797,7 +797,7 @@ impl Spotify {
                     spotify.imp().remote.borrow_mut().covers_refresh = false;
                     if spotify.soloist_receiving() {
                         spotify.receiver_show(true);
-                    } else if GatefoldApplication::get().player().is_remote() {
+                    } else if JewelcaseApplication::get().player().is_remote() {
                         glib::spawn_future_local(async move {
                             spotify.show_remote_again().await;
                         });
@@ -816,13 +816,13 @@ fn repeat_mode(repeat: &str) -> RepeatMode {
     }
 }
 
-fn cover_cache() -> gatefold_core::library::covers::CoverCache {
-    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir())
+fn cover_cache() -> jewelcase_core::library::covers::CoverCache {
+    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir())
 }
 
 /// A stand-in track for a Spotify song that isn't in the library. Its ID
 /// is negative, so it never collides with a library song.
-fn stand_in(track: &gatefold_spotify::Track, cover_key: Option<String>) -> Track {
+fn stand_in(track: &jewelcase_spotify::Track, cover_key: Option<String>) -> Track {
     let id = -(i64::from(fnv(&track.uri) & 0x7fff_ffff) + 1);
     Track {
         record: TrackRecord {

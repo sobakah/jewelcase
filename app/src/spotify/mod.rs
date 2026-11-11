@@ -22,14 +22,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_spotify::auth::{self, Callback, Pkce};
-use gatefold_spotify::{Client, Error, Tokens};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_spotify::auth::{self, Callback, Pkce};
+use jewelcase_spotify::{Client, Error, Tokens};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 
 pub use library::{Discography, LibraryItem, album_from};
@@ -99,7 +99,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Spotify {
-        const NAME: &'static str = "GatefoldSpotify";
+        const NAME: &'static str = "JewelcaseSpotify";
         type Type = super::Spotify;
     }
 
@@ -256,7 +256,7 @@ impl Spotify {
         open_in_browser(&url);
         // Development aid: with the stand-in server, "the browser" comes
         // back by itself.
-        if cfg!(debug_assertions) && std::env::var_os("GATEFOLD_SPOTIFY_TEST_SERVER").is_some() {
+        if cfg!(debug_assertions) && std::env::var_os("JEWELCASE_SPOTIFY_TEST_SERVER").is_some() {
             let state = pkce.state.clone();
             std::thread::spawn(move || {
                 use std::io::Write;
@@ -282,7 +282,7 @@ impl Spotify {
         self.imp().cancel_login.replace(None);
         let tokens = match code {
             Ok(code) => gio::spawn_blocking(move || {
-                gatefold_spotify::exchange_code(&client_id, &code, &pkce)
+                jewelcase_spotify::exchange_code(&client_id, &code, &pkce)
             })
             .await
             .unwrap_or(Err(Error::Cancelled)),
@@ -443,7 +443,7 @@ impl Spotify {
     /// disconnecting. (Remembered in the database, so a login that
     /// couldn't be checked at start counts too.)
     fn check_account(&self, user_id: &str) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(mut db) = library.db() else {
             return;
         };
@@ -497,7 +497,7 @@ impl Spotify {
         if let Err(err) = keyring::delete().await {
             tracing::warn!("Cannot remove the Spotify login: {err}");
         }
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         if let Some(mut db) = library.db() {
             if let Err(err) = db.forget_spotify() {
                 tracing::warn!("Cannot remove the Spotify playlists: {err}");
@@ -533,8 +533,8 @@ impl Spotify {
     /// out.
     pub(crate) async fn call<T: Send + 'static>(
         &self,
-        job: impl FnOnce(&Client) -> gatefold_spotify::Result<T> + Send + 'static,
-    ) -> gatefold_spotify::Result<T> {
+        job: impl FnOnce(&Client) -> jewelcase_spotify::Result<T> + Send + 'static,
+    ) -> jewelcase_spotify::Result<T> {
         let Some(client) = self.client() else {
             return Err(Error::LoggedOut);
         };
@@ -552,7 +552,7 @@ impl Spotify {
 /// in the Spotify app when that's chosen in Preferences and installed,
 /// else on the web.
 pub fn open_on_spotify(kind: &str, id: &str) {
-    let in_app = GatefoldApplication::get()
+    let in_app = JewelcaseApplication::get()
         .player()
         .settings()
         .boolean("spotify-links-in-app");
@@ -566,11 +566,11 @@ pub fn open_on_spotify(kind: &str, id: &str) {
 
 /// Opens a page in the browser (or, in headless tests, only logs it).
 pub(crate) fn open_in_browser(url: &str) {
-    if std::env::var_os("GATEFOLD_NO_BROWSER").is_some() {
+    if std::env::var_os("JEWELCASE_NO_BROWSER").is_some() {
         tracing::info!("Browser page (not opened): {url}");
         return;
     }
-    let window = GatefoldApplication::get().active_window();
+    let window = JewelcaseApplication::get().active_window();
     gtk::UriLauncher::new(url).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
         if let Err(err) = result {
             tracing::warn!("Cannot open the browser: {err}");

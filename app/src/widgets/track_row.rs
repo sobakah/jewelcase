@@ -9,7 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::format;
 use crate::objects::TrackObject;
 
@@ -30,7 +30,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for TrackRow {
-        const NAME: &'static str = "GatefoldTrackRow";
+        const NAME: &'static str = "JewelcaseTrackRow";
         type Type = super::TrackRow;
         type ParentType = gtk::ListBoxRow;
     }
@@ -147,7 +147,7 @@ impl TrackRow {
             #[strong]
             track,
             move |_| {
-                GatefoldApplication::get()
+                JewelcaseApplication::get()
                     .player()
                     .add_to_queue(vec![track.clone()]);
             }
@@ -254,7 +254,7 @@ impl TrackRow {
             .build();
         let track = track.clone();
         play_next.connect_clicked(move |_| {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .player()
                 .play_next(vec![track.clone()]);
         });
@@ -264,7 +264,7 @@ impl TrackRow {
             .build();
         let path = self.track().track().record.path.clone();
         edit_tags.connect_clicked(move |_| {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .tools()
                 .edit_tags(vec![path.clone()]);
         });

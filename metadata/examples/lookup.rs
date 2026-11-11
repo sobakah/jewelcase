@@ -1,8 +1,8 @@
 //! Looks up one artist online and prints what was found.
-//! `cargo run -p gatefold-metadata --example lookup -- NAME [MBID]`;
+//! `cargo run -p jewelcase-metadata --example lookup -- NAME [MBID]`;
 //! `ALBUMS="Title|Title"` tells artists of the same name apart on Deezer.
 
-use gatefold_metadata::{ArtistQuery, Client, Providers};
+use jewelcase_metadata::{ArtistQuery, Client, Providers};
 
 fn main() {
     let mut args = std::env::args().skip(1);

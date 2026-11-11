@@ -4,7 +4,7 @@
 use gettextrs::gettext;
 use gtk::prelude::*;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::format;
 use crate::objects::TrackObject;
 
@@ -114,7 +114,7 @@ pub fn grid(track: &TrackObject, full: bool) -> gtk::Grid {
         }
     }
     // The playlists that have it, local or Spotify ones.
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let mut playlists: Vec<String> = library
         .playlists_containing(track)
         .into_iter()

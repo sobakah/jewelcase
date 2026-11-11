@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install the build dependencies
-        run: dnf -y builddep gatefold.spec
+        run: dnf -y builddep jewelcase.spec
 
       - name: Version
         id: version
@@ -53,11 +53,11 @@ jobs:
         run: make tarballs
 
       - name: Build
-        run: rpmbuild -ba --define "_topdir $PWD/rpmbuild" gatefold.spec
+        run: rpmbuild -ba --define "_topdir $PWD/rpmbuild" jewelcase.spec
 
       - uses: actions/upload-artifact@v7
         with:
-          name: gatefold-${{ steps.version.outputs.version }}-rpms
+          name: jewelcase-${{ steps.version.outputs.version }}-rpms
           path: |
             rpmbuild/RPMS/*/*.rpm
             rpmbuild/SRPMS/*.src.rpm
@@ -79,7 +79,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: gatefold-${{ needs.rpm.outputs.version }}-rpms
+          name: jewelcase-${{ needs.rpm.outputs.version }}-rpms
           path: dist
 
       - name: Draft release with the packages
@@ -104,6 +104,6 @@ jobs:
           gh release create "$tag" $files \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Gatefold $VERSION" \
+            --title "Jewelcase $VERSION" \
             --draft $prerelease \
             "${notes[@]}"

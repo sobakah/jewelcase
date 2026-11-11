@@ -134,8 +134,8 @@ impl Player {
         let playbin = gst::ElementFactory::make("playbin3").build()?;
         // Audio only: no video sinks for cover art streams.
         playbin.set_property_from_str("flags", "audio+soft-volume");
-        // GATEFOLD_SILENT=1 plays into a fakesink (in real time) for tests.
-        if std::env::var_os("GATEFOLD_SILENT").is_some() {
+        // JEWELCASE_SILENT=1 plays into a fakesink (in real time) for tests.
+        if std::env::var_os("JEWELCASE_SILENT").is_some() {
             let sink = gst::ElementFactory::make("fakesink")
                 .property("sync", true)
                 .build()?;

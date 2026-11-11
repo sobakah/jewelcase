@@ -12,15 +12,15 @@ use std::sync::OnceLock;
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_core::db::SearchResults;
-use gatefold_core::library::covers::CoverSize;
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::{gio, glib};
+use jewelcase_core::db::SearchResults;
+use jewelcase_core::library::covers::CoverSize;
 
 use super::CoverImage;
 use super::album_tile::artist_or_unknown;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::objects::TrackObject;
 use crate::{covers, format};
@@ -92,14 +92,15 @@ mod imp {
         pub spotify_generation: std::cell::Cell<u64>,
         pub spotify_timer: std::cell::RefCell<Option<glib::SourceId>>,
         /// Spotify's answers this session, by query (lowercase).
-        pub spotify_cache: std::cell::RefCell<HashMap<String, Rc<gatefold_spotify::SearchResults>>>,
+        pub spotify_cache:
+            std::cell::RefCell<HashMap<String, Rc<jewelcase_spotify::SearchResults>>>,
         pub last_query: std::cell::RefCell<String>,
         pub settings: std::cell::OnceCell<gio::Settings>,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for SearchView {
-        const NAME: &'static str = "GatefoldSearchView";
+        const NAME: &'static str = "JewelcaseSearchView";
         type Type = super::SearchView;
         type ParentType = adw::Bin;
     }
@@ -144,7 +145,7 @@ mod imp {
             obj.set_overflow(gtk::Overflow::Hidden);
             obj.set_child(Some(&self.stack));
             // Spotify connected while a search shows: add its results.
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .spotify()
                 .connect_status_notify(glib::clone!(
                     #[weak]
@@ -193,9 +194,9 @@ impl SearchView {
         let imp = self.imp();
         imp.last_query.replace(query.to_owned());
         self.clear();
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let results = library.search(query, LIMIT);
-        let spotify = GatefoldApplication::get().spotify().is_connected()
+        let spotify = JewelcaseApplication::get().spotify().is_connected()
             && query.trim().chars().count() >= 2;
         if results.is_empty() && !spotify {
             imp.empty
@@ -387,7 +388,7 @@ impl SearchView {
                 .build()
         } else {
             gtk::Image::builder()
-                .icon_name("gatefold-spotify-symbolic")
+                .icon_name("jewelcase-spotify-symbolic")
                 .valign(gtk::Align::Center)
                 .tooltip_text(gettext("On Spotify, not in your library"))
                 .build()
@@ -403,7 +404,7 @@ impl SearchView {
     }
 
     fn library_artist(&self, section: &Section, id: i64) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(artist) = library.artist(id) else {
             return;
         };
@@ -424,7 +425,7 @@ impl SearchView {
     }
 
     fn add_albums(&self, section: &Section, results: &SearchResults) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         for id in &results.albums {
             if let Some(group) = library.album_group(*id) {
                 self.library_album(section, &group);
@@ -456,7 +457,7 @@ impl SearchView {
     }
 
     fn add_songs(&self, section: &Section, results: &SearchResults) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let mut tracks = library.tracks(&results.tracks);
         for id in &results.tracks {
             if let Some(track) = tracks.remove(id) {
@@ -507,7 +508,7 @@ impl SearchView {
             .build();
         let to_queue = track.clone();
         queue.connect_clicked(move |_| {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .player()
                 .add_to_queue(vec![to_queue.clone()]);
         });
@@ -525,7 +526,7 @@ impl SearchView {
         row.add_suffix(&playlist);
         row.add_suffix(&Self::source_icon(in_library));
         row.connect_activated(move |_| {
-            let app = GatefoldApplication::get();
+            let app = JewelcaseApplication::get();
             // A library song plays its album from it; a Spotify song alone.
             if let Some(album_id) = track.track().album_id.filter(|_| !track.is_stand_in()) {
                 let index = app
@@ -549,7 +550,7 @@ impl SearchView {
     }
 
     fn library_playlist(&self, section: &Section, id: i64) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(playlist) = library.playlist(id) else {
             return;
         };
@@ -602,7 +603,7 @@ impl SearchView {
     }
 
     async fn fetch_spotify(&self, query: String, key: String, generation: u64) {
-        let result = GatefoldApplication::get()
+        let result = JewelcaseApplication::get()
             .spotify()
             .call(move |client| client.search_all(&query))
             .await;
@@ -632,7 +633,7 @@ impl SearchView {
         }
     }
 
-    fn show_spotify(&self, found: &gatefold_spotify::SearchResults) {
+    fn show_spotify(&self, found: &jewelcase_spotify::SearchResults) {
         let Some(sections) = self.imp().current.borrow().clone() else {
             return;
         };
@@ -669,10 +670,10 @@ impl SearchView {
     fn spotify_artists(
         &self,
         section: &Section,
-        artists: &[gatefold_spotify::Artist],
+        artists: &[jewelcase_spotify::Artist],
         covers: &mut SpotifyCovers,
     ) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         for artist in artists {
             if let Some(id) = library.artist_for_spotify(&artist.id, &artist.name) {
                 if !self.imp().shown.borrow().artists.contains(&id) {
@@ -707,10 +708,10 @@ impl SearchView {
     fn spotify_albums(
         &self,
         section: &Section,
-        albums: &[gatefold_spotify::Album],
+        albums: &[jewelcase_spotify::Album],
         covers: &mut SpotifyCovers,
     ) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         for album in albums {
             let album = crate::spotify::album_from(album);
             if let Some(group) = library.local_album_for(&album) {
@@ -728,7 +729,7 @@ impl SearchView {
             let row = Self::row(&album.name, &subtitle, &cover);
             row.add_suffix(&Self::source_icon(false));
             row.connect_activated(move |row| {
-                if let Some(window) = row.root().and_downcast::<crate::window::GatefoldWindow>() {
+                if let Some(window) = row.root().and_downcast::<crate::window::JewelcaseWindow>() {
                     window.show_spotify_album(&album);
                 }
             });
@@ -739,22 +740,22 @@ impl SearchView {
     fn spotify_songs(
         &self,
         section: &Section,
-        tracks: &[gatefold_spotify::Track],
+        tracks: &[jewelcase_spotify::Track],
         covers: &mut SpotifyCovers,
     ) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let index = library.match_index();
         for track in tracks.iter().filter(|t| !t.is_local) {
             // In the library? Then it's the library's song (§9.5).
             let local = index
-                .find(&gatefold_core::matching::RemoteTrack {
+                .find(&jewelcase_core::matching::RemoteTrack {
                     title: track.name.clone(),
                     artists: track.artists.clone(),
                     album: track.album.clone(),
                     duration_ms: track.duration_ms,
                     isrc: track.isrc.clone(),
                 })
-                .filter(|(_, c)| *c == gatefold_core::matching::Confidence::Sure)
+                .filter(|(_, c)| *c == jewelcase_core::matching::Confidence::Sure)
                 .map(|(id, _)| id);
             if let Some(id) = local {
                 if let Some(song) = library.tracks(&[id]).remove(&id) {
@@ -764,7 +765,7 @@ impl SearchView {
             }
             // A Spotify song to stream (negative ID, §9.4).
             let id = library.db().and_then(|mut db| {
-                db.stream_track_id(&gatefold_core::db::StreamInfo {
+                db.stream_track_id(&jewelcase_core::db::StreamInfo {
                     uri: track.uri.clone(),
                     title: track.name.clone(),
                     artist: Some(track.artist_line()),
@@ -799,10 +800,10 @@ impl SearchView {
     fn spotify_playlists(
         &self,
         section: &Section,
-        playlists: &[gatefold_spotify::PlaylistSummary],
+        playlists: &[jewelcase_spotify::PlaylistSummary],
         covers: &mut SpotifyCovers,
     ) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let store = library.playlists();
         let linked = |spotify_id: &str| {
             (0..store.n_items())
@@ -836,7 +837,7 @@ impl SearchView {
             let id = playlist.id.clone();
             row.set_tooltip_text(Some(&gettext("Plays with Soloist, or opens in Spotify")));
             row.connect_activated(move |_| {
-                let spotify = GatefoldApplication::get().spotify();
+                let spotify = JewelcaseApplication::get().spotify();
                 let uri = format!("spotify:playlist:{id}");
                 if !(spotify.can_stream() && spotify.soloist_play_context(&uri)) {
                     crate::spotify::open_on_spotify("playlist", &id);

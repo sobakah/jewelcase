@@ -1,4 +1,4 @@
-//! Gatefold's GTK-free core: library database, scanner, queue and playback
+//! Jewelcase's GTK-free core: library database, scanner, queue and playback
 //! (CONCEPT.md §2, "Crate / module layout").
 
 pub mod analysis;

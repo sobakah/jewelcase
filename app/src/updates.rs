@@ -1,22 +1,22 @@
-//! Updates (CONCEPT.md §13, phase 9): new versions of Gatefold, of the
-//! Soloist build and of soloistd, checked when Gatefold starts and twice a
+//! Updates (CONCEPT.md §13, phase 9): new versions of Jewelcase, of the
+//! Soloist build and of soloistd, checked when Jewelcase starts and twice a
 //! day, shown in a banner and installed only when asked.
 //!
-//! - **Gatefold** (the RPM from GitHub releases): the newest release
+//! - **Jewelcase** (the RPM from GitHub releases): the newest release
 //!   above this version. While the repository is private, GitHub answers
 //!   only logged-in requests, so it's asked through the `gh` command when
 //!   it's installed and logged in, else directly. The RPM is downloaded,
 //!   checked against the SHA-256 GitHub lists for it, and installed with
-//!   `pkexec dnf install` (GNOME asks for the password); then Gatefold
+//!   `pkexec dnf install` (GNOME asks for the password); then Jewelcase
 //!   offers to restart. Off in development builds and in a build with
 //!   `-Dupdate_check=false` (a Flatpak updates through its repository).
 //! - **Soloist** (managed by soloistd): Spotify's build on its CDN has
 //!   another ETag than the one soloistd installed (`release.json`).
-//!   Updating runs `soloistd update` and restarts the service; Gatefold
+//!   Updating runs `soloistd update` and restarts the service; Jewelcase
 //!   reconnects by itself. (soloistd also updates by itself every six
 //!   hours.)
 //! - **soloistd**: a newer GitHub release than `soloistd version`;
-//!   installed like Gatefold when it came as an RPM, else linked.
+//!   installed like Jewelcase when it came as an RPM, else linked.
 
 use std::cell::RefCell;
 use std::io::Read;
@@ -30,22 +30,22 @@ use gtk::{gio, glib};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config;
-use crate::window::GatefoldWindow;
+use crate::window::JewelcaseWindow;
 
-const GATEFOLD_REPO: &str = "sobakah/gatefold";
+const JEWELCASE_REPO: &str = "sobakah/jewelcase";
 const SOLOISTD_REPO: &str = "MopigamesYT/soloistd";
 const SOLOIST_CDN: &str = "https://soloist-builds.spotifycdn.com/";
 /// After the start (it doesn't slow it down) …
 const FIRST_CHECK_S: u32 = 8;
-/// … and again while Gatefold stays open.
+/// … and again while Jewelcase stays open.
 const CHECK_EVERY_S: u32 = 12 * 3600;
 
 /// Something that can be updated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Update {
-    Gatefold(Release),
+    Jewelcase(Release),
     Soloistd(Release),
     /// A new Soloist build, with its date (the CDN's Last-Modified).
     Soloist {
@@ -57,7 +57,7 @@ enum Update {
 impl Update {
     fn key(&self) -> String {
         match self {
-            Update::Gatefold(r) => format!("gatefold:{}", r.tag),
+            Update::Jewelcase(r) => format!("jewelcase:{}", r.tag),
             Update::Soloistd(r) => format!("soloistd:{}", r.tag),
             Update::Soloist { etag, .. } => format!("soloist:{etag}"),
         }
@@ -65,8 +65,8 @@ impl Update {
 
     fn title(&self) -> String {
         match self {
-            Update::Gatefold(r) => {
-                gettext("Gatefold {} is available").replace("{}", &r.version_text())
+            Update::Jewelcase(r) => {
+                gettext("Jewelcase {} is available").replace("{}", &r.version_text())
             }
             Update::Soloistd(r) => {
                 gettext("soloistd {} is available").replace("{}", &r.version_text())
@@ -127,7 +127,7 @@ fn first_offered() -> Option<Update> {
 }
 
 /// Starts the checks for `window` (when it opens, then twice a day).
-pub fn start(window: &GatefoldWindow) {
+pub fn start(window: &JewelcaseWindow) {
     let window = window.downgrade();
     glib::timeout_add_seconds_local_once(FIRST_CHECK_S, {
         let window = window.clone();
@@ -146,19 +146,19 @@ fn settings() -> gio::Settings {
     gio::Settings::new(config::APP_ID)
 }
 
-/// Whether this Gatefold looks for its own updates: the RPM build (not a
+/// Whether this Jewelcase looks for its own updates: the RPM build (not a
 /// development build, not a Flatpak), installed by dnf.
 fn checks_itself() -> bool {
-    if std::env::var_os("GATEFOLD_UPDATE_TEST").is_some() {
+    if std::env::var_os("JEWELCASE_UPDATE_TEST").is_some() {
         return true;
     }
     config::update_check()
         && !config::is_development()
-        && std::env::current_exe().is_ok_and(|exe| exe == Path::new("/usr/bin/gatefold"))
-        && rpm_version("gatefold").is_some()
+        && std::env::current_exe().is_ok_and(|exe| exe == Path::new("/usr/bin/jewelcase"))
+        && rpm_version("jewelcase").is_some()
 }
 
-fn check(window: glib::WeakRef<GatefoldWindow>) {
+fn check(window: glib::WeakRef<JewelcaseWindow>) {
     if !settings().boolean("check-updates") {
         return;
     }
@@ -167,10 +167,10 @@ fn check(window: glib::WeakRef<GatefoldWindow>) {
         let found = gio::spawn_blocking(move || {
             let mut found = Vec::new();
             if checks_itself() {
-                match newest_release(gatefold_repo(), &current) {
-                    Ok(Some(release)) => found.push(Update::Gatefold(release)),
+                match newest_release(jewelcase_repo(), &current) {
+                    Ok(Some(release)) => found.push(Update::Jewelcase(release)),
                     Ok(None) => {}
-                    Err(err) => tracing::info!("No update check for Gatefold: {err}"),
+                    Err(err) => tracing::info!("No update check for Jewelcase: {err}"),
                 }
             }
             if let Some(update) = soloist_build() {
@@ -205,50 +205,50 @@ fn check(window: glib::WeakRef<GatefoldWindow>) {
                 .collect();
         });
         refresh_banner(&window);
-        // Development aid: `GATEFOLD_SCREENSHOT_UPDATE=1` opens the dialog.
-        if std::env::var_os("GATEFOLD_SCREENSHOT_UPDATE").is_some() {
+        // Development aid: `JEWELCASE_SCREENSHOT_UPDATE=1` opens the dialog.
+        if std::env::var_os("JEWELCASE_SCREENSHOT_UPDATE").is_some() {
             show_dialog(&window);
         }
     });
 }
 
-/// `GATEFOLD_UPDATE_REPO=owner/name` asks another (public) repository
-/// for Gatefold's releases (tests: the private one needs `gh`'s login).
-fn gatefold_repo() -> &'static str {
+/// `JEWELCASE_UPDATE_REPO=owner/name` asks another (public) repository
+/// for Jewelcase's releases (tests: the private one needs `gh`'s login).
+fn jewelcase_repo() -> &'static str {
     static REPO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     REPO.get_or_init(|| {
-        std::env::var("GATEFOLD_UPDATE_REPO")
+        std::env::var("JEWELCASE_UPDATE_REPO")
             .ok()
             .filter(|r| r.split('/').count() == 2)
-            .unwrap_or_else(|| GATEFOLD_REPO.to_owned())
+            .unwrap_or_else(|| JEWELCASE_REPO.to_owned())
     })
 }
 
-/// `GATEFOLD_UPDATE_TEST=0.1.0` pretends to be that version (tests).
+/// `JEWELCASE_UPDATE_TEST=0.1.0` pretends to be that version (tests).
 fn test_version() -> Option<&'static str> {
     static VERSION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     VERSION
         .get_or_init(|| {
-            std::env::var("GATEFOLD_UPDATE_TEST")
+            std::env::var("JEWELCASE_UPDATE_TEST")
                 .ok()
                 .filter(|v| parse_version(v).is_some())
         })
         .as_deref()
 }
 
-fn refresh_banner(window: &GatefoldWindow) {
+fn refresh_banner(window: &JewelcaseWindow) {
     let first = first_offered().map(|u| u.title());
     window.set_update_banner(first.as_deref());
 }
 
 /// The banner's button: the first update's dialog.
-pub fn show_dialog(window: &GatefoldWindow) {
+pub fn show_dialog(window: &JewelcaseWindow) {
     let Some(update) = first_offered() else {
         window.set_update_banner(None);
         return;
     };
     let (body, install_label) = match &update {
-        Update::Gatefold(release) | Update::Soloistd(release) => {
+        Update::Jewelcase(release) | Update::Soloistd(release) => {
             let mut body = notes_text(&release.notes);
             if release.rpm.is_none() {
                 body.push_str("\n\n");
@@ -273,7 +273,7 @@ pub fn show_dialog(window: &GatefoldWindow) {
         .build();
     dialog.add_response("later", &gettext("_Later"));
     dialog.add_response("skip", &gettext("_Skip This Version"));
-    if let Update::Gatefold(release) | Update::Soloistd(release) = &update {
+    if let Update::Jewelcase(release) | Update::Soloistd(release) = &update {
         dialog.add_response("page", &gettext("Release _Page"));
         let page = release.page.clone();
         dialog.connect_response(Some("page"), move |dialog, _| {
@@ -357,10 +357,10 @@ fn notes_text(notes: &str) -> String {
     text
 }
 
-fn install(window: &GatefoldWindow, update: Update) {
+fn install(window: &JewelcaseWindow, update: Update) {
     window.show_toast(&match &update {
         Update::Soloist { .. } => gettext("Updating Soloist…"),
-        Update::Gatefold(_) => gettext("Downloading the update…"),
+        Update::Jewelcase(_) => gettext("Downloading the update…"),
         Update::Soloistd(_) => gettext("Downloading the update…"),
     });
     let key = update.key();
@@ -380,15 +380,15 @@ fn install(window: &GatefoldWindow, update: Update) {
         async move {
             let job = update.clone();
             let result = gio::spawn_blocking(move || match &job {
-                Update::Gatefold(release) | Update::Soloistd(release) => {
+                Update::Jewelcase(release) | Update::Soloistd(release) => {
                     let path = download(release)?;
                     let installed = install_rpm(&path);
                     let _ = std::fs::remove_file(&path);
                     installed
                 }
                 Update::Soloist { .. } => {
-                    gatefold_soloist::soloistd::update()?;
-                    gatefold_soloist::soloistd::control_service("restart")
+                    jewelcase_soloist::soloistd::update()?;
+                    jewelcase_soloist::soloistd::control_service("restart")
                 }
             })
             .await
@@ -401,7 +401,7 @@ fn install(window: &GatefoldWindow, update: Update) {
                     forget(&key);
                     refresh_banner(&window);
                     match update {
-                        Update::Gatefold(release) => ask_restart(&window, &release),
+                        Update::Jewelcase(release) => ask_restart(&window, &release),
                         Update::Soloistd(release) => window.show_toast(
                             &gettext("soloistd {} is installed")
                                 .replace("{}", &release.version_text()),
@@ -429,9 +429,9 @@ fn install(window: &GatefoldWindow, update: Update) {
 
 const CANCELLED: &str = "cancelled";
 
-fn ask_restart(window: &GatefoldWindow, release: &Release) {
+fn ask_restart(window: &JewelcaseWindow, release: &Release) {
     let dialog = adw::AlertDialog::builder()
-        .heading(gettext("Gatefold {} Is Installed").replace("{}", &release.version_text()))
+        .heading(gettext("Jewelcase {} Is Installed").replace("{}", &release.version_text()))
         .body(gettext(
             "It’s used from the next start. Restarting now stops what plays; the queue is kept.",
         ))
@@ -452,7 +452,7 @@ fn restart() {
     let started = Command::new("sh")
         .args([
             "-c",
-            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec gatefold",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec jewelcase",
             "sh",
             &pid.to_string(),
         ])
@@ -463,17 +463,17 @@ fn restart() {
     let mut helper = match started {
         Ok(helper) => helper,
         Err(err) => {
-            tracing::warn!("Cannot restart Gatefold: {err}");
+            tracing::warn!("Cannot restart Jewelcase: {err}");
             return;
         }
     };
-    let app = GatefoldApplication::get();
+    let app = JewelcaseApplication::get();
     app.activate_action("quit", None);
     // Closing may keep the app (background playback) or be cancelled
     // (a running tool asks first): quit for good once the windows are
     // gone, else the restart is off.
     glib::timeout_add_seconds_local_once(2, move || {
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         if app.windows().is_empty() {
             app.quit();
         } else {
@@ -488,7 +488,7 @@ fn restart() {
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .user_agent(format!(
-            "Gatefold/{} ( https://github.com/sobakah/gatefold )",
+            "Jewelcase/{} ( https://github.com/sobakah/jewelcase )",
             config::VERSION
         ))
         .timeout_global(Some(Duration::from_secs(30)))
@@ -532,7 +532,7 @@ fn releases(repo: &str) -> Result<(Value, bool), String> {
 }
 
 /// The newest release of `repo` above `current` (drafts aside; pre-
-/// releases count, Gatefold's are all pre-releases for now).
+/// releases count, Jewelcase's are all pre-releases for now).
 fn newest_release(repo: &'static str, current: &str) -> Result<Option<Release>, String> {
     let current = parse_version(current).ok_or("unknown version")?;
     let (value, via_gh) = releases(repo)?;
@@ -575,7 +575,7 @@ fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// The binary RPM for this machine and Fedora release, if the release
-/// has one and Gatefold (or soloistd) came as an RPM.
+/// has one and Jewelcase (or soloistd) came as an RPM.
 fn rpm_asset(release: &Value) -> Option<Asset> {
     let arch = std::env::consts::ARCH;
     let dist = fedora_dist();
@@ -632,12 +632,12 @@ fn rpm_version(package: &str) -> Option<String> {
 
 /// soloistd is the one dnf installed (`/usr/bin/soloistd`).
 fn soloistd_from_rpm() -> bool {
-    gatefold_soloist::soloistd::binary().is_some_and(|b| b == Path::new("/usr/bin/soloistd"))
+    jewelcase_soloist::soloistd::binary().is_some_and(|b| b == Path::new("/usr/bin/soloistd"))
         && rpm_version("soloistd").is_some()
 }
 
 fn soloistd_version() -> Option<String> {
-    let binary = gatefold_soloist::soloistd::binary()?;
+    let binary = jewelcase_soloist::soloistd::binary()?;
     let output = Command::new(binary)
         .arg("version")
         .stdin(Stdio::null())
@@ -823,8 +823,8 @@ mod tests {
         let arch = std::env::consts::ARCH;
         let release = serde_json::json!({
             "assets": [
-                {"name": "gatefold-0.2.1-1.fc45.src.rpm", "browser_download_url": "s", "digest": "sha256:aa"},
-                {"name": format!("gatefold-0.2.1-1.fc45.{arch}.rpm"), "browser_download_url": "b", "digest": "sha256:bb"},
+                {"name": "jewelcase-0.2.1-1.fc45.src.rpm", "browser_download_url": "s", "digest": "sha256:aa"},
+                {"name": format!("jewelcase-0.2.1-1.fc45.{arch}.rpm"), "browser_download_url": "b", "digest": "sha256:bb"},
             ]
         });
         let asset = rpm_asset(&release).unwrap();

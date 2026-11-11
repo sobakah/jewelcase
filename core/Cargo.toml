@@ -1,6 +1,6 @@
 [package]
-name = "gatefold-core"
-description = "Gatefold's GTK-free core: library model, scanner, queue and playback engine"
+name = "jewelcase-core"
+description = "Jewelcase's GTK-free core: library model, scanner, queue and playback engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

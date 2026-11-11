@@ -7,13 +7,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_core::playback::{self, PlayerEvent};
-use gatefold_core::queue::{Queue, RepeatMode};
-use gatefold_core::similar::{self, Criteria, SongFeatures};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_core::playback::{self, PlayerEvent};
+use jewelcase_core::queue::{Queue, RepeatMode};
+use jewelcase_core::similar::{self, Criteria, SongFeatures};
 
 use crate::config::APP_ID;
 use crate::library::Library;
@@ -126,7 +126,7 @@ mod imp {
         /// Whether ReplayGain was on, to notice it being switched.
         pub replaygain_on: Cell<bool>,
         /// Where songs' music starts and ends (smart crossfade), by track.
-        pub edges: RefCell<HashMap<i64, Option<gatefold_core::analysis::Edges>>>,
+        pub edges: RefCell<HashMap<i64, Option<jewelcase_core::analysis::Edges>>>,
         pub library: OnceCell<Library>,
         pub settings: OnceCell<gio::Settings>,
         pub actions: gio::SimpleActionGroup,
@@ -150,7 +150,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Player {
-        const NAME: &'static str = "GatefoldPlayer";
+        const NAME: &'static str = "JewelcasePlayer";
         type Type = super::Player;
     }
 
@@ -1036,7 +1036,7 @@ impl Player {
             .into_iter()
             .enumerate()
             .map(|(offset, track)| {
-                QueueEntry::new(offset, track, gatefold_core::queue::Origin::Context)
+                QueueEntry::new(offset, track, jewelcase_core::queue::Origin::Context)
             })
             .collect();
         let model = self.remote_queue();
@@ -1182,7 +1182,7 @@ impl Player {
     }
 
     /// Where a song's music starts and ends, from the analysis.
-    fn song_edges(&self, track_id: i64) -> Option<gatefold_core::analysis::Edges> {
+    fn song_edges(&self, track_id: i64) -> Option<jewelcase_core::analysis::Edges> {
         if track_id < 0 {
             return None;
         }
@@ -1353,7 +1353,7 @@ impl Player {
     // Streaming (§9.4) --------------------------------------------------
 
     fn spotify(&self) -> crate::spotify::Spotify {
-        crate::application::GatefoldApplication::get().spotify()
+        crate::application::JewelcaseApplication::get().spotify()
     }
 
     fn stream_uri(&self, track: &TrackObject) -> Option<String> {
@@ -1440,7 +1440,7 @@ impl Player {
                     self.emit_by_name::<()>(
                         "message",
                         &[&gettext(
-                            "Spotify streaming can't play songs right now; Gatefold stopped",
+                            "Spotify streaming can't play songs right now; Jewelcase stopped",
                         )],
                     );
                     return;

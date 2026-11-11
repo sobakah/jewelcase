@@ -1,7 +1,7 @@
 //! Loads the lyrics of the given files and prints a summary; with one file,
-//! prints its lines. `cargo run -p gatefold-lyrics --example survey -- FILE...`
+//! prints its lines. `cargo run -p jewelcase-lyrics --example survey -- FILE...`
 
-use gatefold_lyrics::{LyricsState, load};
+use jewelcase_lyrics::{LyricsState, load};
 
 fn main() {
     let files: Vec<String> = std::env::args().skip(1).collect();

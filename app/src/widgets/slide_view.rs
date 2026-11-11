@@ -83,7 +83,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SlideView {
-        const NAME: &'static str = "GatefoldSlideView";
+        const NAME: &'static str = "JewelcaseSlideView";
         type Type = super::SlideView;
         type ParentType = gtk::Widget;
 

@@ -1,4 +1,4 @@
-//! Gatefold's companion tools (CONCEPT.md §10): lyrembed, cdport and the
+//! Jewelcase's companion tools (CONCEPT.md §10): lyrembed, cdport and the
 //! tag editor (Ear Tag by default).
 //!
 //! The command line is the stable interface: arguments, exit codes,

@@ -173,7 +173,7 @@ pub fn spotify_title(title: &str, from_spotify: bool) -> gtk::Widget {
 /// The small Spotify icon for songs that play from Spotify.
 pub fn spotify_icon() -> gtk::Image {
     gtk::Image::builder()
-        .icon_name("gatefold-spotify-symbolic")
+        .icon_name("jewelcase-spotify-symbolic")
         .pixel_size(12)
         .valign(gtk::Align::Center)
         .tooltip_text(gettextrs::gettext("Plays from Spotify"))
@@ -186,11 +186,11 @@ pub fn open_song_page(uri: String, artist: bool) {
     use gettextrs::gettext;
     use gtk::prelude::*;
 
-    use crate::application::GatefoldApplication;
-    use crate::window::GatefoldWindow;
+    use crate::application::JewelcaseApplication;
+    use crate::window::JewelcaseWindow;
 
     gtk::glib::spawn_future_local(async move {
-        let app = GatefoldApplication::get();
+        let app = JewelcaseApplication::get();
         let spotify = app.spotify();
         let unanswered = || {
             app.library()
@@ -199,7 +199,7 @@ pub fn open_song_page(uri: String, artist: bool) {
         let Some(links) = spotify.track_links(&uri).await else {
             return unanswered();
         };
-        let Some(window) = app.active_window().and_downcast::<GatefoldWindow>() else {
+        let Some(window) = app.active_window().and_downcast::<JewelcaseWindow>() else {
             return;
         };
         if artist {

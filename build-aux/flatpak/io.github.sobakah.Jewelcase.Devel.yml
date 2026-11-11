@@ -4,17 +4,17 @@
 #
 # Its own app ID (.Devel, like `make build`), so it runs next to the RPM
 # install without sharing its window, MPRIS name or desktop entry; its
-# data lives in ~/.var/app/io.github.sobakah.Gatefold.Devel.
+# data lives in ~/.var/app/io.github.sobakah.Jewelcase.Devel.
 #
 # Not for Flathub as it is: Cargo fetches crates over the network while
 # building (Flathub builds offline, from a generated cargo-sources.json).
-id: io.github.sobakah.Gatefold.Devel
+id: io.github.sobakah.Jewelcase.Devel
 runtime: org.gnome.Platform
 runtime-version: '51'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: gatefold-devel
+command: jewelcase-devel
 
 finish-args:
   - --share=ipc
@@ -24,15 +24,15 @@ finish-args:
   - --socket=pulseaudio
   # Spotify, artist information, lyrics (LRCLIB), cover and portrait downloads.
   - --share=network
-  # The library. Read-only: Gatefold never writes there (tags are Ear Tag's
+  # The library. Read-only: Jewelcase never writes there (tags are Ear Tag's
   # job, playlist exports go where the file chooser says).
   - --filesystem=xdg-music:ro
   # The Soloist that soloistd downloads and updates on the host, run here
-  # as Gatefold's own Soloist (own data folder, API key and device).
+  # as Jewelcase's own Soloist (own data folder, API key and device).
   # soloistd itself stays outside: it manages only one Soloist.
   - --filesystem=xdg-data/soloistd/bin:ro
   # Media keys and GNOME Shell's media controls.
-  - --own-name=org.mpris.MediaPlayer2.Gatefold.Devel
+  - --own-name=org.mpris.MediaPlayer2.Jewelcase.Devel
   # cdport (CD imports) and lyrembed (lyrics) through their D-Bus services
   # on the host.
   - --talk-name=io.github.sobakah.cdport
@@ -87,16 +87,16 @@ modules:
       - /lib/girepository-1.0
       - /share
 
-  - name: gatefold
+  - name: jewelcase
     buildsystem: meson
     config-opts:
       - -Dprofile=development
-      # Flatpaks update through their repository, not Gatefold's own check.
+      # Flatpaks update through their repository, not Jewelcase's own check.
       - -Dupdate_check=false
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
-        CARGO_HOME: /run/build/gatefold/cargo
+        CARGO_HOME: /run/build/jewelcase/cargo
       # Cargo downloads the crates (see the note at the top).
       build-args:
         - --share=network

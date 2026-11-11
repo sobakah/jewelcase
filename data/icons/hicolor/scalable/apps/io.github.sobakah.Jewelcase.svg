@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Jewelcase: a CD jewel case seen from the front (the hinge on the left,
+       a sunset on the booklet behind the clear lid) with the disc slipping
+       out behind it. Fills the canvas like GNOME's own icons (96 x 92 case,
+       its edge below), so it doesn't look small next to them. -->
+  <defs>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c0bfbc"/>
+    </linearGradient>
+    <linearGradient id="shimmer" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0.2" stop-color="#99c1f1" stop-opacity="0"/>
+      <stop offset="0.38" stop-color="#99c1f1"/>
+      <stop offset="0.5" stop-color="#8ff0a4"/>
+      <stop offset="0.6" stop-color="#f9f06b"/>
+      <stop offset="0.72" stop-color="#ffa348"/>
+      <stop offset="0.85" stop-color="#dc8add"/>
+      <stop offset="1" stop-color="#dc8add" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#613583"/>
+      <stop offset="0.55" stop-color="#c01c28"/>
+      <stop offset="1" stop-color="#e66100"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9f06b"/>
+      <stop offset="1" stop-color="#ffbe6f"/>
+    </linearGradient>
+    <linearGradient id="glare" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="cover"><rect x="27" y="35" width="71" height="73" rx="2"/></clipPath>
+    <!-- a retro sun: its lower half in bands, the sky between them -->
+    <clipPath id="bands"><path d="M27 35h71v53H27zM27 91h71v5H27zM27 99h71v4H27zM27 106h71v3H27z"/></clipPath>
+  </defs>
+
+  <!-- the CD, slipping out behind the case -->
+  <circle cx="86" cy="42" r="34" fill="url(#silver)"/>
+  <circle cx="86" cy="42" r="34" fill="url(#shimmer)" opacity="0.85"/>
+  <circle cx="86" cy="42" r="11" fill="#f6f5f4"/>
+  <circle cx="86" cy="42" r="4.5" fill="#77767b"/>
+  <circle cx="86" cy="42" r="33" fill="none" stroke="#c0bfbc" stroke-width="2"/>
+
+  <!-- the case: its edge, then the clear front -->
+  <rect x="10" y="34" width="94" height="86" rx="8" fill="#5e5c64"/>
+  <rect x="10" y="28" width="94" height="86" rx="8" fill="#deddda"/>
+  <!-- the booklet: a sunset -->
+  <g clip-path="url(#cover)">
+    <rect x="27" y="35" width="71" height="73" fill="url(#sky)"/>
+    <circle cx="62" cy="86" r="22" fill="url(#sun)" clip-path="url(#bands)"/>
+  </g>
+  <!-- the hinge -->
+  <path d="M18 28h6v86h-6a8 8 0 0 1-8-8V36a8 8 0 0 1 8-8z" fill="#9a9996"/>
+  <path d="M14 40h6M14 48h6M14 94h6M14 102h6" stroke="#f6f5f4" stroke-width="3" stroke-linecap="round"/>
+  <!-- the clear lid -->
+  <path d="M27 35h44L27 85z" fill="url(#glare)"/>
+  <rect x="11" y="29" width="92" height="84" rx="7" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="2"/>
+</svg>

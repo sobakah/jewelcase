@@ -9,16 +9,16 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_core::db::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, Track};
-use gatefold_core::matching::{self, Confidence, LocalTrack, RemoteTrack};
-use gatefold_spotify::{Client, Error, PlaylistEntry};
 use gettextrs::{gettext, ngettext};
 use gtk::glib;
 use gtk::subclass::prelude::*;
+use jewelcase_core::db::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, Track};
+use jewelcase_core::matching::{self, Confidence, LocalTrack, RemoteTrack};
+use jewelcase_spotify::{Client, Error, PlaylistEntry};
 use serde_json::{Value, json};
 
 use super::Spotify;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::metadata::now;
 
 /// Local edits wait this long after the last one, so several edits in a
@@ -374,7 +374,7 @@ impl Op {
         client: &Client,
         id: &str,
         snapshot: Option<&str>,
-    ) -> gatefold_spotify::Result<Option<String>> {
+    ) -> jewelcase_spotify::Result<Option<String>> {
         match self {
             Self::Add { uris, position, .. } if !uris.is_empty() => {
                 client.add_items(id, uris, *position).map(Some)
@@ -398,7 +398,7 @@ impl Op {
             Self::Replace { uris } => client.replace_items(id, uris).map(Some),
             Self::Cover { key } => {
                 let covers =
-                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
                 match covers.upload_jpeg(key, MAX_COVER_BYTES) {
                     Ok(jpeg) => client.upload_cover(id, &jpeg).map(|()| None),
                     // Gone from the cache (replaced again): nothing to send.
@@ -444,7 +444,7 @@ enum Job {
     Remove(i64, bool),
 }
 
-fn remote_track(track: &gatefold_spotify::Track) -> RemoteTrack {
+fn remote_track(track: &jewelcase_spotify::Track) -> RemoteTrack {
     RemoteTrack {
         title: track.name.clone(),
         artists: track.artists.clone(),
@@ -706,7 +706,7 @@ impl Spotify {
         }
         let user = self.user_id().unwrap_or_default();
         let show_mirrors = self.settings().boolean("spotify-playlists");
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let mut to_read = Vec::new();
         {
             let Some(mut db) = library.db() else { return };
@@ -824,7 +824,7 @@ impl Spotify {
     /// One playlist: its changes, then a re-read if Spotify's changed.
     async fn sync_playlist(&self, id: i64) {
         self.flush(id).await;
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(linked) = library
             .db()
             .and_then(|db| db.linked_playlist(id).ok().flatten())
@@ -866,7 +866,7 @@ impl Spotify {
         spotify_id: &str,
         snapshot: Option<String>,
         compare: bool,
-    ) -> gatefold_spotify::Result<bool> {
+    ) -> jewelcase_spotify::Result<bool> {
         let sid = spotify_id.to_owned();
         let (entries, snapshot) = self
             .call(move |client| {
@@ -878,7 +878,7 @@ impl Spotify {
                 Ok((entries, snapshot))
             })
             .await?;
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let index = library.match_index();
         let Some(mut db) = library.db() else {
             return Ok(false);
@@ -900,7 +900,7 @@ impl Spotify {
     }
 
     async fn flush_all(&self) {
-        let ids = GatefoldApplication::get()
+        let ids = JewelcaseApplication::get()
             .library()
             .db()
             .and_then(|db| db.playlists_with_ops().ok())
@@ -924,7 +924,7 @@ impl Spotify {
     }
 
     async fn send_changes(&self, id: i64) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let (linked, ops) = {
             let Some(db) = library.db() else { return };
             let Some(linked) = db.linked_playlist(id).ok().flatten() else {
@@ -1154,7 +1154,7 @@ impl Spotify {
 
     /// Spotify playlists' covers, downloaded when Spotify's image changed.
     async fn load_covers(&self) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let wanted: Vec<(i64, String, String)> = library
             .db()
             .and_then(|db| db.linked_playlists().ok())
@@ -1162,7 +1162,7 @@ impl Spotify {
             .into_iter()
             .filter_map(|p| {
                 let url = p.image_url?;
-                let key = gatefold_core::library::covers::cover_key('s', url.as_bytes());
+                let key = jewelcase_core::library::covers::cover_key('s', url.as_bytes());
                 (p.cover_key.as_deref() != Some(&key)).then_some((p.id, url, key))
             })
             .collect();
@@ -1173,11 +1173,11 @@ impl Spotify {
             let job_key = key.clone();
             let made = gtk::gio::spawn_blocking(move || {
                 let covers =
-                    gatefold_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
                 if covers.has(&job_key) {
                     return true;
                 }
-                match gatefold_spotify::download_image(&url) {
+                match jewelcase_spotify::download_image(&url) {
                     Ok(data) => covers.generate(&job_key, data).is_ok(),
                     Err(err) => {
                         tracing::info!("Cannot load a playlist cover: {err}");
@@ -1198,8 +1198,8 @@ impl Spotify {
     /// playlist, or a search (ISRC first, then title and artist).
     /// An error means Spotify couldn't be asked (offline, too many
     /// requests); nothing is remembered then, so it's tried again later.
-    pub async fn find_version(&self, track_id: i64) -> gatefold_spotify::Result<SpotifyVersion> {
-        let library = GatefoldApplication::get().library();
+    pub async fn find_version(&self, track_id: i64) -> jewelcase_spotify::Result<SpotifyVersion> {
+        let library = JewelcaseApplication::get().library();
         // A Spotify song already (one to stream).
         if track_id < 0 {
             let uri = library
@@ -1339,7 +1339,7 @@ impl Spotify {
     /// ones are added on Spotify, likely ones are suggested. Returns how
     /// many aren't on Spotify.
     async fn resolve_entries(&self, id: i64, announce: bool) -> usize {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let entries = library
             .db()
             .and_then(|db| db.items_without_uri(id).ok())
@@ -1354,7 +1354,7 @@ impl Spotify {
                 // about this song's query: the next one. Any other error
                 // (offline, too many requests, Spotify refusing searches)
                 // holds for the other songs too, and asking for each of
-                // them anyway can get Gatefold blocked for hours.
+                // them anyway can get Jewelcase blocked for hours.
                 Err(err) => {
                     let stop = !err.is_about_request();
                     failed = Some(err);
@@ -1402,8 +1402,8 @@ impl Spotify {
         } else if announce && missing > 0 {
             self.message(
                 &ngettext(
-                    "{} song isn't on Spotify; it stays in Gatefold only",
-                    "{} songs aren't on Spotify; they stay in Gatefold only",
+                    "{} song isn't on Spotify; it stays in Jewelcase only",
+                    "{} songs aren't on Spotify; they stay in Jewelcase only",
                     missing as u32,
                 )
                 .replace("{}", &missing.to_string()),
@@ -1426,7 +1426,7 @@ impl Spotify {
 
     /// Finds the songs and asks; true when the creation is queued.
     async fn ask_to_publish(&self, id: i64, parent: &impl IsA<gtk::Widget>) -> bool {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(playlist) = library.playlist(id) else {
             return false;
         };
@@ -1557,7 +1557,7 @@ impl Spotify {
                     .label(format!(
                         "{} {}",
                         search_error(err),
-                        gettext("These songs stay in Gatefold for now and are added on Spotify once they're found.")
+                        gettext("These songs stay in Jewelcase for now and are added on Spotify once they're found.")
                     ))
                     .wrap(true)
                     .xalign(0.0)
@@ -1576,7 +1576,7 @@ impl Spotify {
         }
         if !missing.is_empty() {
             content.append(&small_heading(&gettext(
-                "Not on Spotify — Stay in Gatefold Only",
+                "Not on Spotify — Stay in Jewelcase Only",
             )));
             let list = boxed_list();
             for track in &missing {
@@ -1604,7 +1604,7 @@ impl Spotify {
         dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
         // Development aid: headless tests can't click.
         let ask =
-            !(cfg!(debug_assertions) && std::env::var_os("GATEFOLD_SCREENSHOT_PUBLISH").is_some());
+            !(cfg!(debug_assertions) && std::env::var_os("JEWELCASE_SCREENSHOT_PUBLISH").is_some());
         if ask && dialog.choose_future(Some(parent)).await != "create" {
             return false;
         }
@@ -1635,7 +1635,7 @@ impl Spotify {
     }
 
     async fn remove_playlist(&self, id: i64, keep: bool) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         let Some(linked) = library
             .db()
             .and_then(|db| db.linked_playlist(id).ok().flatten())
@@ -1675,7 +1675,7 @@ impl Spotify {
                 tracing::warn!("Cannot remove a playlist from Spotify: {err}");
                 self.message(&match err {
                     Error::Status { status: 403, .. } => gettext(
-                        "Spotify didn't allow it; connect again in Preferences → Spotify (Gatefold needs one more permission), then try again",
+                        "Spotify didn't allow it; connect again in Preferences → Spotify (Jewelcase needs one more permission), then try again",
                     ),
                     err => answer_error(&err),
                 });
@@ -1691,7 +1691,7 @@ impl Spotify {
     }
 
     async fn created_playlist(&self, id: i64, name: &str, sure: &[(i64, String, bool)]) {
-        let library = GatefoldApplication::get().library();
+        let library = JewelcaseApplication::get().library();
         // Linked meanwhile, or deleted.
         if library
             .playlist(id)
@@ -1701,7 +1701,7 @@ impl Spotify {
         }
         let playlist_name = name.to_owned();
         let created = self
-            .call(move |client| client.create_playlist(&playlist_name, "Made with Gatefold"))
+            .call(move |client| client.create_playlist(&playlist_name, "Made with Jewelcase"))
             .await;
         let summary = match created {
             Ok(summary) => summary,
@@ -1827,14 +1827,14 @@ fn request_error(err: &Error) -> Option<String> {
         // (matching a large library) it can ask to wait for hours.
         Error::RateLimited(wait) if wait.as_secs() >= 90 => {
             // Translators: {} is a time, e.g. "3 h" or "20 min".
-            gettext("Spotify asks Gatefold to wait {} (too many requests).")
+            gettext("Spotify asks Jewelcase to wait {} (too many requests).")
                 .replace("{}", &wait_text(*wait))
         }
         Error::RateLimited(_) => {
-            gettext("Spotify is busy (too many requests); Gatefold tries again later.")
+            gettext("Spotify is busy (too many requests); Jewelcase tries again later.")
         }
         Error::LoggedOut => gettext("Not connected to Spotify; connect in Preferences."),
-        Error::Http(_) => gettext("Spotify can't be reached; Gatefold tries again later."),
+        Error::Http(_) => gettext("Spotify can't be reached; Jewelcase tries again later."),
         _ => return None,
     })
 }
@@ -1860,7 +1860,7 @@ fn search_queries(local: &LocalTrack) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(|a| {
-            gatefold_core::library::artists::track_artist_names(a)
+            jewelcase_core::library::artists::track_artist_names(a)
                 .into_iter()
                 .next()
         })

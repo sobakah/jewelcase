@@ -2,15 +2,15 @@
 //! provider (CONCEPT.md §8).
 
 use adw::prelude::*;
-use gatefold_core::library::covers::CoverSize;
 use gettextrs::gettext;
 use gtk::glib;
+use jewelcase_core::library::covers::CoverSize;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::covers;
 
 pub fn show(parent: &impl IsA<gtk::Widget>, artist_id: i64) {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let flow = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .homogeneous(true)
@@ -86,7 +86,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist_id: i64) {
         #[weak]
         dialog,
         async move {
-            let library = GatefoldApplication::get().library();
+            let library = JewelcaseApplication::get().library();
             match library.portrait_candidates(artist_id).await {
                 Ok(candidates) if !candidates.is_empty() => {
                     for (key, candidate) in &candidates {
@@ -102,7 +102,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, artist_id: i64) {
                     }
                     flow.connect_child_activated(move |_, child| {
                         if let Some((key, _)) = candidates.get(child.index() as usize) {
-                            GatefoldApplication::get()
+                            JewelcaseApplication::get()
                                 .library()
                                 .choose_portrait(artist_id, Some(key));
                             dialog.close();

@@ -12,12 +12,12 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use gatefold_core::analysis;
-use gatefold_core::db::Database;
 use gtk::glib::subclass::Signal;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_core::analysis;
+use jewelcase_core::db::Database;
 
 use crate::config;
 
@@ -86,7 +86,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Analyzer {
-        const NAME: &'static str = "GatefoldAnalyzer";
+        const NAME: &'static str = "JewelcaseAnalyzer";
         type Type = super::Analyzer;
     }
 

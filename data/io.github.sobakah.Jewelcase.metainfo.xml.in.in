@@ -4,11 +4,11 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
 
-  <name>Gatefold</name>
+  <name>Jewelcase</name>
   <summary>Listen to albums, follow artists, curate playlists</summary>
   <description>
     <p>
-      Gatefold is a local-first music player for people who listen to albums.
+      Jewelcase is a local-first music player for people who listen to albums.
       Cover art is the main way around your library, and lyrics, the queue
       and details stay out of the way until you want them.
     </p>
@@ -25,12 +25,12 @@
     <name>sobakah</name>
   </developer>
 
-  <url type="homepage">https://github.com/sobakah/gatefold</url>
-  <url type="bugtracker">https://github.com/sobakah/gatefold/issues</url>
-  <url type="vcs-browser">https://github.com/sobakah/gatefold</url>
+  <url type="homepage">https://github.com/sobakah/jewelcase</url>
+  <url type="bugtracker">https://github.com/sobakah/jewelcase/issues</url>
+  <url type="vcs-browser">https://github.com/sobakah/jewelcase</url>
 
   <launchable type="desktop-id">@app_id@.desktop</launchable>
-  <translation type="gettext">gatefold</translation>
+  <translation type="gettext">jewelcase</translation>
   <content_rating type="oars-1.1"/>
 
   <requires>
@@ -100,8 +100,8 @@
         <ul>
           <li>Listening Statistics: what played most this week, month, year or ever, with listening time and how it changed</li>
           <li>A visualizer moves with songs from your library, in the player and the mini player</li>
-          <li>New versions of Gatefold, Soloist and soloistd are announced and installed when you choose to</li>
-          <li>Next in the Spotify app skips to Gatefold's next song while Soloist plays</li>
+          <li>New versions of Jewelcase, Soloist and soloistd are announced and installed when you choose to</li>
+          <li>Next in the Spotify app skips to Jewelcase's next song while Soloist plays</li>
           <li>The Pre-Amp setting is gone: local and Spotify songs play equally loud</li>
         </ul>
       </description>
@@ -110,7 +110,7 @@
       <description>
         <p>Recently played Spotify songs, and adding the playing song to playlists.</p>
         <ul>
-          <li>Recently Played has the Spotify songs that played in Gatefold, with a menu to queue them again or add them to a playlist</li>
+          <li>Recently Played has the Spotify songs that played in Jewelcase, with a menu to queue them again or add them to a playlist</li>
           <li>Add the playing song to a playlist from the player or the queue</li>
           <li>Playlists that have a song come first in "Add to Playlist"; choosing one again removes it</li>
           <li>Song Info lists the playlists that have the song</li>
@@ -142,13 +142,13 @@
           <li>Choose the view to start with, and whether lyrics and queue show in the player</li>
           <li>Side panels show their cover blurred behind the top and close with a grip</li>
           <li>Artist photos from Spotify and Deezer; fanart.tv is no longer used</li>
-          <li>Spotify search works again, and Gatefold respects Spotify's rate limits</li>
+          <li>Spotify search works again, and Jewelcase respects Spotify's rate limits</li>
         </ul>
       </description>
     </release>
     <release version="0.1.0" date="2026-11-07" type="development">
       <description>
-        <p>The first pre-release of Gatefold.</p>
+        <p>The first pre-release of Jewelcase.</p>
         <ul>
           <li>Albums grouped from your music files, with editions merged and covers as the main way around</li>
           <li>Artist pages with portraits, a short bio and links, from optional online lookups</li>

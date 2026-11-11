@@ -2,7 +2,7 @@ using Gtk 4.0;
 using Adw 1;
 // An artist's page (CONCEPT.md §4.2): a panel like the album panel, over
 // most of the artist grid, which stays visible (dimmed) behind it.
-template $GatefoldArtistPage: Adw.Bin {
+template $JewelcaseArtistPage: Adw.Bin {
   styles [
     "album-panel",
     "artist-panel",
@@ -10,7 +10,7 @@ template $GatefoldArtistPage: Adw.Bin {
 
   // An album opens in a panel over the whole height of the page, from
   // its top edge (like the album panel in the library).
-  child: $GatefoldSlideView split_view {
+  child: $JewelcaseSlideView split_view {
     show-sidebar: false;
     min-sidebar-width: 320;
     max-sidebar-width: 440;
@@ -19,7 +19,7 @@ template $GatefoldArtistPage: Adw.Bin {
     // the page: it slides back to the right (CONCEPT.md §4.2).
     content: Gtk.Overlay {
       // The cover, blurred, behind the top of the panel (like the player).
-      child: $GatefoldCoverBackdrop backdrop {
+      child: $JewelcaseCoverBackdrop backdrop {
         child: Adw.ToolbarView {
           [top]
           Adw.HeaderBar {
@@ -63,7 +63,7 @@ template $GatefoldArtistPage: Adw.Bin {
                     halign: start;
                     valign: start;
 
-                    child: $GatefoldCoverImage portrait {
+                    child: $JewelcaseCoverImage portrait {
                       min-size: 160;
                       natural-size: 180;
                       kind: "panel";
@@ -187,7 +187,7 @@ template $GatefoldArtistPage: Adw.Bin {
                       line-spacing: 6;
                       margin-top: 6;
                       visible: false;
-                      // Following on Spotify (when Gatefold knows the artist there).
+                      // Following on Spotify (when Jewelcase knows the artist there).
                       Gtk.Button follow_button {
                         action-name: "artist.toggle-follow";
                         visible: false;
@@ -266,7 +266,7 @@ template $GatefoldArtistPage: Adw.Bin {
       }
     };
 
-    sidebar: $GatefoldAlbumPanel album_panel {};
+    sidebar: $JewelcaseAlbumPanel album_panel {};
   };
 }
 

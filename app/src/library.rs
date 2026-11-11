@@ -8,21 +8,21 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gatefold_core::db::LinkedPlaylist;
-use gatefold_core::db::{Album, Database, PlaylistItem, SearchResults, Track};
-use gatefold_core::library::artists::AlbumRole;
-use gatefold_core::library::artists::Aliases;
-use gatefold_core::library::covers::CoverCache;
-use gatefold_core::library::scanner::{self, ScanProgress, ScanSummary};
-use gatefold_core::library::watch::LibraryWatcher;
-use gatefold_core::playlist_files::{self, Entry as PlaylistFileEntry, Format};
-use gatefold_metadata::{Candidate, PortraitCandidate, Providers};
 use gettextrs::gettext;
 use gtk::glib::subclass::Signal;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
+use jewelcase_core::db::LinkedPlaylist;
+use jewelcase_core::db::{Album, Database, PlaylistItem, SearchResults, Track};
+use jewelcase_core::library::artists::AlbumRole;
+use jewelcase_core::library::artists::Aliases;
+use jewelcase_core::library::covers::CoverCache;
+use jewelcase_core::library::scanner::{self, ScanProgress, ScanSummary};
+use jewelcase_core::library::watch::LibraryWatcher;
+use jewelcase_core::playlist_files::{self, Entry as PlaylistFileEntry, Format};
+use jewelcase_metadata::{Candidate, PortraitCandidate, Providers};
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::config::{self, APP_ID};
 use crate::library_folders;
 use crate::metadata::{self, ArtistChanged, Job, MetadataService};
@@ -60,17 +60,17 @@ enum ScanMessage {
 
 /// What the grids show, read from the database (on any thread).
 struct LoadedLibrary {
-    albums: Vec<gatefold_core::db::Album>,
+    albums: Vec<jewelcase_core::db::Album>,
     genres: HashMap<i64, Vec<String>>,
     barcodes: HashMap<i64, String>,
-    artists: Vec<gatefold_core::db::Artist>,
-    index: gatefold_core::matching::MatchIndex,
+    artists: Vec<jewelcase_core::db::Artist>,
+    index: jewelcase_core::matching::MatchIndex,
 }
 
 /// Reads the library and matches the Spotify playlist entries to it again
 /// (§9.5), in one place for the main thread and a worker.
-fn load_library(db: &mut Database, aliases: &Aliases) -> gatefold_core::db::Result<LoadedLibrary> {
-    let index = gatefold_core::matching::MatchIndex::new(db.match_tracks()?, aliases);
+fn load_library(db: &mut Database, aliases: &Aliases) -> jewelcase_core::db::Result<LoadedLibrary> {
+    let index = jewelcase_core::matching::MatchIndex::new(db.match_tracks()?, aliases);
     if !db.linked_playlists()?.is_empty() {
         match db.rematch_spotify_items(&index) {
             Ok(0) => {}
@@ -126,7 +126,7 @@ mod imp {
         /// See `album_index()`; dropped when the library is read again.
         pub album_index: RefCell<Option<std::rc::Rc<super::AlbumIndex>>>,
         /// See `match_index()`; dropped when the library is read again.
-        pub match_index: RefCell<Option<std::rc::Rc<gatefold_core::matching::MatchIndex>>>,
+        pub match_index: RefCell<Option<std::rc::Rc<jewelcase_core::matching::MatchIndex>>>,
         /// Barcodes by album, to recognize albums on Spotify (§9.8).
         pub album_barcodes: RefCell<HashMap<i64, String>>,
         /// lyrembed's alias groups, from the last scan (search, artist pages).
@@ -159,7 +159,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Library {
-        const NAME: &'static str = "GatefoldLibrary";
+        const NAME: &'static str = "JewelcaseLibrary";
         type Type = super::Library;
     }
 
@@ -463,7 +463,7 @@ impl Library {
     /// The library indexed for matching Spotify songs (§9.5): built once
     /// per library load, not for every search, album or remote song. Get
     /// it before borrowing the database (building it reads the songs).
-    pub fn match_index(&self) -> std::rc::Rc<gatefold_core::matching::MatchIndex> {
+    pub fn match_index(&self) -> std::rc::Rc<jewelcase_core::matching::MatchIndex> {
         if let Some(index) = self.imp().match_index.borrow().as_ref() {
             return index.clone();
         }
@@ -471,7 +471,7 @@ impl Library {
             .db()
             .and_then(|db| db.match_tracks().ok())
             .unwrap_or_default();
-        let index = std::rc::Rc::new(gatefold_core::matching::MatchIndex::new(
+        let index = std::rc::Rc::new(jewelcase_core::matching::MatchIndex::new(
             tracks,
             &self.aliases(),
         ));
@@ -554,8 +554,8 @@ impl Library {
     }
 
     /// The library's copy of an album on Spotify, if it has one (§9.8).
-    pub fn local_album_for(&self, album: &gatefold_core::db::SpotifyAlbum) -> Option<AlbumObject> {
-        use gatefold_core::matching::{AlbumFacts, artist_keys, barcode_key, same_album};
+    pub fn local_album_for(&self, album: &jewelcase_core::db::SpotifyAlbum) -> Option<AlbumObject> {
+        use jewelcase_core::matching::{AlbumFacts, artist_keys, barcode_key, same_album};
         let remote_artists: Vec<String> = album.artist.split(", ").map(str::to_owned).collect();
         let remote = AlbumFacts {
             title: &album.name,
@@ -600,7 +600,7 @@ impl Library {
 
     /// The library's albums indexed for `local_album_for` (per reload).
     fn album_index(&self) -> std::rc::Rc<AlbumIndex> {
-        use gatefold_core::matching::{artist_keys, barcode_key};
+        use jewelcase_core::matching::{artist_keys, barcode_key};
         if let Some(index) = self.imp().album_index.borrow().as_ref() {
             return index.clone();
         }
@@ -669,7 +669,7 @@ impl Library {
         if !self.settings().boolean("metadata-spotify") {
             return None;
         }
-        let spotify = GatefoldApplication::get().spotify();
+        let spotify = JewelcaseApplication::get().spotify();
         spotify.is_connected().then(|| spotify.client()).flatten()
     }
 
@@ -792,7 +792,7 @@ impl Library {
                 library.imp().related_lookup.set(false);
                 tracing::info!("ListenBrainz gave {found} related artists");
                 if found > 0 {
-                    GatefoldApplication::get().player().similarity_changed();
+                    JewelcaseApplication::get().player().similarity_changed();
                 }
             }
         ));
@@ -1019,7 +1019,7 @@ impl Library {
             .unwrap_or_default()
     }
 
-    fn playlist_op(&self, op: impl FnOnce(&mut Database, i64) -> gatefold_core::db::Result<()>) {
+    fn playlist_op(&self, op: impl FnOnce(&mut Database, i64) -> jewelcase_core::db::Result<()>) {
         self.playlist_op_quiet(op);
         self.reload_playlists();
     }
@@ -1029,7 +1029,7 @@ impl Library {
     /// change waiting to be sent" in it).
     fn playlist_op_quiet(
         &self,
-        op: impl FnOnce(&mut Database, i64) -> gatefold_core::db::Result<()>,
+        op: impl FnOnce(&mut Database, i64) -> jewelcase_core::db::Result<()>,
     ) {
         let result = match self.db() {
             Some(mut db) => op(&mut db, metadata::now()),
@@ -1063,7 +1063,7 @@ impl Library {
     /// The playlists that have this song, local or Spotify ones, as itself
     /// or as its Spotify version.
     pub fn playlists_containing(&self, track: &TrackObject) -> Vec<i64> {
-        let device_uri = GatefoldApplication::get()
+        let device_uri = JewelcaseApplication::get()
             .spotify()
             .device_song_uri(track.id());
         // A device's stand-in ID means nothing to the database.
@@ -1093,7 +1093,7 @@ impl Library {
     /// While a playlist's changes are on their way to Spotify, it waits
     /// for Spotify's answer before taking new ones; says so.
     fn refuse_while_sending(&self, id: i64) -> bool {
-        let sending = GatefoldApplication::get().spotify().is_sending(id);
+        let sending = JewelcaseApplication::get().spotify().is_sending(id);
         if sending {
             let name = self
                 .playlist(id)
@@ -1127,7 +1127,7 @@ impl Library {
             tracing::warn!("Cannot queue a Spotify change: {err}");
         }
         // The caller reloads the playlists once ("1 change waiting").
-        GatefoldApplication::get().spotify().changes_queued();
+        JewelcaseApplication::get().spotify().changes_queued();
     }
 
     /// `announce`: confirm with a toast (not needed where the list shows it).
@@ -1160,7 +1160,7 @@ impl Library {
             }
             // …library songs once their Spotify versions are found.
             if !local.is_empty() {
-                GatefoldApplication::get().spotify().resolve_soon(id, true);
+                JewelcaseApplication::get().spotify().resolve_soon(id, true);
             }
         }
         self.reload_playlists();
@@ -1350,7 +1350,7 @@ impl Library {
             if spotify && let Some(track) = track {
                 db.set_spotify_version(
                     track,
-                    &gatefold_core::db::SpotifyVersion {
+                    &jewelcase_core::db::SpotifyVersion {
                         uri: None,
                         confidence: None,
                         title: None,
@@ -1372,7 +1372,7 @@ impl Library {
         if self.refuse_read_only(id) || self.refuse_while_sending(id) {
             return Ok(());
         }
-        let key = gatefold_core::library::covers::cover_key('c', &data);
+        let key = jewelcase_core::library::covers::cover_key('c', &data);
         let job_key = key.clone();
         gio::spawn_blocking(move || {
             let covers = CoverCache::new(config::cover_dir());
@@ -1483,11 +1483,11 @@ impl Library {
         std::thread::spawn(move || {
             // Not just PATH: from the GNOME menu, ~/.local/bin is often
             // missing there (§10.0).
-            let lyrembed = gatefold_tools::find_program(
+            let lyrembed = jewelcase_tools::find_program(
                 "lyrembed",
                 Some(std::path::Path::new(&lyrembed_override)),
             )
-            .or_else(|| gatefold_tools::find_program("lyrembed", None));
+            .or_else(|| jewelcase_tools::find_program("lyrembed", None));
             // lyrembed's service when it's set up (also from a Flatpak),
             // else the program.
             let text = crate::tools::lyrembed_aliases_over_dbus()

@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use gatefold_core::db::{ArtistMeta, Database};
-use gatefold_core::library::covers::{self, CoverCache};
-use gatefold_core::library::grouping::album_folder;
-use gatefold_metadata::{
+use jewelcase_core::db::{ArtistMeta, Database};
+use jewelcase_core::library::covers::{self, CoverCache};
+use jewelcase_core::library::grouping::album_folder;
+use jewelcase_metadata::{
     ArtistQuery, Candidate, Client, Identity, Links, PortraitCandidate, Providers,
 };
 
@@ -32,7 +32,7 @@ const SPOTIFY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The Spotify account, for portraits (`None`: not connected, or turned
 /// off in Preferences).
-pub type SpotifyClient = Option<Arc<gatefold_spotify::Client>>;
+pub type SpotifyClient = Option<Arc<jewelcase_spotify::Client>>;
 
 const LOCAL_PORTRAIT_NAMES: &[&str] = &["artist", "folder"];
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
@@ -277,7 +277,7 @@ impl Worker {
                         .set_related_artists(&mbid, &related, now())
                         .map(|()| related.len())
                         .map_err(|e| RelatedError::Other(e.to_string())),
-                    Err(gatefold_metadata::Error::Busy(wait)) => Err(RelatedError::Busy(wait)),
+                    Err(jewelcase_metadata::Error::Busy(wait)) => Err(RelatedError::Busy(wait)),
                     Err(err) => Err(RelatedError::Other(err.to_string())),
                 };
                 let _ = reply.send_blocking(result);
@@ -499,11 +499,11 @@ impl Worker {
     /// asked for now (too many requests, offline), to try again later.
     fn spotify_portrait(
         &mut self,
-        client: &gatefold_spotify::Client,
+        client: &jewelcase_spotify::Client,
         known: Option<&str>,
         name: &str,
     ) -> Result<Option<(String, PortraitCandidate)>, ()> {
-        let failed = |what: &str, err: gatefold_spotify::Error| {
+        let failed = |what: &str, err: jewelcase_spotify::Error| {
             tracing::info!("Spotify {what}: {err}");
             if err.is_temporary() {
                 Err(())

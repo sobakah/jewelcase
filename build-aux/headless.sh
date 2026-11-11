@@ -3,16 +3,16 @@
 # disturb the desktop:
 #
 # - a headless mutter with a virtual monitor (nothing appears on screen)
-# - its own runtime dir and D-Bus session bus (no clash with a running Gatefold, no MPRIS
+# - its own runtime dir and D-Bus session bus (no clash with a running Jewelcase, no MPRIS
 #   entry in GNOME Shell)
 # - in-memory GSettings (the real settings stay untouched)
-# - its own data and cache folders, in $GATEFOLD_HEADLESS_STATE
+# - its own data and cache folders, in $JEWELCASE_HEADLESS_STATE
 #   (default: _build/headless), kept between runs so scans stay quick
-# - silent audio (GATEFOLD_SILENT=1), no browser, no keyring
+# - silent audio (JEWELCASE_SILENT=1), no browser, no keyring
 #
 # Usage: build-aux/headless.sh COMMAND [ARGS...]
-# GATEFOLD_HEADLESS_MONITOR=WxH sets the virtual monitor (default 1100x760).
-# Example: GATEFOLD_SCREENSHOT=/tmp/shot.png build-aux/headless.sh _build/app/gatefold
+# JEWELCASE_HEADLESS_MONITOR=WxH sets the virtual monitor (default 1100x760).
+# Example: JEWELCASE_SCREENSHOT=/tmp/shot.png build-aux/headless.sh _build/app/jewelcase
 set -eu
 
 if [ $# -eq 0 ]; then
@@ -20,7 +20,7 @@ if [ $# -eq 0 ]; then
     exit 2
 fi
 
-state=${GATEFOLD_HEADLESS_STATE:-$PWD/_build/headless}
+state=${JEWELCASE_HEADLESS_STATE:-$PWD/_build/headless}
 mkdir -p "$state/data" "$state/cache"
 
 # A private runtime dir. Everything the private bus starts on demand (the
@@ -29,7 +29,7 @@ mkdir -p "$state/data" "$state/cache"
 # With the real /run/user/$UID, the private document portal takes over
 # /run/user/$UID/doc, the desktop's portal exits, and Flatpak apps can no
 # longer open files or links until it is restarted.
-runtime=$(mktemp -d "${TMPDIR:-/tmp}/gatefold-headless.XXXXXX")
+runtime=$(mktemp -d "${TMPDIR:-/tmp}/jewelcase-headless.XXXXXX")
 chmod 700 "$runtime"
 cleanup() {
     for mount in "$runtime/doc" "$runtime/gvfs"; do
@@ -45,17 +45,17 @@ trap 'exit 130' INT TERM
 export XDG_RUNTIME_DIR="$runtime"
 export XDG_DATA_HOME="$state/data" XDG_CACHE_HOME="$state/cache"
 # Never the user's own soloistd (it would control their real Soloist).
-export GATEFOLD_SOLOISTD_CONFIG="$state/soloistd/config.json"
-export GSETTINGS_BACKEND=memory GATEFOLD_SILENT=1 GATEFOLD_NO_BROWSER=1 GATEFOLD_NO_KEYRING=1
+export JEWELCASE_SOLOISTD_CONFIG="$state/soloistd/config.json"
+export GSETTINGS_BACKEND=memory JEWELCASE_SILENT=1 JEWELCASE_NO_BROWSER=1 JEWELCASE_NO_KEYRING=1
 # Keep GTK away from portals, gvfs and the accessibility bus.
 export GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none
-export WAYLAND_DISPLAY="gatefold-headless-$$"
+export WAYLAND_DISPLAY="jewelcase-headless-$$"
 unset DISPLAY
 
 status=0
 dbus-run-session -- sh -c '
     mutter --headless --wayland --no-x11 --wayland-display "$WAYLAND_DISPLAY" \
-        --virtual-monitor "${GATEFOLD_HEADLESS_MONITOR:-1100x760}" >/dev/null 2>&1 &
+        --virtual-monitor "${JEWELCASE_HEADLESS_MONITOR:-1100x760}" >/dev/null 2>&1 &
     mutter=$!
     for _ in $(seq 100); do
         [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && break

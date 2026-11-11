@@ -10,13 +10,13 @@ use crate::library::Library;
 use crate::player::Player;
 use crate::preferences_dialog::PreferencesDialog;
 use crate::tools::Tools;
-use crate::window::GatefoldWindow;
+use crate::window::JewelcaseWindow;
 
 mod imp {
     use super::*;
 
     #[derive(Default)]
-    pub struct GatefoldApplication {
+    pub struct JewelcaseApplication {
         pub library: OnceCell<Library>,
         pub player: OnceCell<Player>,
         pub tools: OnceCell<Tools>,
@@ -25,15 +25,15 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for GatefoldApplication {
-        const NAME: &'static str = "GatefoldApplication";
-        type Type = super::GatefoldApplication;
+    impl ObjectSubclass for JewelcaseApplication {
+        const NAME: &'static str = "JewelcaseApplication";
+        type Type = super::JewelcaseApplication;
         type ParentType = adw::Application;
     }
 
-    impl ObjectImpl for GatefoldApplication {}
+    impl ObjectImpl for JewelcaseApplication {}
 
-    impl ApplicationImpl for GatefoldApplication {
+    impl ApplicationImpl for JewelcaseApplication {
         fn startup(&self) {
             self.parent_startup();
             let app = self.obj();
@@ -104,22 +104,22 @@ mod imp {
             let app = self.obj();
             match app.active_window() {
                 Some(window) => window.present(),
-                None => GatefoldWindow::new(&app).present(),
+                None => JewelcaseWindow::new(&app).present(),
             }
         }
     }
 
-    impl GtkApplicationImpl for GatefoldApplication {}
-    impl AdwApplicationImpl for GatefoldApplication {}
+    impl GtkApplicationImpl for JewelcaseApplication {}
+    impl AdwApplicationImpl for JewelcaseApplication {}
 }
 
 glib::wrapper! {
-    pub struct GatefoldApplication(ObjectSubclass<imp::GatefoldApplication>)
+    pub struct JewelcaseApplication(ObjectSubclass<imp::JewelcaseApplication>)
         @extends gio::Application, gtk::Application, adw::Application,
         @implements gio::ActionGroup, gio::ActionMap;
 }
 
-impl GatefoldApplication {
+impl JewelcaseApplication {
     pub fn new() -> Self {
         glib::Object::builder()
             .property("application-id", APP_ID)
@@ -131,7 +131,7 @@ impl GatefoldApplication {
     pub fn get() -> Self {
         gio::Application::default()
             .and_downcast()
-            .expect("the application is a GatefoldApplication")
+            .expect("the application is a JewelcaseApplication")
     }
 
     pub fn library(&self) -> Library {
@@ -191,7 +191,7 @@ impl GatefoldApplication {
             .activate(|app: &Self, _, _| {
                 if let Some(window) = app
                     .active_window()
-                    .and_downcast::<crate::window::GatefoldWindow>()
+                    .and_downcast::<crate::window::JewelcaseWindow>()
                 {
                     crate::updates::show_dialog(&window);
                 }
@@ -284,7 +284,7 @@ impl GatefoldApplication {
         let settings = gio::Settings::new(APP_ID);
         let mut folders = crate::library_folders::load(&settings);
         let home = glib::home_dir();
-        match gatefold_core::library::folders::validate_new_folder(&dir, &folders, Some(&home)) {
+        match jewelcase_core::library::folders::validate_new_folder(&dir, &folders, Some(&home)) {
             Ok(folder) => {
                 folders.push(folder);
                 if let Err(err) = crate::library_folders::store(&settings, &folders) {
@@ -306,12 +306,12 @@ impl GatefoldApplication {
 
     fn show_about(&self) {
         let about = adw::AboutDialog::builder()
-            .application_name(gettext("Gatefold"))
+            .application_name(gettext("Jewelcase"))
             .application_icon(APP_ID)
             .developer_name("sobakah")
             .version(VERSION)
-            .website("https://github.com/sobakah/gatefold")
-            .issue_url("https://github.com/sobakah/gatefold/issues")
+            .website("https://github.com/sobakah/jewelcase")
+            .issue_url("https://github.com/sobakah/jewelcase/issues")
             // bliss-audio is GPL-3.0-only (the code itself is "or later").
             .license_type(gtk::License::Gpl30Only)
             .build();
@@ -319,7 +319,7 @@ impl GatefoldApplication {
     }
 }
 
-impl Default for GatefoldApplication {
+impl Default for JewelcaseApplication {
     fn default() -> Self {
         Self::new()
     }

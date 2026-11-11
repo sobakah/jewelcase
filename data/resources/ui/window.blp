@@ -1,12 +1,12 @@
 using Gtk 4.0;
 using Adw 1;
 // Library window with the player in a bottom sheet (CONCEPT.md §4).
-template $GatefoldWindow: Adw.ApplicationWindow {
+template $JewelcaseWindow: Adw.ApplicationWindow {
   default-width: 1100;
   default-height: 760;
   width-request: 360;
   height-request: 294;
-  title: _("Gatefold");
+  title: _("Jewelcase");
   // Only the last matching breakpoint applies, so the narrow one repeats
   // the album panel setter.
   Adw.Breakpoint {
@@ -134,7 +134,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
           };
         }
 
-        // New versions of Gatefold, Soloist or soloistd (updates.rs).
+        // New versions of Jewelcase, Soloist or soloistd (updates.rs).
         [top]
         Adw.Banner update_banner {
           button-label: _("_Details…");
@@ -232,7 +232,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                   child: Adw.StatusPage {
                     icon-name: "folder-music-symbolic";
                     title: _("No Albums Yet");
-                    description: _("Gatefold shows the albums in your music folders.");
+                    description: _("Jewelcase shows the albums in your music folders.");
 
                     child: Gtk.Button {
                       halign: center;
@@ -264,16 +264,16 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                 Gtk.StackPage {
                   name: "albums";
 
-                  child: $GatefoldSlideView split_view {
+                  child: $JewelcaseSlideView split_view {
                     show-sidebar: false;
                     min-sidebar-width: 320;
                     max-sidebar-width: 440;
                     sidebar-width-fraction: 0.38;
                     // The albums, and at the end, apart, saved Spotify
                     // albums (CONCEPT.md §9.8).
-                    content: $GatefoldSectionedGrid album_grid {};
+                    content: $JewelcaseSectionedGrid album_grid {};
 
-                    sidebar: $GatefoldAlbumPanel album_panel {};
+                    sidebar: $JewelcaseAlbumPanel album_panel {};
                   };
                 }
               };
@@ -284,7 +284,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
               title: _("Artists");
               icon-name: "avatar-default-symbolic";
               // Artist pages open over most of the grid (CONCEPT.md §4.2).
-              child: $GatefoldSlideView artist_split {
+              child: $JewelcaseSlideView artist_split {
                 collapsed: true;
                 show-sidebar: false;
                 min-sidebar-width: 360;
@@ -306,7 +306,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                       icon-name: "avatar-default-symbolic";
                       title: _("Show Artist Photos and Links?");
                       description: _(
-                        "Gatefold can look up artists online: MusicBrainz identifies them; Wikidata, Wikipedia and Wikimedia Commons add links, a short biography and a photo; Deezer, and Spotify when it's connected, add photos. Only artist names, album titles and the artists' IDs are sent. You can change this any time in Preferences."
+                        "Jewelcase can look up artists online: MusicBrainz identifies them; Wikidata, Wikipedia and Wikimedia Commons add links, a short biography and a photo; Deezer, and Spotify when it's connected, add photos. Only artist names, album titles and the artists' IDs are sent. You can change this any time in Preferences."
                       );
 
                       child: Gtk.Box {
@@ -353,7 +353,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                     name: "artists";
                     // The artists, and at the end, apart, followed
                     // Spotify artists (§9.8).
-                    child: $GatefoldSectionedGrid artist_grid {};
+                    child: $JewelcaseSectionedGrid artist_grid {};
                   }
                 };
               };
@@ -406,7 +406,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                 Gtk.StackPage {
                   name: "playlists";
 
-                  child: $GatefoldSlideView playlist_split {
+                  child: $JewelcaseSlideView playlist_split {
                     show-sidebar: false;
                     min-sidebar-width: 320;
                     max-sidebar-width: 440;
@@ -472,7 +472,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                       };
                     };
 
-                    sidebar: $GatefoldPlaylistPanel playlist_panel {};
+                    sidebar: $JewelcasePlaylistPanel playlist_panel {};
                   };
                 }
               };
@@ -506,7 +506,7 @@ template $GatefoldWindow: Adw.ApplicationWindow {
                 "search-clamp",
               ]
 
-              child: $GatefoldSearchView search_view {
+              child: $JewelcaseSearchView search_view {
                 styles [
                   "search-card",
                 ]
@@ -521,9 +521,9 @@ template $GatefoldWindow: Adw.ApplicationWindow {
         }
       };
 
-      bottom-bar: $GatefoldMiniPlayer mini_player {};
+      bottom-bar: $JewelcaseMiniPlayer mini_player {};
 
-      sheet: $GatefoldPlayerView player_view {};
+      sheet: $JewelcasePlayerView player_view {};
     };
   };
 }
@@ -604,7 +604,7 @@ menu primary_menu {
     }
 
     item {
-      label: _("_About Gatefold");
+      label: _("_About Jewelcase");
       action: "app.about";
     }
   }

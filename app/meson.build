@@ -11,17 +11,17 @@ endif
 
 # Read by app/src/config.rs and app/build.rs.
 cargo_env = environment()
-cargo_env.set('GATEFOLD_APP_ID', application_id)
-cargo_env.set('GATEFOLD_VERSION', version + version_suffix)
-cargo_env.set('GATEFOLD_PROFILE', get_option('profile'))
-cargo_env.set('GATEFOLD_UPDATE_CHECK', get_option('update_check').to_string())
-cargo_env.set('GATEFOLD_LOCALEDIR', localedir)
-cargo_env.set('GATEFOLD_GETTEXT_PACKAGE', gettext_package)
-cargo_env.set('GATEFOLD_GRESOURCE', gresource_bundle.full_path())
+cargo_env.set('JEWELCASE_APP_ID', application_id)
+cargo_env.set('JEWELCASE_VERSION', version + version_suffix)
+cargo_env.set('JEWELCASE_PROFILE', get_option('profile'))
+cargo_env.set('JEWELCASE_UPDATE_CHECK', get_option('update_check').to_string())
+cargo_env.set('JEWELCASE_LOCALEDIR', localedir)
+cargo_env.set('JEWELCASE_GETTEXT_PACKAGE', gettext_package)
+cargo_env.set('JEWELCASE_GRESOURCE', gresource_bundle.full_path())
 cargo_env.set('CARGO_TARGET_DIR', meson.project_build_root() / 'target')
 
-# The development build is installed as gatefold-devel, so it doesn't hide
-# the installed app's program (its output stays app/gatefold for make run
+# The development build is installed as jewelcase-devel, so it doesn't hide
+# the installed app's program (its output stays app/jewelcase for make run
 # and the headless tests).
 development = get_option('profile') == 'development'
 cargo_build = custom_target(
@@ -59,7 +59,7 @@ endif
 # small builders (RPM %check, CI): up to an hour.
 test_options = []
 if not get_option('spotify_stream')
-  test_options += ['--exclude', 'gatefold-stream']
+  test_options += ['--exclude', 'jewelcase-stream']
 endif
 test(
   'cargo-test',

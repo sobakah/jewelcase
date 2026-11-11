@@ -3,7 +3,7 @@ option(
   type: 'combo',
   choices: ['default', 'development'],
   value: 'default',
-  description: 'development: debug build with app ID io.github.sobakah.Gatefold.Devel',
+  description: 'development: debug build with app ID io.github.sobakah.Jewelcase.Devel',
 )
 option(
   'spotify_stream',
@@ -15,5 +15,5 @@ option(
   'update_check',
   type: 'boolean',
   value: true,
-  description: 'Look for new Gatefold releases on GitHub (off for builds that update otherwise, e.g. a Flatpak)',
+  description: 'Look for new Jewelcase releases on GitHub (off for builds that update otherwise, e.g. a Flatpak)',
 )

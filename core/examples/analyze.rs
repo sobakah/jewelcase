@@ -1,4 +1,4 @@
-//! Development aid: `cargo run -p gatefold-core --example analyze -- FILE…`
+//! Development aid: `cargo run -p jewelcase-core --example analyze -- FILE…`
 //! analyzes files like the background worker and prints the results.
 
 use std::path::Path;
@@ -9,8 +9,8 @@ fn main() {
     for arg in std::env::args().skip(1) {
         let path = Path::new(&arg);
         let start = Instant::now();
-        let key = gatefold_core::analysis::content_key(path);
-        match gatefold_core::analysis::analyze(path) {
+        let key = jewelcase_core::analysis::content_key(path);
+        match jewelcase_core::analysis::analyze(path) {
             Ok(result) => println!(
                 "{arg}\n  key {:?}, {} features, BPM {:?}, edges {:?}, {:.1} s",
                 key.ok(),

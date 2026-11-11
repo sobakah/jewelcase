@@ -1139,128 +1139,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gatefold"
-version = "0.4.1"
-dependencies = [
- "async-channel",
- "futures-lite",
- "gatefold-core",
- "gatefold-lyrics",
- "gatefold-metadata",
- "gatefold-soloist",
- "gatefold-spotify",
- "gatefold-stream",
- "gatefold-tools",
- "gettext-rs",
- "gtk4",
- "libadwaita",
- "libc",
- "mpris-server",
- "oo7",
- "rand 0.9.5",
- "serde_json",
- "sha2 0.11.1",
- "tempfile",
- "tracing",
- "tracing-subscriber",
- "ureq",
-]
-
-[[package]]
-name = "gatefold-core"
-version = "0.4.1"
-dependencies = [
- "async-channel",
- "bliss-audio",
- "futures-lite",
- "glycin",
- "gstreamer",
- "gstreamer-app",
- "image",
- "lofty",
- "notify",
- "quick-xml",
- "rand 0.9.5",
- "rusqlite",
- "rusqlite_migration",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
-name = "gatefold-lyrics"
-version = "0.4.1"
-dependencies = [
- "lofty",
- "tempfile",
- "tracing",
- "unicode-script",
-]
-
-[[package]]
-name = "gatefold-metadata"
-version = "0.4.1"
-dependencies = [
- "serde_json",
- "thiserror 2.0.21",
- "tracing",
- "ureq",
-]
-
-[[package]]
-name = "gatefold-soloist"
-version = "0.4.1"
-dependencies = [
- "async-channel",
- "libc",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "tungstenite",
-]
-
-[[package]]
-name = "gatefold-spotify"
-version = "0.4.1"
-dependencies = [
- "base64 0.23.1",
- "rand 0.9.5",
- "serde_json",
- "sha2 0.11.1",
- "thiserror 2.0.21",
- "tracing",
- "ureq",
-]
-
-[[package]]
-name = "gatefold-stream"
-version = "0.4.1"
-dependencies = [
- "async-channel",
- "base64 0.23.1",
- "gstreamer",
- "gstreamer-app",
- "librespot-core",
- "librespot-playback",
- "librespot-protocol",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "gatefold-tools"
-version = "0.4.1"
-dependencies = [
- "serde_json",
- "tempfile",
- "tracing",
-]
-
-[[package]]
 name = "gdk-pixbuf"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2552,6 +2430,128 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "jewelcase"
+version = "0.4.1"
+dependencies = [
+ "async-channel",
+ "futures-lite",
+ "gettext-rs",
+ "gtk4",
+ "jewelcase-core",
+ "jewelcase-lyrics",
+ "jewelcase-metadata",
+ "jewelcase-soloist",
+ "jewelcase-spotify",
+ "jewelcase-stream",
+ "jewelcase-tools",
+ "libadwaita",
+ "libc",
+ "mpris-server",
+ "oo7",
+ "rand 0.9.5",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+]
+
+[[package]]
+name = "jewelcase-core"
+version = "0.4.1"
+dependencies = [
+ "async-channel",
+ "bliss-audio",
+ "futures-lite",
+ "glycin",
+ "gstreamer",
+ "gstreamer-app",
+ "image",
+ "lofty",
+ "notify",
+ "quick-xml",
+ "rand 0.9.5",
+ "rusqlite",
+ "rusqlite_migration",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "jewelcase-lyrics"
+version = "0.4.1"
+dependencies = [
+ "lofty",
+ "tempfile",
+ "tracing",
+ "unicode-script",
+]
+
+[[package]]
+name = "jewelcase-metadata"
+version = "0.4.1"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
+name = "jewelcase-soloist"
+version = "0.4.1"
+dependencies = [
+ "async-channel",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "tungstenite",
+]
+
+[[package]]
+name = "jewelcase-spotify"
+version = "0.4.1"
+dependencies = [
+ "base64 0.23.1",
+ "rand 0.9.5",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
+name = "jewelcase-stream"
+version = "0.4.1"
+dependencies = [
+ "async-channel",
+ "base64 0.23.1",
+ "gstreamer",
+ "gstreamer-app",
+ "librespot-core",
+ "librespot-playback",
+ "librespot-protocol",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "jewelcase-tools"
+version = "0.4.1"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
 
 [[package]]
 name = "jiff"

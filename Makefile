@@ -4,7 +4,7 @@ BUILDDIR ?= _build
 RPMDIR   := $(CURDIR)/rpmbuild
 MOCK_CHROOT ?= fedora-45-x86_64
 VERSION  := $(shell sed -n "s/^  version: '\(.*\)',$$/\1/p" meson.build)
-NAME     := gatefold
+NAME     := jewelcase
 
 .PHONY: all build run test lint fmt tarballs srpm rpm mock flatpak flatpak-bundle clean
 
@@ -58,10 +58,10 @@ mock: srpm
 	    --rebuild $$(ls -t $(RPMDIR)/SRPMS/$(NAME)-$(VERSION)-*.src.rpm | head -n1)
 
 # A test Flatpak of the working tree (build-aux/flatpak/README.md):
-# built and installed for this user as io.github.sobakah.Gatefold.Devel.
+# built and installed for this user as io.github.sobakah.Jewelcase.Devel.
 # Uses flatpak-builder if installed, else the Flathub app org.flatpak.Builder.
 FLATPAK_BUILDER ?= $(shell command -v flatpak-builder 2>/dev/null || echo flatpak run org.flatpak.Builder)
-FLATPAK_MANIFEST := build-aux/flatpak/io.github.sobakah.Gatefold.Devel.yml
+FLATPAK_MANIFEST := build-aux/flatpak/io.github.sobakah.Jewelcase.Devel.yml
 FLATPAK_DIR := $(BUILDDIR)/flatpak
 
 # The build has no .git: the commit for the version goes in a file
@@ -74,10 +74,10 @@ flatpak:
 	    --state-dir=$(FLATPAK_DIR)/state --repo=$(FLATPAK_DIR)/repo \
 	    $(FLATPAK_DIR)/build $(FLATPAK_MANIFEST)
 
-# A single file to install elsewhere: flatpak install --user gatefold-devel.flatpak
+# A single file to install elsewhere: flatpak install --user jewelcase-devel.flatpak
 flatpak-bundle: flatpak
 	flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
-	    $(FLATPAK_DIR)/repo $(FLATPAK_DIR)/gatefold-devel.flatpak io.github.sobakah.Gatefold.Devel
+	    $(FLATPAK_DIR)/repo $(FLATPAK_DIR)/jewelcase-devel.flatpak io.github.sobakah.Jewelcase.Devel
 
 clean:
 	rm -rf $(BUILDDIR) target vendor $(RPMDIR)

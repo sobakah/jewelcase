@@ -1,4 +1,4 @@
-//! Light or dark (the `style` setting): Gatefold follows the desktop, or
+//! Light or dark (the `style` setting): Jewelcase follows the desktop, or
 //! stays light or dark.
 //!
 //! libadwaita learns the desktop's choice through the settings portal.

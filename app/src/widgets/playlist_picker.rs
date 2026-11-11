@@ -6,7 +6,7 @@ use adw::prelude::*;
 use gettextrs::{gettext, ngettext};
 use gtk::glib;
 
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::objects::PlaylistObject;
 
 /// Asks for a playlist name; `None` if cancelled or empty.
@@ -74,7 +74,7 @@ pub async fn ask_name_with_option(
 /// Saves `tracks` as a new playlist `name`; if one with that name exists,
 /// asks whether to add them to it instead (or create another anyway).
 pub async fn create_or_add(parent: &impl IsA<gtk::Widget>, name: &str, tracks: &[i64]) {
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let existing = {
         let store = library.playlists();
         (0..store.n_items())
@@ -114,7 +114,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
     if tracks.is_empty() {
         return;
     }
-    let library = GatefoldApplication::get().library();
+    let library = JewelcaseApplication::get().library();
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .valign(gtk::Align::Start)
@@ -217,7 +217,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
         #[weak]
         dialog,
         move |_, row| {
-            let library = GatefoldApplication::get().library();
+            let library = JewelcaseApplication::get().library();
             match row.index() {
                 0 => {
                     let tracks = tracks.clone();

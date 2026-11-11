@@ -5,17 +5,17 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gatefold_spotify::auth::REDIRECT_URI;
 use gettextrs::gettext;
 use gtk::{gio, glib};
+use jewelcase_spotify::auth::REDIRECT_URI;
 
 use super::Spotify;
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 
 const DASHBOARD: &str = "https://developer.spotify.com/dashboard";
 
 pub fn page() -> adw::PreferencesPage {
-    let spotify = GatefoldApplication::get().spotify();
+    let spotify = JewelcaseApplication::get().spotify();
     let settings = spotify.settings().clone();
     let page = adw::PreferencesPage::builder()
         .name("spotify")
@@ -27,14 +27,14 @@ pub fn page() -> adw::PreferencesPage {
     let account = adw::PreferencesGroup::builder()
         .title(gettext("Spotify Account"))
         .description(gettext(
-            "Control your Spotify devices from Gatefold and use your Spotify playlists here; songs you have play from your library. Needs Spotify Premium and a free developer app of your own.",
+            "Control your Spotify devices from Jewelcase and use your Spotify playlists here; songs you have play from your library. Needs Spotify Premium and a free developer app of your own.",
         ))
         .build();
     // Without a keyring service, the logins are kept in a file (keyring.rs).
     let no_keyring = adw::ActionRow::builder()
         .title(gettext("No Keyring on This System"))
         .subtitle(gettext(
-            "Your Spotify logins are kept in a file only your user account can read. With a keyring service running (such as GNOME Keyring or KWallet), Gatefold keeps them there instead.",
+            "Your Spotify logins are kept in a file only your user account can read. With a keyring service running (such as GNOME Keyring or KWallet), Jewelcase keeps them there instead.",
         ))
         .visible(false)
         .build();
@@ -53,7 +53,7 @@ pub fn page() -> adw::PreferencesPage {
     let again = gtk::Button::builder()
         .label(gettext("Connect Again"))
         .tooltip_text(gettext(
-            "Log in to Spotify again, for permissions Gatefold has started to use; your playlists stay",
+            "Log in to Spotify again, for permissions Jewelcase has started to use; your playlists stay",
         ))
         .valign(gtk::Align::Center)
         .css_classes(["pill"])
@@ -139,7 +139,7 @@ pub fn page() -> adw::PreferencesPage {
     let show = adw::SwitchRow::builder()
         .title(gettext("Show _Spotify Playlists"))
         .subtitle(gettext(
-            "Your Spotify playlists next to the local ones. Playlists created on Spotify from Gatefold stay linked either way.",
+            "Your Spotify playlists next to the local ones. Playlists created on Spotify from Jewelcase stay linked either way.",
         ))
         .use_underline(true)
         .build();
@@ -214,7 +214,7 @@ pub fn page() -> adw::PreferencesPage {
                 _ => gettext("Not Connected"),
             });
             status.set_subtitle(&if connecting {
-                gettext("Allow Gatefold access on the Spotify page that opened")
+                gettext("Allow Jewelcase access on the Spotify page that opened")
             } else {
                 String::new()
             });
@@ -357,7 +357,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
-    download.connect_clicked(|_| super::open_in_browser(gatefold_soloist::DOWNLOADS_URL));
+    download.connect_clicked(|_| super::open_in_browser(jewelcase_soloist::DOWNLOADS_URL));
     program.add_suffix(&download);
     group.add(&program);
     let key = adw::PasswordEntryRow::builder()
@@ -370,7 +370,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
-    get_key.connect_clicked(|_| super::open_in_browser(gatefold_soloist::API_KEY_URL));
+    get_key.connect_clicked(|_| super::open_in_browser(jewelcase_soloist::API_KEY_URL));
     key.add_suffix(&get_key);
     key.connect_apply(glib::clone!(
         #[weak]
@@ -412,7 +412,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
     offset.connect_value_notify(glib::clone!(
         #[weak]
         spotify,
-        move |_| spotify.stream_volume(GatefoldApplication::get().player().volume())
+        move |_| spotify.stream_volume(JewelcaseApplication::get().player().volume())
     ));
     group.add(&offset);
 
@@ -443,11 +443,11 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
             let soloist = spotify.stream_backend() == Backend::Soloist;
             about.set_title(&if soloist {
                 gettext(
-                    "Spotify Soloist is Spotify’s own headless player; it plays through your speakers, Gatefold controls it. Get it from Spotify (soloistd can install and update it), plus a free Soloist API key. Needs Spotify Premium. Spotify’s terms don’t clearly cover using it from another app.",
+                    "Spotify Soloist is Spotify’s own headless player; it plays through your speakers, Jewelcase controls it. Get it from Spotify (soloistd can install and update it), plus a free Soloist API key. Needs Spotify Premium. Spotify’s terms don’t clearly cover using it from another app.",
                 )
             } else {
                 gettext(
-                    "librespot is an unofficial Spotify client; songs play through Gatefold’s own output. Needs Spotify Premium. Using it goes against Spotify’s terms of use, and Spotify can stop it from working at any time (on some accounts it already doesn’t).",
+                    "librespot is an unofficial Spotify client; songs play through Jewelcase’s own output. Needs Spotify Premium. Using it goes against Spotify’s terms of use, and Spotify can stop it from working at any time (on some accounts it already doesn’t).",
                 )
             });
             switch.set_subtitle(&if soloist {
@@ -477,14 +477,13 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
                     probes,
                     async move {
                         let found = gio::spawn_blocking(move || {
-                            let running = gatefold_soloist::find_running().map(|r| r.source);
-                            let version = gatefold_soloist::find_binary(configured.as_deref()).map(
-                                |binary| {
-                                    gatefold_soloist::version(&binary)
+                            let running = jewelcase_soloist::find_running().map(|r| r.source);
+                            let version = jewelcase_soloist::find_binary(configured.as_deref())
+                                .map(|binary| {
+                                    jewelcase_soloist::version(&binary)
                                         .unwrap_or_else(|| binary.display().to_string())
-                                },
-                            );
-                            (running, version, gatefold_soloist::soloistd_installed())
+                                });
+                            (running, version, jewelcase_soloist::soloistd_installed())
                         })
                         .await;
                         let Ok((running, version, soloistd)) = found else {
@@ -496,7 +495,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
                         let (text, missing) = match (running, version) {
                             (Some(source), _) => (
                                 // Translators: {} is "soloistd" or "soloist".
-                                gettext("Running ({}); Gatefold uses it, no API key needed here")
+                                gettext("Running ({}); Jewelcase uses it, no API key needed here")
                                     .replace("{}", source),
                                 false,
                             ),
@@ -511,7 +510,7 @@ fn streaming_group(spotify: &Spotify) -> adw::PreferencesGroup {
                         };
                         program.set_subtitle(&text);
                         download.set_visible(missing);
-                        // Only needed when Gatefold starts Soloist itself.
+                        // Only needed when Jewelcase starts Soloist itself.
                         key.set_sensitive(running.is_none());
                     }
                 ));
@@ -575,7 +574,7 @@ async fn confirm_disconnect(parent: &impl IsA<gtk::Widget>) -> bool {
     let dialog = adw::AlertDialog::builder()
         .heading(gettext("Disconnect from Spotify?"))
         .body(gettext(
-            "Spotify playlists are removed from Gatefold; they stay on Spotify. Playlists created on Spotify from Gatefold stay here as local playlists.",
+            "Spotify playlists are removed from Jewelcase; they stay on Spotify. Playlists created on Spotify from Jewelcase stay here as local playlists.",
         ))
         .close_response("cancel")
         .default_response("cancel")

@@ -1,12 +1,12 @@
 //! Scans folders into a throwaway database and prints albums and artists.
-//! `cargo run -p gatefold-core --example scan -- DB_PATH COVER_DIR FOLDER...`
+//! `cargo run -p jewelcase-core --example scan -- DB_PATH COVER_DIR FOLDER...`
 
 use std::path::PathBuf;
 
-use gatefold_core::db::Database;
-use gatefold_core::library::artists::{AlbumRole, Aliases};
-use gatefold_core::library::covers::CoverCache;
-use gatefold_core::library::scanner::scan;
+use jewelcase_core::db::Database;
+use jewelcase_core::library::artists::{AlbumRole, Aliases};
+use jewelcase_core::library::covers::CoverCache;
+use jewelcase_core::library::scanner::scan;
 
 fn main() {
     let mut args = std::env::args_os().skip(1).map(PathBuf::from);

@@ -13,13 +13,13 @@ use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
 use adw::subclass::prelude::*;
-use gatefold_core::library::covers::CoverSize;
 use gettextrs::gettext;
 use gtk::glib;
+use jewelcase_core::library::covers::CoverSize;
 
 use super::mini_player::update_play_button;
 use super::{CoverImage, LyricsView, QueueView};
-use crate::application::GatefoldApplication;
+use crate::application::JewelcaseApplication;
 use crate::objects::TrackObject;
 use crate::player::Player;
 use crate::{covers, format, theme};
@@ -46,7 +46,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/sobakah/Gatefold/ui/player_view.ui")]
+    #[template(resource = "/io/github/sobakah/Jewelcase/ui/player_view.ui")]
     pub struct PlayerView {
         #[template_child]
         pub breakpoint_bin: TemplateChild<adw::BreakpointBin>,
@@ -142,7 +142,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlayerView {
-        const NAME: &'static str = "GatefoldPlayerView";
+        const NAME: &'static str = "JewelcasePlayerView";
         type Type = super::PlayerView;
         type ParentType = adw::Bin;
 
@@ -210,7 +210,7 @@ impl PlayerView {
     fn setup(&self) {
         self.set_layout_manager(None::<gtk::LayoutManager>);
         let imp = self.imp();
-        let player = GatefoldApplication::get().player();
+        let player = JewelcaseApplication::get().player();
         // The overlay sizes itself from the controls, not the backdrop.
         imp.overlay.set_measure_overlay(&*imp.toolbar, true);
         // The artist and album under the title open their pages.
@@ -283,7 +283,7 @@ impl PlayerView {
             move |player| view.update_repeat(player)
         ));
         // A rescan can bring new covers and colors.
-        GatefoldApplication::get().library().connect_local(
+        JewelcaseApplication::get().library().connect_local(
             "reloaded",
             false,
             glib::clone!(
@@ -292,7 +292,7 @@ impl PlayerView {
                 #[upgrade_or]
                 None,
                 move |_| {
-                    view.update_track(&GatefoldApplication::get().player());
+                    view.update_track(&JewelcaseApplication::get().player());
                     None
                 }
             ),
@@ -300,7 +300,7 @@ impl PlayerView {
         adw::StyleManager::default().connect_dark_notify(glib::clone!(
             #[weak(rename_to = view)]
             self,
-            move |_| view.update_theme(GatefoldApplication::get().player().current_track())
+            move |_| view.update_theme(JewelcaseApplication::get().player().current_track())
         ));
 
         imp.seek.connect_change_value(glib::clone!(
@@ -319,7 +319,7 @@ impl PlayerView {
             glib::clone!(
                 #[weak(rename_to = view)]
                 self,
-                move || view.update_position(&GatefoldApplication::get().player())
+                move || view.update_position(&JewelcaseApplication::get().player())
             ),
         );
 
@@ -338,7 +338,7 @@ impl PlayerView {
         // The current song into a playlist; a device's song is kept as a
         // streamed one for it.
         imp.playlist_button.connect_clicked(|button| {
-            let app = GatefoldApplication::get();
+            let app = JewelcaseApplication::get();
             let id = app
                 .player()
                 .current_track()
@@ -352,7 +352,7 @@ impl PlayerView {
         imp.playlist_button.set_has_tooltip(true);
         imp.playlist_button
             .connect_query_tooltip(|_, _, _, _, tooltip| {
-                let app = GatefoldApplication::get();
+                let app = JewelcaseApplication::get();
                 let library = app.library();
                 let mut names: Vec<String> = app
                     .player()
@@ -382,7 +382,7 @@ impl PlayerView {
         super::tooltips::wait_for_rest(&*imp.devices_popover);
         // Song Info: built for the current song whenever it opens.
         imp.info_popover.connect_show(|popover| {
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             let child: gtk::Widget = match player.current_track() {
                 Some(track) => super::track_info::grid(&track, true).upcast(),
                 None => gtk::Label::new(Some(&gettext("Not Playing"))).upcast(),
@@ -540,7 +540,7 @@ impl PlayerView {
             imp.updating.set(false);
         }
         if !imp.pane_auto.get() {
-            let player = GatefoldApplication::get().player();
+            let player = JewelcaseApplication::get().player();
             let settings = player.settings();
             // Closed only for a song without lyrics: still open.
             let lyrics = imp.lyrics_button.is_active() || imp.lyrics_suspended.get();
@@ -609,7 +609,7 @@ impl PlayerView {
         let imp = self.imp();
         let album_id = track.track().album_id;
         let artist_id = album_id.and_then(|id| {
-            GatefoldApplication::get()
+            JewelcaseApplication::get()
                 .library()
                 .album_artists(id)
                 .first()
@@ -617,7 +617,7 @@ impl PlayerView {
         });
         imp.album_link.set(album_id);
         imp.artist_link.set(artist_id);
-        let spotify_uri = GatefoldApplication::get()
+        let spotify_uri = JewelcaseApplication::get()
             .spotify()
             .stand_in_uri(track.id())
             .filter(|uri| uri.starts_with("spotify:track:"));

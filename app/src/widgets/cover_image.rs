@@ -4,10 +4,10 @@
 
 use std::cell::{Cell, RefCell};
 
-use gatefold_core::library::covers::CoverSize;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use jewelcase_core::library::covers::CoverSize;
 
 use crate::covers;
 
@@ -66,7 +66,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for CoverImage {
-        const NAME: &'static str = "GatefoldCoverImage";
+        const NAME: &'static str = "JewelcaseCoverImage";
         type Type = super::CoverImage;
         type ParentType = gtk::Widget;
 

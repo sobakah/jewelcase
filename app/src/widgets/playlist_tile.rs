@@ -43,7 +43,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlaylistTile {
-        const NAME: &'static str = "GatefoldPlaylistTile";
+        const NAME: &'static str = "JewelcasePlaylistTile";
         type Type = super::PlaylistTile;
         type ParentType = gtk::Box;
     }

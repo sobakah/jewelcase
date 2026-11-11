@@ -131,7 +131,7 @@ impl Client {
     pub fn new(version: &str) -> Self {
         let agent = ureq::Agent::config_builder()
             .user_agent(format!(
-                "Gatefold/{version} ( https://github.com/sobakah/gatefold )"
+                "Jewelcase/{version} ( https://github.com/sobakah/jewelcase )"
             ))
             .timeout_global(Some(Duration::from_secs(20)))
             .build()

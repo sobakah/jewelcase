@@ -1,7 +1,7 @@
 using Gtk 4.0;
 using Adw 1;
 
-template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
+template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
   Adw.PreferencesPage {
     name: "library";
     title: _("Library");
@@ -10,7 +10,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
     Adw.PreferencesGroup folders_group {
       title: _("Music Folders");
       description: _(
-        "Gatefold reads music from these folders. Symlinked folders and folders inside another music folder can't be added."
+        "Jewelcase reads music from these folders. Symlinked folders and folders inside another music folder can't be added."
       );
 
       header-suffix: Gtk.Button {
@@ -34,7 +34,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
       Adw.ComboRow start_view_row {
         title: _("_Open With");
-        subtitle: _("The view shown when Gatefold starts");
+        subtitle: _("The view shown when Jewelcase starts");
         use-underline: true;
 
         model: Gtk.StringList {
@@ -100,7 +100,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       description: _("How songs are listed in playlists whose sort you haven’t changed. A sort chosen in a playlist stays until you choose “Use Default Sort” there.");
 
       Adw.ComboRow playlist_sort_row {
-        title: _("_Gatefold Playlists");
+        title: _("_Jewelcase Playlists");
         use-underline: true;
 
         model: Gtk.StringList {
@@ -379,7 +379,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
       Adw.SwitchRow updates_row {
         title: _("Check for _Updates");
-        subtitle: _("New versions of Gatefold, Soloist and soloistd, when Gatefold starts and twice a day; installed only when you choose to");
+        subtitle: _("New versions of Jewelcase, Soloist and soloistd, when Jewelcase starts and twice a day; installed only when you choose to");
         use-underline: true;
       }
     }
@@ -390,7 +390,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
       Adw.SwitchRow spotify_app_row {
         title: _("Open Spotify Links in the _App");
         subtitle: _(
-          "Otherwise they open in the browser. Careful: the Spotify app starts playing the artist right away, alongside Gatefold."
+          "Otherwise they open in the browser. Careful: the Spotify app starts playing the artist right away, alongside Jewelcase."
         );
         use-underline: true;
       }
@@ -498,7 +498,7 @@ template $GatefoldPreferencesDialog: Adw.PreferencesDialog {
 
     Adw.PreferencesGroup tag_editor_group {
       title: _("Tag Editor");
-      description: _("Gatefold never changes your files. Editing opens them in a tag editor: cdport’s opens in your browser, one album at a time (cdport 1.4.0 or newer).");
+      description: _("Jewelcase never changes your files. Editing opens them in a tag editor: cdport’s opens in your browser, one album at a time (cdport 1.4.0 or newer).");
 
       Adw.ComboRow tag_editor_row {
         title: _("_Editor");
