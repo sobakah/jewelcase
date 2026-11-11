@@ -51,8 +51,9 @@ copy them back. Setup details of the owner's machine are in `CLAUDE.local.md` (n
 
 ### Versions and releases
 
-- Versions have three parts and tags no `v` (`1.2.0`). New features or changed behaviour raise the
-  minor version, fixes alone the patch. The version lives in one place (see Releasing below).
+- Versions have three parts and tags no `v` (`1.2.0`). New features raise the minor version. A
+  release of a few changes that fix bugs is a patch, also when a fix changes behaviour. The
+  version lives in one place (see Releasing below).
 - Every user-visible change goes under `## [Unreleased]` at the top of `CHANGELOG.md` when it is
   committed. Don't propose a release after every change: say what is waiting and suggest one when
   a feature or a few fixes have gathered.
