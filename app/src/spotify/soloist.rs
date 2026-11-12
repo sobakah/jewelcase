@@ -71,9 +71,6 @@ pub struct SoloistState {
     /// Jewelcase's songs that ended right after starting, in a row: a
     /// loop, stopped (`RUNAWAY_ENDS`).
     quick_ends: u32,
-    /// Jewelcase's Next made Soloist skip to this song in its queue, from
-    /// the song that played then.
-    skip_to: Option<(String, Option<String>)>,
     /// Loaded without playing (a restored queue): played on "play".
     pending: Option<(String, u64)>,
     seek_after_start: Option<u64>,
@@ -126,6 +123,8 @@ pub struct SoloistState {
     end_generation: u64,
     /// Jewelcase's volume (0 to 1), before the Spotify offset.
     volume: f64,
+    /// Jewelcase's last seek in its playing song: when, and to where (ms).
+    last_seek: Option<(std::time::Instant, u64)>,
 }
 
 /// With a local song next, Soloist is muted this long before the end.
@@ -145,6 +144,22 @@ const QUICK_END: std::time::Duration = std::time::Duration::from_secs(2);
 const RUNAWAY_ENDS: u32 = 4;
 /// A pause Jewelcase asked for is reported within this.
 const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
+/// Soloist moving on this soon after a seek, long before the end, was the
+/// seek going wrong (seen after Next), not the song ending.
+const SEEK_SLIP: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Soloist changed songs with `left` ms of Jewelcase's song left: if that
+/// was right after Jewelcase's seek (`last_seek`) and long before the end,
+/// where Jewelcase's song should go on (ms); else `None`.
+fn seek_slip(
+    last_seek: Option<(std::time::Instant, u64)>,
+    left: Option<u64>,
+    now: std::time::Instant,
+) -> Option<u64> {
+    let (at, ms) = last_seek?;
+    let since = now.checked_duration_since(at)?;
+    (since < SEEK_SLIP && left? > CHOSEN_ELSEWHERE_MS).then(|| ms + since.as_millis() as u64)
+}
 
 impl SoloistState {
     /// Soloist's reported shuffle and repeat; while a chosen repeat mode
@@ -517,30 +532,6 @@ impl Spotify {
             Event::Volume(_) => {}
             Event::CommandError { command, message } => {
                 tracing::warn!("Soloist refused {command:?}: {message}");
-                // Jewelcase's Next skipped in Soloist's queue and that was
-                // refused: the song is started directly instead (its copy
-                // stays in the queue, as when a skip lands elsewhere).
-                if command.as_deref() == Some("skip_next") {
-                    let target = {
-                        let mut stream = self.imp().stream.borrow_mut();
-                        let state = &mut stream.soloist;
-                        match state.skip_to.take() {
-                            Some((target, _))
-                                if !state.started
-                                    && state.wanted.as_deref() == Some(target.as_str()) =>
-                            {
-                                state.stale_queue.push(target.clone());
-                                Some(target)
-                            }
-                            _ => None,
-                        }
-                    };
-                    if let (Some(target), Some(soloist)) = (target, self.soloist()) {
-                        tracing::info!("Playing {target} directly");
-                        soloist.play(Some(&target));
-                    }
-                    return;
-                }
                 // Only the song's own start failing means it can't play
                 // (not shuffle or repeat sent before it).
                 let waiting = {
@@ -699,7 +690,6 @@ impl Spotify {
                     let mut stream = self.imp().stream.borrow_mut();
                     stream.soloist.started = true;
                     stream.soloist.started_at = Some(std::time::Instant::now());
-                    stream.soloist.skip_to = None;
                     stream.soloist.seek_after_start.take()
                 };
                 if let (Some(ms), Some(soloist)) = (seek, self.soloist()) {
@@ -713,14 +703,13 @@ impl Spotify {
                 // waited in the queue.)
                 self.soloist_ended("the copy left in Soloist's queue plays");
             }
-        } else if !started && let Some(target) = self.skip_missed(uri) {
-            // Jewelcase's Next made Soloist skip, but a song Jewelcase didn't
-            // know of was ahead in its queue: Jewelcase's song is started
-            // directly (its copy stays in the queue).
-            tracing::info!("Soloist skipped to {uri} instead of {target}; playing it directly");
-            if let Some(soloist) = self.soloist() {
-                soloist.play(Some(&target));
+        } else if started
+            && let Some(resume) = {
+                let state = &self.imp().stream.borrow().soloist;
+                seek_slip(state.last_seek, left, std::time::Instant::now())
             }
+        {
+            self.resume_after_slip(uri, resume);
         } else if started {
             let (chained, expected) = {
                 let state = &self.imp().stream.borrow().soloist;
@@ -735,6 +724,10 @@ impl Spotify {
                 self.soloist_ended("the handed-over song, but Jewelcase's queue changed");
             } else if chained {
                 // The handed-over song plays: it's Jewelcase's next one.
+                tracing::info!(
+                    "Soloist moved on to the handed-over {uri} ({} ms left)",
+                    left.map_or_else(|| "?".to_owned(), |l| l.to_string())
+                );
                 {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
@@ -774,30 +767,37 @@ impl Spotify {
         }
     }
 
+    /// Soloist moved on to `uri` right after Jewelcase's seek (it does so
+    /// now and then in a song it plays from its queue, e.g. after Next):
+    /// Jewelcase's song is started again where the seek went. A song taken
+    /// from Soloist's queue is no longer there; it's handed over again.
+    fn resume_after_slip(&self, uri: &str, resume_ms: u64) {
+        let wanted = {
+            let mut stream = self.imp().stream.borrow_mut();
+            let state = &mut stream.soloist;
+            if state.queued_next.as_deref() == Some(uri) {
+                state.queued_next = None;
+            }
+            state.last_seek = None;
+            state.started = false;
+            state.end_generation += 1;
+            state.seek_after_start = Some(resume_ms);
+            state.position = None;
+            state.wanted.clone()
+        };
+        let (Some(wanted), Some(soloist)) = (wanted, self.soloist()) else {
+            return;
+        };
+        tracing::info!(
+            "Soloist moved on to {uri} right after a seek; {wanted} goes on at {resume_ms} ms"
+        );
+        soloist.play(Some(&wanted));
+        self.watch_start(&wanted);
+    }
+
     fn started_a_while_ago(&self) -> bool {
         let state = &self.imp().stream.borrow().soloist;
         state.started_at.is_some_and(|at| at.elapsed() >= QUICK_END)
-    }
-
-    /// Jewelcase's Next skipped in Soloist's queue and Soloist didn't land
-    /// on Jewelcase's song: the song, now known to wait behind others.
-    fn skip_missed(&self, uri: &str) -> Option<String> {
-        let mut stream = self.imp().stream.borrow_mut();
-        let state = &mut stream.soloist;
-        // A late report of the song skipped from isn't where it landed.
-        if state
-            .skip_to
-            .as_ref()
-            .is_none_or(|(_, from)| from.as_deref() == Some(uri))
-        {
-            return None;
-        }
-        let (target, _) = state.skip_to.take()?;
-        if state.wanted.as_deref() != Some(target.as_str()) {
-            return None;
-        }
-        state.stale_queue.push(target.clone());
-        Some(target)
     }
 
     /// Whether `uri` was left in Soloist's queue (and now isn't).
@@ -1110,29 +1110,21 @@ impl Spotify {
             self.schedule_end();
             return;
         }
-        // Jewelcase's Next to the song already in Soloist's queue: Soloist
-        // skips to it, so it isn't left in the queue to play again later.
-        let skip = {
+        // Jewelcase's song is always started directly, never by skipping to
+        // it in Soloist's queue: Soloist slips on from a song it skipped to
+        // (to the next one handed over, or on a seek). Another song waiting
+        // there is skipped past, muted until the new song starts
+        // (soloist_item); the song itself is left there (a skip to it would
+        // look like its start), as a left-over that ends it.
+        self.restore_volume();
+        {
             let mut stream = self.imp().stream.borrow_mut();
             let state = &mut stream.soloist;
-            let skip = play
-                && start_ms == 0
-                && state.started
-                && state.wanted.is_some()
-                && state.queued_next.as_deref() == Some(uri);
-            if skip {
-                state.queued_next = None;
+            if state.queued_next.as_deref() == Some(uri) {
+                Self::forget_queued(state);
             }
-            state.skip_to = skip.then(|| {
-                let from = state.current.as_ref().map(|c| c.uri.clone());
-                (uri.to_owned(), from)
-            });
-            skip
-        };
-        if !skip {
-            self.consume_queued();
         }
-        self.restore_volume();
+        self.consume_queued();
         let Some(soloist) = self.soloist() else {
             JewelcaseApplication::get()
                 .player()
@@ -1146,22 +1138,17 @@ impl Spotify {
             stream.soloist.started = false;
             return;
         }
-        let (prepare, generation, load, active) = {
+        let (prepare, active) = {
             let mut stream = self.imp().stream.borrow_mut();
             let state = &mut stream.soloist;
-            state.loads += 1;
             let active = std::mem::replace(&mut state.is_active, true);
             state.pending = None;
             state.wanted = Some(uri.to_owned());
             state.started = false;
             state.seek_after_start = (start_ms > 0).then_some(start_ms);
             state.position = None;
-            (
-                !std::mem::replace(&mut state.prepared, true),
-                state.generation,
-                state.loads,
-                active,
-            )
+            state.last_seek = None;
+            (!std::mem::replace(&mut state.prepared, true), active)
         };
         // Linked once, but maybe not the active device right now.
         if !active {
@@ -1172,14 +1159,19 @@ impl Spotify {
             soloist.set_shuffle(false);
             soloist.set_repeat(Repeat::Off);
         }
-        if skip {
-            tracing::info!("Soloist: {uri} by skipping to it in its queue");
-            soloist.skip_next();
-        } else {
-            tracing::info!("Soloist: playing {uri}");
-            soloist.play(Some(uri));
-        }
-        // No start in time: Spotify can't play it.
+        tracing::info!("Soloist: playing {uri}");
+        soloist.play(Some(uri));
+        self.watch_start(uri);
+    }
+
+    /// No start of `uri` in time: Spotify can't play it.
+    fn watch_start(&self, uri: &str) {
+        let (generation, load) = {
+            let mut stream = self.imp().stream.borrow_mut();
+            let state = &mut stream.soloist;
+            state.loads += 1;
+            (state.generation, state.loads)
+        };
         let uri = uri.to_owned();
         glib::timeout_add_seconds_local_once(
             START_TIMEOUT_S,
@@ -1249,6 +1241,8 @@ impl Spotify {
             soloist.seek(ms);
         }
         let mut stream = self.imp().stream.borrow_mut();
+        stream.soloist.last_seek = (stream.soloist.started && stream.soloist.wanted.is_some())
+            .then(|| (std::time::Instant::now(), ms));
         let speed = stream.soloist.position.map_or(1.0, |p| p.speed);
         stream.soloist.position = Some(Position {
             position_ms: ms,
@@ -1541,6 +1535,24 @@ fn as_track(item: &Item) -> jewelcase_spotify::Track {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn soloist_moving_on_right_after_a_seek_is_a_slip() {
+        let now = std::time::Instant::now();
+        let second = std::time::Duration::from_secs(1);
+        let seek = Some((now - second, 51_000));
+        // A second after a seek to 0:51, minutes left: the song goes on
+        // where it should be by now.
+        assert_eq!(seek_slip(seek, Some(140_000), now), Some(52_000));
+        // Near the end: the song really ended.
+        assert_eq!(seek_slip(seek, Some(5_000), now), None);
+        // Long after the seek: someone chose a song in the Spotify app.
+        let old = Some((now - 10 * second, 51_000));
+        assert_eq!(seek_slip(old, Some(140_000), now), None);
+        // No seek, or nothing known about what was left.
+        assert_eq!(seek_slip(None, Some(140_000), now), None);
+        assert_eq!(seek_slip(seek, None, now), None);
+    }
 
     #[test]
     fn a_chosen_repeat_mode_skips_the_step_in_between() {

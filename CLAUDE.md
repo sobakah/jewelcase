@@ -152,8 +152,12 @@ cargo clippy --workspace --all-targets --features spotify-stream -- -D warnings
 make test
 ```
 
-`JEWELCASE_LOG=debug` (or `trace`, `warn`) sets the log level; the log goes to the journal
-(`journalctl --user -t jewelcase`, with hourly Spotify request counts per kind).
+`JEWELCASE_LOG=debug` (or `trace`, `warn`) sets the log level; the log goes to the journal, with
+hourly Spotify request counts per kind. Started from the dash, its lines carry the launcher's
+name (`journalctl --user | grep jewelcase::`), not `-t jewelcase`; after the update banner's
+restart they go nowhere. For Soloist trouble read soloistd's log first
+(`journalctl --user -t soloistd`): every song start, pause (a seek shows as one) and volume change,
+to the millisecond.
 `JEWELCASE_FRAME_STATS=1` logs each animation's frame rate, longest frame and painting time (also
 in release builds): measure before changing anything for "it feels slow". Headless runs render on
 the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
@@ -330,9 +334,6 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 - The artist page has two ↻ icons with different jobs ("Look Up Again" for the artist's
   information at the top, "Ask Spotify Again" for the releases); the owner chose to leave it for
   now.
-- Clicking beside the open player once stopped closing it until a restart; not reproduced
-  (libadwaita ignores that click while it thinks a swipe on the sheet is still going). Ask what
-  was done just before if it happens again.
 - Not verified: two Soloists running on one API key at the same time; Soloist's WebSocket with two
   connected apps at once.
 - Known issues left from the code reviews: CONCEPT.md §13 "Known issues". Roadmap and optional

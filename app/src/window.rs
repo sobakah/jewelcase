@@ -360,6 +360,7 @@ mod imp {
             let player = JewelcaseApplication::get().player();
             obj.insert_action_group("player", Some(player.actions()));
             obj.setup_shortcuts();
+            obj.setup_sheet_release();
             obj.setup_albums();
             obj.setup_artists();
             obj.setup_playlists();
@@ -418,6 +419,25 @@ impl JewelcaseWindow {
             .settings
             .get()
             .expect("settings are set in constructed()")
+    }
+
+    /// Every press lets go of a player sheet a queue row held, before the
+    /// press reaches the row (capture phase, from the window down): a hold
+    /// whose release never came would keep the sheet from closing on a
+    /// click beside it (widgets/reorder.rs).
+    fn setup_sheet_release(&self) {
+        let controller = gtk::EventControllerLegacy::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_event(|_, event| {
+            if matches!(
+                event.event_type(),
+                gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin
+            ) {
+                crate::widgets::reorder::release_sheet();
+            }
+            glib::Propagation::Proceed
+        });
+        self.add_controller(controller);
     }
 
     /// Playback keys run in the bubble phase, so text entries and focused

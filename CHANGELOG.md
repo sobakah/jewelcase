@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Spotify songs no longer jump to the next song when you seek in them after Next or after picking a song in the queue.
+- Clicking beside the player and its × close it again after songs were dragged in the queue; before, only the grip did until a restart.
+
 ## [0.6.1] — 2026-11-12
 
 The library database is unchanged; 0.6.0 still opens it.

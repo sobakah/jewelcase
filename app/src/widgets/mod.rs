@@ -16,7 +16,7 @@ pub mod playlist_picker;
 mod playlist_tile;
 mod portrait_dialog;
 mod queue_view;
-mod reorder;
+pub mod reorder;
 mod search_view;
 mod sectioned_grid;
 mod shuffle_options;

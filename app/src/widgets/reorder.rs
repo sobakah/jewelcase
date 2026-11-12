@@ -129,14 +129,38 @@ fn set_gap(row: &gtk::ListBoxRow, gap: Option<bool>) {
     }
 }
 
+thread_local! {
+    /// The sheet held by `hold_sheet`, so it's let go also when the row
+    /// that held it has left the window (a moved queue row is rebuilt).
+    static HELD_SHEET: RefCell<glib::WeakRef<adw::BottomSheet>> = RefCell::default();
+}
+
 /// While a row is pressed or dragged inside the player sheet, the sheet
 /// mustn't take the drag as "swipe down to close".
 pub fn hold_sheet(widget: &impl IsA<gtk::Widget>, hold: bool) {
+    if !hold {
+        release_sheet();
+        return;
+    }
     if let Some(sheet) = widget
         .ancestor(adw::BottomSheet::static_type())
         .and_downcast::<adw::BottomSheet>()
     {
-        sheet.set_can_close(!hold);
+        sheet.set_can_close(false);
+        HELD_SHEET.with_borrow_mut(|held| held.set(Some(&sheet)));
+    }
+}
+
+/// Lets go of a held sheet. Every press in the window does this first
+/// (window.rs): a release that went elsewhere (a menu) doesn't leave the
+/// sheet unable to close.
+pub fn release_sheet() {
+    if let Some(sheet) = HELD_SHEET.with_borrow_mut(|held| {
+        let sheet = held.upgrade();
+        held.set(None);
+        sheet
+    }) {
+        sheet.set_can_close(true);
     }
 }
 
@@ -222,4 +246,38 @@ fn keyboard(
         }
     ));
     row.add_controller(keys);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A queue row moved by a drag is rebuilt: the row that held the sheet
+    /// has left the window when the drag ends, and the sheet must still be
+    /// let go (it couldn't close on a click beside it until a restart).
+    #[test]
+    fn a_sheet_held_by_a_row_that_left_is_let_go() {
+        if adw::init().is_err() {
+            eprintln!("no display: skipped");
+            return;
+        }
+        let sheet = adw::BottomSheet::new();
+        let list = gtk::ListBox::new();
+        let row = gtk::ListBoxRow::new();
+        list.append(&row);
+        sheet.set_sheet(Some(&list));
+
+        hold_sheet(&row, true);
+        assert!(!sheet.can_close());
+        list.remove(&row);
+        hold_sheet(&row, false);
+        assert!(sheet.can_close());
+
+        // A release that never came: the next press lets go.
+        let other = gtk::ListBoxRow::new();
+        list.append(&other);
+        hold_sheet(&other, true);
+        release_sheet();
+        assert!(sheet.can_close());
+    }
 }
