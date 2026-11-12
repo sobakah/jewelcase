@@ -1,6 +1,6 @@
-//! The album or artist grid, and at its end, apart from the library, a
-//! collapsible section of Spotify's saved albums or followed artists
-//! (CONCEPT.md §9.8).
+//! The album or artist grid, and apart from the library, collapsible
+//! sections before or after it: Spotify's saved albums or followed artists
+//! at the end, new releases at the top (CONCEPT.md §9.8).
 //!
 //! GTK's grid view has no sections, so this is a list view of rows, each
 //! a line of tiles: only the rows on screen are built, as in a grid view,
@@ -26,15 +26,43 @@ const MIN_COLUMNS: i32 = 2;
 const MAX_COLUMNS: i32 = 40;
 
 /// One line of the list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     /// Library items `start..start + len`.
     Local { start: u32, len: u32 },
-    /// "Saved on Spotify (N)", which opens and closes the section.
-    #[default]
-    Header,
-    /// Spotify items `start..start + len`.
-    Spotify { start: u32, len: u32 },
+    /// A section's header ("Saved on Spotify (N)"), which opens and
+    /// closes it.
+    Header(usize),
+    /// A section's items `start..start + len`.
+    Section {
+        section: usize,
+        start: u32,
+        len: u32,
+    },
+}
+
+/// Where a section goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Before,
+    After,
+}
+
+/// A part of the grid apart from the library.
+struct Section {
+    place: Place,
+    /// "Saved on Spotify ({})".
+    title: String,
+    /// The boolean setting that keeps it open.
+    key: String,
+    items: Rc<Vec<ShelfItem>>,
+    activate: Option<SpotifyActivate>,
+    /// Shows a way to connect to Spotify again.
+    needs_permission: bool,
+    /// The items changed: their rows show other items now.
+    dirty: bool,
+    /// The row showing the header, to update it in place.
+    header_row: glib::WeakRef<GridRow>,
 }
 
 type Create = Rc<dyn Fn() -> gtk::Widget>;
@@ -51,9 +79,7 @@ mod imp {
         pub list: gtk::ListView,
         pub rows: OnceCell<gio::ListStore>,
         pub local: RefCell<Option<gio::ListModel>>,
-        pub spotify: RefCell<Rc<Vec<ShelfItem>>>,
-        pub spotify_activate: RefCell<Option<SpotifyActivate>>,
-        pub needs_permission: Cell<bool>,
+        pub(super) sections: RefCell<Vec<Section>>,
         pub create: OnceCell<Create>,
         pub bind: OnceCell<Bind>,
         pub activate: OnceCell<Activate>,
@@ -65,18 +91,11 @@ mod imp {
         pub columns: Rc<Cell<u32>>,
         pub rebuild_pending: Cell<bool>,
         pub settings: OnceCell<gio::Settings>,
-        /// The setting that keeps the Spotify section open.
-        pub key: OnceCell<String>,
-        /// "Saved on Spotify ({})".
-        pub title: OnceCell<String>,
         /// The rows in the list now, so a rebuild only replaces what
         /// changed (rows that stay keep their widgets, and focus).
         pub shown: RefCell<Vec<Row>>,
-        /// The items changed: their rows show other items now.
+        /// The library's items changed: their rows show other items now.
         pub local_dirty: Cell<bool>,
-        pub spotify_dirty: Cell<bool>,
-        /// The row showing the Spotify header, to update it in place.
-        pub header_row: glib::WeakRef<GridRow>,
     }
 
     #[glib::object_subclass]
@@ -193,7 +212,7 @@ impl SectionedGrid {
         self.rebuild_soon();
     }
 
-    /// Scrolls to the end (screenshot tests of the Spotify section).
+    /// Scrolls to the end (screenshot tests of the Spotify sections).
     pub fn scroll_to_end(&self) {
         let adjustment = self.imp().scroller.vadjustment();
         adjustment.set_value(adjustment.upper());
@@ -224,11 +243,12 @@ impl SectionedGrid {
         self.imp().local.borrow().clone()
     }
 
-    /// The Spotify section's header: `title` with a `{}` for the count;
-    /// `key` the boolean setting that keeps it open.
-    pub fn setup_spotify(&self, title: &str, key: &str) {
+    /// Adds a section `place`d before or after the library: `title` with
+    /// a `{}` for the count; `key` the boolean setting that keeps it open.
+    /// Returns its index for `set_section`.
+    pub fn add_section(&self, place: Place, title: &str, key: &str) -> usize {
         let imp = self.imp();
-        let settings = gio::Settings::new(APP_ID);
+        let settings = imp.settings.get_or_init(|| gio::Settings::new(APP_ID));
         settings.connect_changed(
             Some(key),
             glib::clone!(
@@ -237,30 +257,44 @@ impl SectionedGrid {
                 move |_, _| grid.rebuild_soon()
             ),
         );
-        let _ = imp.settings.set(settings);
-        let _ = imp.key.set(key.to_owned());
-        let _ = imp.title.set(title.to_owned());
+        let mut sections = imp.sections.borrow_mut();
+        sections.push(Section {
+            place,
+            title: title.to_owned(),
+            key: key.to_owned(),
+            items: Rc::default(),
+            activate: None,
+            needs_permission: false,
+            dirty: false,
+            header_row: glib::WeakRef::new(),
+        });
+        sections.len() - 1
     }
 
-    /// Spotify's items; `needs_permission` asks to connect again.
-    pub fn set_spotify(
+    /// A section's items (shown only when there are any, or with
+    /// `needs_permission`, which asks to connect to Spotify again);
+    /// `activate` opens one.
+    pub fn set_section(
         &self,
+        section: usize,
         items: Vec<ShelfItem>,
         needs_permission: bool,
         activate: impl Fn(usize) + 'static,
     ) {
-        let imp = self.imp();
-        imp.spotify.replace(Rc::new(items));
-        imp.spotify_dirty.set(true);
-        imp.needs_permission.set(needs_permission);
-        imp.spotify_activate.replace(Some(Rc::new(activate)));
+        if let Some(s) = self.imp().sections.borrow_mut().get_mut(section) {
+            s.items = Rc::new(items);
+            s.dirty = true;
+            s.needs_permission = needs_permission;
+            s.activate = Some(Rc::new(activate));
+        }
         self.rebuild_soon();
     }
 
-    fn spotify_open(&self) -> bool {
+    fn section_open(&self, section: usize) -> bool {
         let imp = self.imp();
-        match (imp.settings.get(), imp.key.get()) {
-            (Some(settings), Some(key)) => settings.boolean(key),
+        let key = imp.sections.borrow().get(section).map(|s| s.key.clone());
+        match (imp.settings.get(), key) {
+            (Some(settings), Some(key)) => settings.boolean(&key),
             _ => false,
         }
     }
@@ -299,28 +333,52 @@ impl SectionedGrid {
             .borrow()
             .as_ref()
             .map_or(0, gio::ListModel::n_items);
-        let mut rows = chunks(local, &|start, len| Row::Local { start, len });
-        let spotify = imp.spotify.borrow().len() as u32;
-        if spotify > 0 || imp.needs_permission.get() {
-            rows.push(Row::Header);
-            if self.spotify_open() {
-                rows.extend(chunks(spotify, &|start, len| Row::Spotify { start, len }));
+        let (places, counts): (Vec<Place>, Vec<(u32, bool)>) = imp
+            .sections
+            .borrow()
+            .iter()
+            .map(|s| (s.place, (s.items.len() as u32, s.needs_permission)))
+            .unzip();
+        let section_rows = |place: Place| -> Vec<Row> {
+            let mut rows = Vec::new();
+            for (section, &(count, needs_permission)) in counts.iter().enumerate() {
+                if places[section] != place || (count == 0 && !needs_permission) {
+                    continue;
+                }
+                rows.push(Row::Header(section));
+                if self.section_open(section) {
+                    rows.extend(chunks(count, &|start, len| Row::Section {
+                        section,
+                        start,
+                        len,
+                    }));
+                }
             }
-        }
+            rows
+        };
+        let mut rows = section_rows(Place::Before);
+        rows.extend(chunks(local, &|start, len| Row::Local { start, len }));
+        rows.extend(section_rows(Place::After));
         // Only what changed: rows that stay keep their widgets (no new
         // textures, focus kept); changed items change every row after them.
         let old = imp.shown.replace(rows.clone());
-        let (local_dirty, spotify_dirty) = (
-            imp.local_dirty.replace(false),
-            imp.spotify_dirty.replace(false),
-        );
+        let local_dirty = imp.local_dirty.replace(false);
+        let dirty: Vec<bool> = imp
+            .sections
+            .borrow_mut()
+            .iter_mut()
+            .map(|s| std::mem::take(&mut s.dirty))
+            .collect();
         let keep = old
             .iter()
             .zip(&rows)
             .take_while(|(a, b)| {
                 a == b
-                    && !(local_dirty && matches!(a, Row::Local { .. }))
-                    && !(spotify_dirty && matches!(a, Row::Spotify { .. }))
+                    && match a {
+                        Row::Local { .. } => !local_dirty,
+                        Row::Section { section, .. } => !dirty[*section],
+                        Row::Header(_) => true,
+                    }
             })
             .count();
         let objects: Vec<glib::BoxedAnyObject> = rows[keep..]
@@ -332,8 +390,17 @@ impl SectionedGrid {
             store.splice(keep as u32, store.n_items() - keep as u32, &objects);
         }
         // A header that stayed shows the new count and state.
-        if let Some(row) = imp.header_row.upgrade() {
-            self.update_header(&row);
+        let headers: Vec<Option<GridRow>> = imp
+            .sections
+            .borrow()
+            .iter()
+            .map(|s| s.header_row.upgrade())
+            .collect();
+        for (section, row) in headers.into_iter().enumerate() {
+            // Not when the row went on to show another section's header.
+            if let Some(row) = row.filter(|r| r.imp().section.get() == section) {
+                self.update_header(&row);
+            }
         }
     }
 
@@ -341,9 +408,12 @@ impl SectionedGrid {
         let imp = self.imp();
         let columns = imp.columns.get() as usize;
         match row {
-            Row::Header => {
+            Row::Header(section) => {
                 widget.ensure_header(self);
-                imp.header_row.set(Some(widget));
+                widget.imp().section.set(section);
+                if let Some(s) = imp.sections.borrow().get(section) {
+                    s.header_row.set(Some(widget));
+                }
                 self.update_header(widget);
             }
             Row::Local { start, len } => {
@@ -361,35 +431,50 @@ impl SectionedGrid {
                     .collect();
                 widget.fill_local(items, bind);
             }
-            Row::Spotify { start, len } => {
-                let items = imp.spotify.borrow().clone();
-                let activate = imp.spotify_activate.borrow().clone();
+            Row::Section {
+                section,
+                start,
+                len,
+            } => {
+                let Some((items, activate)) = imp
+                    .sections
+                    .borrow()
+                    .get(section)
+                    .map(|s| (s.items.clone(), s.activate.clone()))
+                else {
+                    return;
+                };
+                widget.imp().section.set(section);
                 widget.fill_spotify(columns, &items, start as usize, len as usize, activate);
             }
         }
     }
 
-    fn toggle_spotify(&self) {
+    fn toggle_section(&self, section: usize) {
         let imp = self.imp();
-        if let (Some(settings), Some(key)) = (imp.settings.get(), imp.key.get()) {
-            let _ = settings.set_boolean(key, !settings.boolean(key));
+        let key = imp.sections.borrow().get(section).map(|s| s.key.clone());
+        if let (Some(settings), Some(key)) = (imp.settings.get(), key) {
+            let _ = settings.set_boolean(&key, !settings.boolean(&key));
         }
     }
 
-    /// The header's count, open/closed state (shown and told to screen
-    /// readers) and the "connect again" note.
+    /// The header's title and count, open/closed state (shown and told to
+    /// screen readers) and the "connect again" note.
     fn update_header(&self, row: &GridRow) {
         let imp = self.imp();
-        let open = self.spotify_open();
-        let count = imp.spotify.borrow().len();
         let row_imp = row.imp();
+        let section = row_imp.section.get();
+        let open = self.section_open(section);
+        let Some((title, count, needs_permission)) = imp
+            .sections
+            .borrow()
+            .get(section)
+            .map(|s| (s.title.clone(), s.items.len(), s.needs_permission))
+        else {
+            return;
+        };
         if let Some(content) = row_imp.header_content.borrow().as_ref() {
-            content.set_label(
-                &imp.title
-                    .get()
-                    .map(|t| t.replace("{}", &count.to_string()))
-                    .unwrap_or_default(),
-            );
+            content.set_label(&title.replace("{}", &count.to_string()));
             content.set_icon_name(if open {
                 "pan-down-symbolic"
             } else {
@@ -400,7 +485,7 @@ impl SectionedGrid {
             toggle.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
         }
         if let Some(permission) = row_imp.header_permission.borrow().as_ref() {
-            permission.set_visible(imp.needs_permission.get() && open);
+            permission.set_visible(needs_permission && open);
         }
     }
 }
@@ -443,7 +528,9 @@ mod row_imp {
         /// The grid's column count now (tiles are sized by it, also before
         /// the rows are rebuilt for a new width).
         pub columns: RefCell<Option<Rc<Cell<u32>>>>,
-        /// The first Spotify item of the row, and what opens one.
+        /// The section of a header or section row.
+        pub section: Cell<usize>,
+        /// The first section item of the row, and what opens one.
         pub spotify_start: Cell<usize>,
         pub spotify_activate: RefCell<Option<SpotifyActivate>>,
     }
@@ -657,9 +744,9 @@ impl GridRow {
         }
     }
 
-    /// The Spotify section's header (built once per row widget, then only
-    /// updated, so the toggle keeps the focus): the open/close toggle and,
-    /// when the login lacks the permission, a way to connect again.
+    /// A section's header (built once per row widget, then only updated,
+    /// so the toggle keeps the focus): the open/close toggle and, when the
+    /// login lacks the permission, a way to connect again.
     fn ensure_header(&self, grid: &SectionedGrid) {
         let imp = self.imp();
         if imp.kind.get() == RowKind::Header && imp.header.borrow().is_some() {
@@ -681,7 +768,9 @@ impl GridRow {
         toggle.connect_clicked(glib::clone!(
             #[weak]
             grid,
-            move |_| grid.toggle_spotify()
+            #[weak(rename_to = row)]
+            self,
+            move |_| grid.toggle_section(row.imp().section.get())
         ));
         header.append(&toggle);
         let permission = gtk::Box::builder().spacing(12).margin_start(12).build();

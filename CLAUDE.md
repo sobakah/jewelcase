@@ -236,6 +236,10 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   `POST /api/token`, `GET /v1/me`, `/v1/search` (tracks, artists), `/v1/artists/<id>/albums`, an
   empty page for everything else. A sync against it drops Spotify playlists it doesn't list, so
   use a copy of the headless state (`JEWELCASE_HEADLESS_STATE=<scratchpad>/state`).
+  `JEWELCASE_DEEZER_TEST_SERVER` does the same for Deezer's new releases (`/search/artist`,
+  `/album/upc:<upc>`, `/artist/<id>/albums`, `/album/<id>`; one server can answer both). To be
+  sure nothing reaches the internet (online lookups on), run the stand-in and headless.sh inside
+  `unshare -rn sh -c 'ip link set lo up; …'`: only loopback exists there.
 - **Soloist and soloistd**: headless runs set `JEWELCASE_SOLOISTD_CONFIG` to the state folder, so
   they never control the owner's real Soloist. Don't connect tests to the owner's soloistd.
 - **Updates**: `JEWELCASE_UPDATE_TEST=<version>` pretends to be that version (and checks in

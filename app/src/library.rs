@@ -134,6 +134,8 @@ mod imp {
         pub reload_generation: Cell<u64>,
         /// Related artists are being asked for on ListenBrainz.
         pub related_lookup: Cell<bool>,
+        /// New releases are being read from Deezer.
+        pub release_check: Cell<bool>,
         /// ListenBrainz asked to wait until then.
         pub related_paused: Cell<Option<std::time::Instant>>,
         pub lookups: RefCell<HashSet<i64>>,
@@ -747,6 +749,89 @@ impl Library {
                     library.rematch_spotify();
                     library.reload_playlists();
                 }
+            }
+        ));
+    }
+
+    /// New releases of the followed Spotify artists from Deezer (§9.8):
+    /// with online lookups and `new-releases` on, once a day (after a
+    /// check that stopped, at the next try); one artist at a time, so an
+    /// open artist page's lookup goes in between. `done` runs when the
+    /// check ends.
+    pub fn check_new_releases(&self, done: impl FnOnce() + 'static) {
+        const KEY: &str = "new-releases-checked";
+        const EVERY_S: i64 = 24 * 3600;
+        if !self.online_enabled()
+            || !self.settings().boolean("new-releases")
+            || self.imp().release_check.get()
+        {
+            return;
+        }
+        let Some((artists, last)) = self.db().map(|db| {
+            (
+                db.followed_artists().unwrap_or_default(),
+                db.app_state(KEY)
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(0),
+            )
+        }) else {
+            return;
+        };
+        if artists.is_empty() || metadata::now() - last < EVERY_S {
+            return;
+        }
+        self.imp().release_check.set(true);
+        tracing::info!(
+            "Looking on Deezer for new releases of {} followed artists",
+            artists.len()
+        );
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = library)]
+            self,
+            async move {
+                let mut found = 0;
+                let mut stopped = None;
+                for artist in artists {
+                    let (reply, answer) = async_channel::bounded(1);
+                    library.send_job(Job::ArtistReleases {
+                        spotify_id: artist.spotify_id,
+                        name: artist.name,
+                        reply,
+                    });
+                    match answer.recv().await {
+                        Ok(Ok(count)) => found += count,
+                        Ok(Err(err)) => {
+                            stopped = Some(err);
+                            break;
+                        }
+                        Err(_) => {
+                            stopped = Some("the worker stopped".to_owned());
+                            break;
+                        }
+                    }
+                }
+                if stopped.is_none() {
+                    let (reply, answer) = async_channel::bounded(1);
+                    library.send_job(Job::ReleaseBarcodes { reply });
+                    stopped = match answer.recv().await {
+                        Ok(Ok(())) => None,
+                        Ok(Err(err)) => Some(err),
+                        Err(_) => Some("the worker stopped".to_owned()),
+                    };
+                }
+                match stopped {
+                    Some(err) => tracing::info!("Cannot ask Deezer for new releases now: {err}"),
+                    None => {
+                        tracing::info!("Deezer has {found} new releases of followed artists");
+                        if let Some(mut db) = library.db() {
+                            let _ = db.set_app_state(KEY, &metadata::now().to_string());
+                        }
+                    }
+                }
+                library.imp().release_check.set(false);
+                done();
             }
         ));
     }

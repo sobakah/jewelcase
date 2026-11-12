@@ -364,6 +364,17 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
     }
 
     Adw.PreferencesGroup {
+      title: _("New Releases");
+
+      Adw.SwitchRow new_releases_row {
+        title: _("New Releases of _Followed Artists");
+        subtitle: _("Once a day from Deezer, at the top of the Artists view; sends the names of the artists you follow on Spotify and barcodes of their albums; needs “Look Up Artists Online”");
+        use-underline: true;
+        sensitive: bind online_row.active;
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: _("Lyrics");
 
       Adw.SwitchRow lrclib_row {

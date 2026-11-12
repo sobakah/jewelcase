@@ -12,6 +12,7 @@ Jewelcase is built around your local library: covers to browse, albums and artis
 - **What you don't own comes from Spotify**: in playlists, in search results (after your library's) and on artist pages ("On Spotify": the releases you don't have). It streams through Spotify Soloist, Spotify's official player, in Jewelcase's queue.
 - **Playlists go both ways.** Your Spotify playlists show next to your own; edit them from here (songs, order, name, cover). Publish a local playlist to Spotify. Add songs from your library or from Spotify to any playlist.
 - **Saved albums and followed artists** that aren't in your library get their own section in the album and artist grids.
+- **New releases** of the artists you follow show at the top of the Artists view, from the last 30 days. Jewelcase reads them from Deezer once a day, as Spotify only allows a few artist requests a day; clicking one finds it on Spotify. Preferences → Online → *New Releases of Followed Artists* (needs *Look Up Artists Online*).
 - **Play on your Spotify Connect devices**, with the player showing what they play.
 
 ## Features

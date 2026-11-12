@@ -10,6 +10,8 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **Sort artists** by name or by date added, from the sort button on the Artists page.
 
+- **New releases of the artists you follow on Spotify** at the top of the Artists view: albums, EPs and singles from the last 30 days, read from Deezer once a day. Clicking one opens it from Spotify. Preferences → Online → *New Releases of Followed Artists* (needs *Look Up Artists Online*).
+
 ### Changed
 
 - Albums saved on Spotify and artists followed there are sorted like your own albums and artists, instead of in the order you saved or followed them.

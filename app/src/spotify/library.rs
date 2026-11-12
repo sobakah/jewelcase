@@ -10,7 +10,7 @@ use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use jewelcase_core::db::{SpotifyAlbum, SpotifyArtist, StreamInfo};
+use jewelcase_core::db::{NewRelease, SpotifyAlbum, SpotifyArtist, StreamInfo};
 use jewelcase_core::matching::{Confidence, RemoteTrack};
 use jewelcase_spotify::Error;
 
@@ -522,6 +522,86 @@ impl Spotify {
             .db()
             .and_then(|db| db.followed_artists().ok())
             .unwrap_or_default()
+    }
+
+    /// Recent releases of the followed artists (from Deezer, §9.8),
+    /// newest first.
+    pub fn new_releases(&self) -> Vec<NewRelease> {
+        let since = jewelcase_metadata::date_string(now() - crate::metadata::NEW_RELEASES_KEPT_S);
+        JewelcaseApplication::get()
+            .library()
+            .db()
+            .and_then(|db| db.new_releases(&since).ok())
+            .unwrap_or_default()
+    }
+
+    /// Looks for new releases (once a day, see `Library`), then shows
+    /// them and downloads their covers.
+    pub fn check_new_releases(&self) {
+        if !self.is_connected() {
+            return;
+        }
+        let spotify = self.downgrade();
+        JewelcaseApplication::get()
+            .library()
+            .check_new_releases(move || {
+                let Some(spotify) = spotify.upgrade() else {
+                    return;
+                };
+                spotify.emit_by_name::<()>("library-changed", &[]);
+                let covers = crate::config::cover_cache();
+                let urls: Vec<String> = spotify
+                    .new_releases()
+                    .into_iter()
+                    .filter_map(|r| r.image_url)
+                    .filter(|url| !covers.has(&super::image_cover_key(url)))
+                    .collect();
+                let spotify = spotify.downgrade();
+                super::fetch_covers_in_batches(urls, move |_| {
+                    if let Some(spotify) = spotify.upgrade() {
+                        spotify.emit_by_name::<()>("library-changed", &[]);
+                    }
+                });
+            });
+    }
+
+    /// A new release on Spotify (by barcode, else by title and artist),
+    /// remembered once found; one not there yet is asked for again next
+    /// time. `Err` when Spotify can't be asked.
+    pub async fn new_release_album(
+        &self,
+        release: &NewRelease,
+    ) -> Result<Option<SpotifyAlbum>, String> {
+        let library = JewelcaseApplication::get().library();
+        if let Some(id) = &release.spotify_album_id
+            && let Some(album) = library
+                .db()
+                .and_then(|db| db.spotify_album(id).ok().flatten())
+        {
+            return Ok(Some(album));
+        }
+        let (upc, title, artist) = (
+            release.upc.clone(),
+            release.title.clone(),
+            release.artist.clone(),
+        );
+        let found = self
+            .call(move |client| client.find_album(upc.as_deref(), &title, &artist))
+            .await
+            .map_err(|err| {
+                tracing::info!("Cannot look for a new release on Spotify: {err}");
+                super::answer_error(&err)
+            })?;
+        let album = found.as_ref().map(album_from);
+        if let Some(album) = &album
+            && let Some(mut db) = library.db()
+        {
+            if let Err(err) = db.store_spotify_album(album) {
+                tracing::warn!("Cannot store a Spotify album: {err}");
+            }
+            let _ = db.set_new_release_spotify(release.deezer_id, &album.spotify_id);
+        }
+        Ok(album)
     }
 }
 

@@ -956,6 +956,44 @@ impl Client {
         })
     }
 
+    /// A release found elsewhere (Deezer's new releases): by its barcode
+    /// (the `upc:` filter), else the album of exactly this title by this
+    /// artist among those a search finds.
+    pub fn find_album(
+        &self,
+        upc: Option<&str>,
+        title: &str,
+        artist: &str,
+    ) -> Result<Option<Album>> {
+        if let Some(upc) = upc.filter(|u| !u.is_empty()) {
+            if let Some(album) = self
+                .search_albums(&format!("upc:{upc}"))?
+                .into_iter()
+                .next()
+            {
+                return Ok(Some(album));
+            }
+            std::thread::sleep(PAGE_PAUSE);
+        }
+        let found = self.search_albums(&format!("{title} {artist}"))?;
+        Ok(pick_album(found, title, artist))
+    }
+
+    fn search_albums(&self, query: &str) -> Result<Vec<Album>> {
+        let value = self.get(
+            "/search",
+            &[
+                ("q", query.to_owned()),
+                ("type", "album".into()),
+                ("limit", MAX_SEARCH_RESULTS.to_string()),
+            ],
+        )?;
+        Ok(value["albums"]["items"]
+            .as_array()
+            .map(|items| items.iter().filter_map(Album::parse).collect())
+            .unwrap_or_default())
+    }
+
     pub fn search_tracks(&self, query: &str, limit: u32) -> Result<Vec<Track>> {
         let value = self.get(
             "/search",
@@ -981,6 +1019,21 @@ impl Client {
             .map(str::to_owned)
             .ok_or(Error::Format("no snapshot"))
     }
+}
+
+/// Of albums a search found, the one of exactly `title` (letters and
+/// digits, ignoring case) with an artist named `artist`.
+pub fn pick_album(found: Vec<Album>, title: &str, artist: &str) -> Option<Album> {
+    let key = |text: &str| -> String {
+        text.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let (title, artist) = (key(title), key(artist));
+    found.into_iter().find(|album| {
+        key(&album.name) == title && album.artists.iter().any(|(_, name)| key(name) == artist)
+    })
 }
 
 /// What a search found on Spotify, each kind in Spotify's order.
@@ -1055,6 +1108,32 @@ fn status_error(status: u16, text: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn found_albums_are_picked_by_exact_title_and_artist() {
+        let album = |id: &str, name: &str, artist: &str| Album {
+            id: id.into(),
+            name: name.into(),
+            artists: vec![(None, artist.into())],
+            album_type: "single".into(),
+            year: None,
+            total_tracks: 1,
+            image_url: None,
+            upc: None,
+        };
+        let found = || {
+            vec![
+                album("1", "Echo (Remixes)", "The Band"),
+                album("2", "Echo", "Someone Else"),
+                album("3", "ECHO", "The Band"),
+            ]
+        };
+        assert_eq!(
+            pick_album(found(), "Echo", "the band").map(|a| a.id),
+            Some("3".into())
+        );
+        assert_eq!(pick_album(found(), "Echo!", "Nobody").map(|a| a.id), None);
+    }
 
     #[test]
     fn a_kept_block_is_answered_without_asking_spotify() {

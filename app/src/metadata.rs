@@ -23,6 +23,8 @@ use crate::config;
 pub const REFRESH_DONE: i64 = 30 * 24 * 3600;
 /// Failed or unclear lookups are retried after this long.
 pub const REFRESH_FAILED: i64 = 7 * 24 * 3600;
+/// New releases are those of the last 30 days.
+pub const NEW_RELEASES_KEPT_S: i64 = 30 * 24 * 3600;
 /// A lookup that a portrait source couldn't answer (Spotify's or
 /// Deezer's rate limit, offline) is repeated after this long.
 pub const PARTIAL_AGAIN: i64 = 24 * 3600;
@@ -75,12 +77,37 @@ pub enum Job {
         mbid: String,
         reply: async_channel::Sender<Result<usize, RelatedError>>,
     },
+    /// A followed Spotify artist's recent releases from Deezer (§9.8):
+    /// replies how many, or why Deezer can't be asked now.
+    ArtistReleases {
+        spotify_id: String,
+        name: String,
+        reply: async_channel::Sender<Result<usize, String>>,
+    },
+    /// After the artists: forgets releases of artists no longer followed
+    /// and reads the barcodes of new ones.
+    ReleaseBarcodes {
+        reply: async_channel::Sender<Result<(), String>>,
+    },
     /// An image file the user picked as the portrait.
     SetCustom {
         artist_id: i64,
         data: Vec<u8>,
         reply: async_channel::Sender<Result<(), String>>,
     },
+}
+
+/// An error of one artist's (or release's) Deezer request: `Ok(0)` when
+/// it's about that one only (unexpected data), else `Err`, which stops the
+/// check (offline, Deezer's quota).
+fn about_artist(err: jewelcase_metadata::Error) -> Result<usize, String> {
+    match err {
+        jewelcase_metadata::Error::Format(what) => {
+            tracing::info!("Unexpected answer from {what}");
+            Ok(0)
+        }
+        err => Err(err.to_string()),
+    }
 }
 
 fn sort_job(
@@ -91,7 +118,9 @@ fn sort_job(
     match &job {
         Job::Lookup { urgent: false, .. }
         | Job::ReleaseIsrcs { .. }
-        | Job::RelatedArtists { .. } => {
+        | Job::RelatedArtists { .. }
+        | Job::ArtistReleases { .. }
+        | Job::ReleaseBarcodes { .. } => {
             background.push_back(job);
         }
         _ => urgent.push_back(job),
@@ -285,6 +314,16 @@ impl Worker {
                     Err(err) => Err(RelatedError::Other(err.to_string())),
                 };
                 let _ = reply.send_blocking(result);
+            }
+            Job::ArtistReleases {
+                spotify_id,
+                name,
+                reply,
+            } => {
+                let _ = reply.send_blocking(self.artist_releases(&spotify_id, &name));
+            }
+            Job::ReleaseBarcodes { reply } => {
+                let _ = reply.send_blocking(self.release_barcodes());
             }
             Job::SetCustom {
                 artist_id,
@@ -565,6 +604,89 @@ impl Worker {
         let result = request();
         self.last_spotify = Some(std::time::Instant::now());
         result
+    }
+
+    /// A followed artist's recent releases on Deezer (§9.8). Their Deezer
+    /// artist is looked for once (again after a week when not found).
+    /// `Err` for what isn't about this artist (offline, Deezer's quota).
+    fn artist_releases(&mut self, spotify_id: &str, name: &str) -> Result<usize, String> {
+        use jewelcase_core::db::NewRelease;
+        let now = now();
+        let stored = self
+            .db
+            .deezer_artist(spotify_id)
+            .map_err(|e| e.to_string())?;
+        let deezer_id = match stored {
+            Some((Some(id), _)) => id as u64,
+            Some((None, matched)) if now - matched < REFRESH_FAILED => return Ok(0),
+            _ => {
+                let known = self
+                    .db
+                    .known_albums(spotify_id, name)
+                    .map_err(|e| e.to_string())?;
+                let id = match self.client.deezer_artist(name, &known.upcs, &known.titles) {
+                    Ok(id) => id,
+                    Err(err) => return about_artist(err),
+                };
+                if id.is_none() {
+                    tracing::info!("{name} isn't on Deezer, or not clearly");
+                }
+                self.db
+                    .set_deezer_artist(spotify_id, id.map(|i| i as i64), now)
+                    .map_err(|e| e.to_string())?;
+                match id {
+                    Some(id) => id,
+                    None => return Ok(0),
+                }
+            }
+        };
+        let releases = match self.client.deezer_releases(deezer_id) {
+            Ok(releases) => releases,
+            Err(err) => return about_artist(err),
+        };
+        let today = jewelcase_metadata::date_string(now);
+        let since = jewelcase_metadata::date_string(now - NEW_RELEASES_KEPT_S);
+        let recent: Vec<NewRelease> =
+            jewelcase_metadata::recent_releases(&releases, &since, &today)
+                .into_iter()
+                .map(|r| NewRelease {
+                    deezer_id: r.id as i64,
+                    artist_spotify_id: spotify_id.to_owned(),
+                    artist: name.to_owned(),
+                    title: r.title,
+                    kind: r.kind,
+                    release_date: r.date,
+                    image_url: r.cover_url,
+                    upc: None,
+                    spotify_album_id: None,
+                })
+                .collect();
+        self.db
+            .replace_new_releases(spotify_id, &recent)
+            .map_err(|e| e.to_string())?;
+        Ok(recent.len())
+    }
+
+    /// Forgets releases of artists no longer followed, and reads the
+    /// barcodes of the others (Deezer's album lists have none), to find
+    /// them on Spotify.
+    fn release_barcodes(&mut self) -> Result<(), String> {
+        self.db
+            .remove_unfollowed_releases()
+            .map_err(|e| e.to_string())?;
+        let since = jewelcase_metadata::date_string(now() - NEW_RELEASES_KEPT_S);
+        let releases = self.db.new_releases(&since).map_err(|e| e.to_string())?;
+        for release in releases.iter().filter(|r| r.upc.is_none()) {
+            match self.client.deezer_upc(release.deezer_id as u64) {
+                Ok(Some(upc)) => self
+                    .db
+                    .set_new_release_upc(release.deezer_id, &upc)
+                    .map_err(|e| e.to_string())?,
+                Ok(None) => {}
+                Err(err) => about_artist(err).map(|_| ())?,
+            }
+        }
+        Ok(())
     }
 
     fn set_custom(&mut self, artist_id: i64, data: Vec<u8>) -> Result<(), String> {

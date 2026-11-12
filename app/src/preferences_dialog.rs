@@ -102,6 +102,8 @@ mod imp {
         #[template_child]
         pub deezer_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub new_releases_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub lrclib_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub updates_row: TemplateChild<adw::SwitchRow>,
@@ -207,6 +209,9 @@ mod imp {
                 .build();
             settings
                 .bind("metadata-deezer", &*self.deezer_row, "active")
+                .build();
+            settings
+                .bind("new-releases", &*self.new_releases_row, "active")
                 .build();
             settings
                 .bind("lyrics-lrclib", &*self.lrclib_row, "active")

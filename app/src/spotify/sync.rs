@@ -816,6 +816,7 @@ impl Spotify {
             self.resolve_entries(id, false).await;
         }
         self.sync_library().await;
+        self.check_new_releases();
         // For the next matches (in the background).
         library.lookup_isrcs();
     }

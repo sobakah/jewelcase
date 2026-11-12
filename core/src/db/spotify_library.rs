@@ -306,6 +306,13 @@ impl Database {
             .optional()?)
     }
 
+    /// One album, e.g. a new release found on Spotify (its saved state
+    /// stays as it was).
+    pub fn store_spotify_album(&mut self, album: &SpotifyAlbum) -> Result<()> {
+        upsert_album(&self.conn, album)?;
+        Ok(())
+    }
+
     /// An artist's releases as Spotify lists them, read at `now`.
     pub fn store_discography(
         &mut self,

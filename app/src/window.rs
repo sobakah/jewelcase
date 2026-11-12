@@ -15,6 +15,24 @@ use crate::widgets::{
     PlaylistTile, SearchView, panel_resizer, playlist_picker,
 };
 
+/// The sections of the album and artist grids (`setup_spotify_shelves`).
+const SAVED_SECTION: usize = 0;
+const NEW_SECTION: usize = 0;
+const FOLLOWED_SECTION: usize = 1;
+
+/// When a release came out ("today", "3 days ago"), from its date
+/// (YYYY-MM-DD); the date itself if it can't be read.
+fn release_day(date: &str) -> String {
+    let parts: Vec<i32> = date.split('-').filter_map(|p| p.parse().ok()).collect();
+    match parts[..] {
+        [year, month, day] => glib::DateTime::from_local(year, month, day, 12, 0, 0.0).map_or_else(
+            |_| date.to_owned(),
+            |d| crate::format::days_ago(d.to_unix()),
+        ),
+        _ => date.to_owned(),
+    }
+}
+
 /// How long a Spotify request runs before the header bar's spinner shows,
 /// and how long it stays after the last one.
 const LOADING_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
@@ -67,6 +85,8 @@ mod imp {
         pub album_sort: RefCell<String>,
         pub artist_sort: RefCell<String>,
         pub artist_sorter: OnceCell<gtk::CustomSorter>,
+        /// Watches the settings that show new releases.
+        pub shelf_settings: RefCell<Option<gio::Settings>>,
         #[template_child]
         pub bottom_sheet: TemplateChild<adw::BottomSheet>,
         #[template_child]
@@ -954,17 +974,52 @@ impl JewelcaseWindow {
     }
 
     /// The saved albums and followed artists on Spotify that aren't in the
-    /// library: shelves above the grids (§9.8).
+    /// library, after the grids, and the followed artists' new releases
+    /// before the artist grid (§9.8).
     fn setup_spotify_shelves(&self) {
+        use crate::widgets::Place;
         let imp = self.imp();
         // Translators: {} is a number of albums.
-        imp.album_grid
-            .setup_spotify(&gettext("Saved on Spotify ({})"), "show-spotify-albums");
+        let saved = imp.album_grid.add_section(
+            Place::After,
+            &gettext("Saved on Spotify ({})"),
+            "show-spotify-albums",
+        );
+        // Translators: {} is a number of albums and singles.
+        let new = imp.artist_grid.add_section(
+            Place::Before,
+            &gettext("New Releases ({})"),
+            "show-new-releases",
+        );
         // Translators: {} is a number of artists.
-        imp.artist_grid
-            .setup_spotify(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
+        let followed = imp.artist_grid.add_section(
+            Place::After,
+            &gettext("Followed on Spotify ({})"),
+            "show-spotify-artists",
+        );
+        debug_assert_eq!(
+            (saved, new, followed),
+            (SAVED_SECTION, NEW_SECTION, FOLLOWED_SECTION)
+        );
         let app = JewelcaseApplication::get();
         let spotify = app.spotify();
+        let settings = gio::Settings::new(APP_ID);
+        for key in ["new-releases", "online-metadata"] {
+            settings.connect_changed(
+                Some(key),
+                glib::clone!(
+                    #[weak(rename_to = window)]
+                    self,
+                    #[weak]
+                    spotify,
+                    move |_, _| {
+                        spotify.check_new_releases();
+                        window.refresh_spotify_shelves();
+                    }
+                ),
+            );
+        }
+        imp.shelf_settings.replace(Some(settings));
         spotify.connect_local(
             "library-changed",
             false,
@@ -1008,10 +1063,15 @@ impl JewelcaseWindow {
         let spotify = app.spotify();
         let library = app.library();
         if !spotify.is_connected() {
-            imp.album_grid.set_spotify(Vec::new(), false, |_| {});
-            imp.artist_grid.set_spotify(Vec::new(), false, |_| {});
+            imp.album_grid
+                .set_section(SAVED_SECTION, Vec::new(), false, |_| {});
+            imp.artist_grid
+                .set_section(NEW_SECTION, Vec::new(), false, |_| {});
+            imp.artist_grid
+                .set_section(FOLLOWED_SECTION, Vec::new(), false, |_| {});
             return;
         }
+        self.refresh_new_releases();
         let needs = spotify.needs_library_permission();
         // Sorted like the library (album-sort), from Spotify's order, which
         // has the most recently saved first.
@@ -1033,7 +1093,8 @@ impl JewelcaseWindow {
                 artist: false,
             })
             .collect();
-        imp.album_grid.set_spotify(
+        imp.album_grid.set_section(
+            SAVED_SECTION,
             items,
             needs,
             glib::clone!(
@@ -1079,7 +1140,8 @@ impl JewelcaseWindow {
                 artist: true,
             })
             .collect();
-        imp.artist_grid.set_spotify(
+        imp.artist_grid.set_section(
+            FOLLOWED_SECTION,
             items,
             needs,
             glib::clone!(
@@ -1092,6 +1154,83 @@ impl JewelcaseWindow {
                 }
             ),
         );
+    }
+
+    /// The followed artists' new releases from Deezer (§9.8), without
+    /// those in the library; with online lookups and `new-releases` on.
+    fn refresh_new_releases(&self) {
+        use crate::widgets::ShelfItem;
+        let imp = self.imp();
+        let app = JewelcaseApplication::get();
+        let library = app.library();
+        let shown = imp
+            .shelf_settings
+            .borrow()
+            .as_ref()
+            .is_some_and(|s| s.boolean("online-metadata") && s.boolean("new-releases"));
+        let releases: Vec<_> = if shown {
+            app.spotify().new_releases()
+        } else {
+            Vec::new()
+        }
+        .into_iter()
+        .filter(|release| {
+            let album = jewelcase_core::db::SpotifyAlbum {
+                name: release.title.clone(),
+                artist: release.artist.clone(),
+                year: release.release_date.get(..4).and_then(|y| y.parse().ok()),
+                upc: release.upc.clone(),
+                ..Default::default()
+            };
+            library.local_album_for(&album).is_none()
+        })
+        .collect();
+        let items = releases
+            .iter()
+            .map(|release| ShelfItem {
+                cover_key: release.cover_key(),
+                title: release.title.clone(),
+                // Translators: an artist, and when they released it
+                // ("today", "3 days ago").
+                subtitle: gettext("{artist} · {when}")
+                    .replace("{artist}", &release.artist)
+                    .replace("{when}", &release_day(&release.release_date)),
+                artist: false,
+            })
+            .collect();
+        imp.artist_grid.set_section(
+            NEW_SECTION,
+            items,
+            false,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |index| {
+                    if let Some(release) = releases.get(index) {
+                        window.open_new_release(release.clone());
+                    }
+                }
+            ),
+        );
+    }
+
+    /// A new release in the album panel, once found on Spotify.
+    fn open_new_release(&self, release: jewelcase_core::db::NewRelease) {
+        glib::spawn_future_local(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            async move {
+                let spotify = JewelcaseApplication::get().spotify();
+                match spotify.new_release_album(&release).await {
+                    Ok(Some(album)) => window.show_spotify_album(&album),
+                    // Translators: {} is an album title.
+                    Ok(None) => window.show_toast(
+                        &gettext("“{}” isn’t on Spotify yet").replace("{}", &release.title),
+                    ),
+                    Err(err) => window.show_toast(&err),
+                }
+            }
+        ));
     }
 
     /// A Spotify album in the album panel (§9.8).

@@ -20,6 +20,8 @@ use crate::queue::{Origin, QueueSnapshot, RepeatMode};
 
 mod spotify;
 pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, StreamInfo};
+mod new_releases;
+pub use new_releases::{KnownAlbums, NewRelease};
 mod spotify_library;
 mod stats;
 pub use spotify_library::{SpotifyAlbum, SpotifyArtist};
@@ -54,6 +56,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/026_spotify_history.sql")),
     M::up(include_str!("db/027_play_log.sql")),
     M::up(include_str!("db/028_unknown_lengths.sql")),
+    M::up(include_str!("db/029_new_releases.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once
@@ -505,8 +508,9 @@ impl Database {
     }
 
     /// Every cover key something refers to: songs, albums, playlists, and
-    /// the Spotify images of entries, songs to stream, saved albums and
-    /// followed artists (their keys derive from the image address).
+    /// the Spotify images of entries, songs to stream, saved albums,
+    /// followed artists and their new releases (their keys derive from the
+    /// image address).
     pub fn cover_keys_in_use(&self) -> Result<HashSet<String>> {
         let mut keys = HashSet::new();
         for sql in [
@@ -527,6 +531,7 @@ impl Database {
             "SELECT image_url FROM stream_track",
             "SELECT image_url FROM spotify_album",
             "SELECT image_url FROM spotify_artist",
+            "SELECT image_url FROM new_release",
         ] {
             let mut stmt = self.conn.prepare(sql)?;
             for url in stmt.query_map([], |row| row.get::<_, Option<String>>(0))? {

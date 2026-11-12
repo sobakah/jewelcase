@@ -39,7 +39,7 @@ pub use playlist_panel::{DEFAULT_SORTS as DEFAULT_PLAYLIST_SORTS, PlaylistPanel}
 pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;
-pub use sectioned_grid::SectionedGrid;
+pub use sectioned_grid::{Place, SectionedGrid};
 pub use slide_view::SlideView;
 pub use spotify_tile::{ShelfItem, tile_content};
 pub use track_row::TrackRow;
