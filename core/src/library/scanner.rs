@@ -291,6 +291,10 @@ fn clean_covers(db: &mut Database, covers: &CoverCache) -> Result<(), DbError> {
     if removed > 0 {
         tracing::info!("Removed {removed} unused covers from the cache");
     }
+    let repeated = covers.remove_repeated_sizes();
+    if repeated > 0 {
+        tracing::info!("Removed {repeated} cover thumbnails that repeated a smaller size");
+    }
     db.set_app_state(KEY, &now.to_string())
 }
 

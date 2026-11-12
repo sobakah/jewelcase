@@ -222,6 +222,10 @@ impl Worker {
         if removed > 0 {
             tracing::info!("Removed {removed} unused portraits from the cache");
         }
+        let repeated = self.portraits.remove_repeated_sizes();
+        if repeated > 0 {
+            tracing::info!("Removed {repeated} portraits that repeated a smaller size");
+        }
         let _ = self.db.set_app_state(KEY, &now().to_string());
     }
 

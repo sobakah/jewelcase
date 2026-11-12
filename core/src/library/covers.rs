@@ -97,14 +97,61 @@ impl CoverCache {
         removed.len()
     }
 
+    /// The thumbnail to show at `size`: the largest one stored up to that
+    /// size. A picture smaller than a size isn't stored again under the
+    /// bigger name, it would be the same picture (see `write_thumbnails`).
+    /// Without any thumbnail, the grid one's (missing) path.
     pub fn path(&self, key: &str, size: CoverSize) -> PathBuf {
+        CoverSize::ALL
+            .iter()
+            .rev()
+            .filter(|s| s.pixels() <= size.pixels())
+            .map(|&s| self.size_path(key, s))
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| self.size_path(key, CoverSize::Grid))
+    }
+
+    fn size_path(&self, key: &str, size: CoverSize) -> PathBuf {
         self.dir.join(format!("{key}-{}.jpg", size.pixels()))
     }
 
+    /// Whether the thumbnails are made. The grid one is written last.
     pub fn has(&self, key: &str) -> bool {
-        CoverSize::ALL
-            .iter()
-            .all(|&size| self.path(key, size).is_file())
+        self.size_path(key, CoverSize::Grid).is_file()
+    }
+
+    /// Removes thumbnails that only repeat the next smaller size: earlier
+    /// versions wrote a small picture again under every bigger name (a
+    /// 640 px Spotify image as 720 and 1200 px). Returns how many.
+    pub fn remove_repeated_sizes(&self) -> usize {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return 0;
+        };
+        let grid = format!("-{}.jpg", CoverSize::Grid.pixels());
+        let keys: Vec<String> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                name.strip_suffix(grid.as_str()).map(str::to_owned)
+            })
+            .collect();
+        let mut removed = 0;
+        for key in keys {
+            // Biggest first, so a small picture loses both repeats.
+            for (smaller, bigger) in [
+                (CoverSize::Panel, CoverSize::Player),
+                (CoverSize::Grid, CoverSize::Panel),
+            ] {
+                let path = self.size_path(&key, bigger);
+                let repeats = image::image_dimensions(&path)
+                    .is_ok_and(|(w, h)| w.max(h) <= smaller.pixels())
+                    && self.size_path(&key, smaller).is_file();
+                if repeats && fs::remove_file(&path).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        removed
     }
 
     fn color_path(&self, key: &str) -> PathBuf {
@@ -208,14 +255,22 @@ impl CoverCache {
 
     fn write_thumbnails(&self, key: &str, image: &DynamicImage) -> Result<(), CoverError> {
         fs::create_dir_all(&self.dir)?;
-        for size in CoverSize::ALL {
+        let longest = image.width().max(image.height());
+        // Biggest first: the grid thumbnail is the sign they're all made
+        // (`has`).
+        for (i, size) in CoverSize::ALL.into_iter().enumerate().rev() {
+            // A size the picture doesn't reach would repeat the one below;
+            // `path` shows that one instead.
+            if i > 0 && longest <= CoverSize::ALL[i - 1].pixels() {
+                continue;
+            }
             let pixels = size.pixels();
-            let scaled = if image.width() > pixels || image.height() > pixels {
+            let scaled = if longest > pixels {
                 image.resize(pixels, pixels, FilterType::CatmullRom)
             } else {
                 image.clone()
             };
-            let path = self.path(key, size);
+            let path = self.size_path(key, size);
             let partial = path.with_extension("jpg.part");
             {
                 let file = BufWriter::new(fs::File::create(&partial)?);
@@ -336,6 +391,89 @@ pub fn find_folder_cover(folder: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn picture(width: u32, height: u32) -> DynamicImage {
+        DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            width,
+            height,
+            image::Rgb([200, 40, 90]),
+        ))
+    }
+
+    fn stored(cache: &CoverCache, key: &str) -> Vec<u32> {
+        CoverSize::ALL
+            .iter()
+            .filter(|&&s| cache.size_path(key, s).is_file())
+            .map(|s| s.pixels())
+            .collect()
+    }
+
+    #[test]
+    fn small_pictures_are_stored_once_per_size_they_reach() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = CoverCache::new(dir.path());
+        // Spotify's 640 px: grid and panel; the player shows the panel's.
+        cache.write_thumbnails("s640", &picture(640, 640)).unwrap();
+        assert_eq!(stored(&cache, "s640"), [360, 720]);
+        assert!(cache.has("s640"));
+        assert_eq!(
+            cache.path("s640", CoverSize::Player),
+            cache.size_path("s640", CoverSize::Panel)
+        );
+        assert_eq!(
+            image::image_dimensions(cache.path("s640", CoverSize::Player)).unwrap(),
+            (640, 640)
+        );
+        // Smaller than the grid size: one thumbnail for everything.
+        cache.write_thumbnails("s300", &picture(300, 200)).unwrap();
+        assert_eq!(stored(&cache, "s300"), [360]);
+        assert_eq!(
+            cache.path("s300", CoverSize::Player),
+            cache.size_path("s300", CoverSize::Grid)
+        );
+        // Exactly a size: not repeated at the next one.
+        cache.write_thumbnails("e720", &picture(720, 500)).unwrap();
+        assert_eq!(stored(&cache, "e720"), [360, 720]);
+        // Big enough for all three.
+        cache
+            .write_thumbnails("e1500", &picture(1500, 1500))
+            .unwrap();
+        assert_eq!(stored(&cache, "e1500"), [360, 720, 1200]);
+        assert_eq!(
+            image::image_dimensions(cache.path("e1500", CoverSize::Player)).unwrap(),
+            (1200, 1200)
+        );
+        // Nothing stored: the grid path, missing.
+        assert!(!cache.has("missing"));
+        assert!(!cache.path("missing", CoverSize::Player).is_file());
+    }
+
+    #[test]
+    fn repeated_sizes_from_earlier_versions_are_removed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = CoverCache::new(dir.path());
+        // What earlier versions wrote: the picture under every bigger name.
+        let old = |key: &str, image: &DynamicImage| {
+            for size in CoverSize::ALL {
+                let pixels = size.pixels();
+                let scaled = image.resize(pixels, pixels, FilterType::Triangle);
+                let scaled = if image.width().max(image.height()) > pixels {
+                    scaled
+                } else {
+                    image.clone()
+                };
+                scaled.save(cache.size_path(key, size)).unwrap();
+            }
+        };
+        old("s640", &picture(640, 640));
+        old("s300", &picture(300, 300));
+        old("e1500", &picture(1500, 1000));
+        assert_eq!(cache.remove_repeated_sizes(), 3);
+        assert_eq!(stored(&cache, "s640"), [360, 720]);
+        assert_eq!(stored(&cache, "s300"), [360]);
+        assert_eq!(stored(&cache, "e1500"), [360, 720, 1200]);
+        assert_eq!(cache.remove_repeated_sizes(), 0);
+    }
 
     #[test]
     fn unused_covers_are_removed_and_others_kept() {
