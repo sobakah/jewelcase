@@ -419,3 +419,12 @@ slide-view > dimming {
 .visualizer {
   color: var(--accent-color);
 }
+
+/* Something new: on the new releases bell and on unseen releases in its
+   feed (widgets/new_releases.rs). */
+.new-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 9999px;
+  background-color: var(--accent-bg-color);
+}

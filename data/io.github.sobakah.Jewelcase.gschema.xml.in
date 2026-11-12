@@ -233,11 +233,7 @@
     <key name="new-releases" type="b">
       <default>true</default>
       <summary>New releases of followed artists</summary>
-      <description>Once a day, the recent releases of the artists followed on Spotify are read from Deezer and shown at the top of the Artists view. Needs online lookups (online-metadata) and a Spotify connection.</description>
-    </key>
-    <key name="show-new-releases" type="b">
-      <default>true</default>
-      <summary>Show the new releases section open</summary>
+      <description>Once a day, the recent releases of the artists followed on Spotify are read from Deezer and listed under the bell in the header bar. Needs online lookups (online-metadata) and a Spotify connection.</description>
     </key>
     <key name="recent-searches" type="as">
       <default>[]</default>

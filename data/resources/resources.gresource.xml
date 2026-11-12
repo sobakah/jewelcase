@@ -74,5 +74,6 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-more-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-refresh-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-sort-descending-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/preferences-system-notifications-symbolic.svg</file>
   </gresource>
 </gresources>

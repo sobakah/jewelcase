@@ -659,6 +659,7 @@ impl Worker {
                     image_url: r.cover_url,
                     upc: None,
                     spotify_album_id: None,
+                    seen: false,
                 })
                 .collect();
         self.db

@@ -1,6 +1,6 @@
-//! The album or artist grid, and apart from the library, collapsible
-//! sections before or after it: Spotify's saved albums or followed artists
-//! at the end, new releases at the top (CONCEPT.md §9.8).
+//! The album or artist grid, and at its end, apart from the library,
+//! collapsible sections: Spotify's saved albums or followed artists
+//! (CONCEPT.md §9.8).
 //!
 //! GTK's grid view has no sections, so this is a list view of rows, each
 //! a line of tiles: only the rows on screen are built, as in a grid view,
@@ -41,16 +41,8 @@ pub enum Row {
     },
 }
 
-/// Where a section goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Place {
-    Before,
-    After,
-}
-
 /// A part of the grid apart from the library.
 struct Section {
-    place: Place,
     /// "Saved on Spotify ({})".
     title: String,
     /// The boolean setting that keeps it open.
@@ -243,10 +235,10 @@ impl SectionedGrid {
         self.imp().local.borrow().clone()
     }
 
-    /// Adds a section `place`d before or after the library: `title` with
-    /// a `{}` for the count; `key` the boolean setting that keeps it open.
-    /// Returns its index for `set_section`.
-    pub fn add_section(&self, place: Place, title: &str, key: &str) -> usize {
+    /// Adds a section after the library (and the sections added before):
+    /// `title` with a `{}` for the count; `key` the boolean setting that
+    /// keeps it open. Returns its index for `set_section`.
+    pub fn add_section(&self, title: &str, key: &str) -> usize {
         let imp = self.imp();
         let settings = imp.settings.get_or_init(|| gio::Settings::new(APP_ID));
         settings.connect_changed(
@@ -259,7 +251,6 @@ impl SectionedGrid {
         );
         let mut sections = imp.sections.borrow_mut();
         sections.push(Section {
-            place,
             title: title.to_owned(),
             key: key.to_owned(),
             items: Rc::default(),
@@ -333,32 +324,26 @@ impl SectionedGrid {
             .borrow()
             .as_ref()
             .map_or(0, gio::ListModel::n_items);
-        let (places, counts): (Vec<Place>, Vec<(u32, bool)>) = imp
+        let counts: Vec<(u32, bool)> = imp
             .sections
             .borrow()
             .iter()
-            .map(|s| (s.place, (s.items.len() as u32, s.needs_permission)))
-            .unzip();
-        let section_rows = |place: Place| -> Vec<Row> {
-            let mut rows = Vec::new();
-            for (section, &(count, needs_permission)) in counts.iter().enumerate() {
-                if places[section] != place || (count == 0 && !needs_permission) {
-                    continue;
-                }
-                rows.push(Row::Header(section));
-                if self.section_open(section) {
-                    rows.extend(chunks(count, &|start, len| Row::Section {
-                        section,
-                        start,
-                        len,
-                    }));
-                }
+            .map(|s| (s.items.len() as u32, s.needs_permission))
+            .collect();
+        let mut rows = chunks(local, &|start, len| Row::Local { start, len });
+        for (section, &(count, needs_permission)) in counts.iter().enumerate() {
+            if count == 0 && !needs_permission {
+                continue;
             }
-            rows
-        };
-        let mut rows = section_rows(Place::Before);
-        rows.extend(chunks(local, &|start, len| Row::Local { start, len }));
-        rows.extend(section_rows(Place::After));
+            rows.push(Row::Header(section));
+            if self.section_open(section) {
+                rows.extend(chunks(count, &|start, len| Row::Section {
+                    section,
+                    start,
+                    len,
+                }));
+            }
+        }
         // Only what changed: rows that stay keep their widgets (no new
         // textures, focus kept); changed items change every row after them.
         let old = imp.shown.replace(rows.clone());

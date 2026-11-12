@@ -24,6 +24,8 @@ CREATE TABLE new_release (
     image_url TEXT,
     upc TEXT,
     -- The same release on Spotify, once found there.
-    spotify_album_id TEXT
+    spotify_album_id TEXT,
+    -- Shown in the feed (the bell loses its dot).
+    seen INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX new_release_artist ON new_release(artist_spotify_id);

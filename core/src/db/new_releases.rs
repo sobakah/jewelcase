@@ -20,6 +20,8 @@ pub struct NewRelease {
     pub upc: Option<String>,
     /// The same release on Spotify, once found there.
     pub spotify_album_id: Option<String>,
+    /// Shown in the feed already.
+    pub seen: bool,
 }
 
 impl NewRelease {
@@ -157,7 +159,7 @@ impl Database {
     pub fn new_releases(&self, since: &str) -> Result<Vec<NewRelease>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.deezer_id, r.artist_spotify_id, r.artist, r.title, r.kind,
-                    r.release_date, r.image_url, r.upc, r.spotify_album_id
+                    r.release_date, r.image_url, r.upc, r.spotify_album_id, r.seen
              FROM new_release r JOIN spotify_artist f ON f.spotify_id = r.artist_spotify_id
              WHERE f.followed_position IS NOT NULL AND r.release_date >= ?1
              ORDER BY r.release_date DESC, r.artist COLLATE NOCASE, r.title COLLATE NOCASE",
@@ -173,9 +175,19 @@ impl Database {
                 image_url: row.get(6)?,
                 upc: row.get(7)?,
                 spotify_album_id: row.get(8)?,
+                seen: row.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The releases from `since` on have been shown.
+    pub fn mark_new_releases_seen(&mut self, since: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE new_release SET seen = 1 WHERE release_date >= ?1",
+            [since],
+        )?;
+        Ok(())
     }
 
     /// A release's barcode, once read from Deezer.
@@ -253,7 +265,16 @@ mod tests {
         assert_eq!(titles(&db, "2026-10-01"), ["New", "Other"]);
         assert_eq!(titles(&db, "2026-01-01"), ["New", "Other", "Old"]);
 
-        // Read again: one gone, one new; what was found for "New" stays.
+        assert!(
+            db.new_releases("2026-01-01")
+                .unwrap()
+                .iter()
+                .all(|r| !r.seen)
+        );
+        db.mark_new_releases_seen("2026-01-01").unwrap();
+
+        // Read again: one gone, one new; what was found for "New" stays,
+        // also that it was seen; the new one isn't.
         db.replace_new_releases(
             "a",
             &[
@@ -266,6 +287,8 @@ mod tests {
         let new = &db.new_releases("2026-11-01").unwrap()[1];
         assert_eq!(new.upc.as_deref(), Some("123"));
         assert_eq!(new.spotify_album_id.as_deref(), Some("sp2"));
+        assert!(new.seen);
+        assert!(!db.new_releases("2026-11-01").unwrap()[0].seen);
 
         // Unfollowed: not shown, and forgotten.
         followed(&mut db, &["a"]);

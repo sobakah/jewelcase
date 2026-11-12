@@ -17,21 +17,7 @@ use crate::widgets::{
 
 /// The sections of the album and artist grids (`setup_spotify_shelves`).
 const SAVED_SECTION: usize = 0;
-const NEW_SECTION: usize = 0;
-const FOLLOWED_SECTION: usize = 1;
-
-/// When a release came out ("today", "3 days ago"), from its date
-/// (YYYY-MM-DD); the date itself if it can't be read.
-fn release_day(date: &str) -> String {
-    let parts: Vec<i32> = date.split('-').filter_map(|p| p.parse().ok()).collect();
-    match parts[..] {
-        [year, month, day] => glib::DateTime::from_local(year, month, day, 12, 0, 0.0).map_or_else(
-            |_| date.to_owned(),
-            |d| crate::format::days_ago(d.to_unix()),
-        ),
-        _ => date.to_owned(),
-    }
-}
+const FOLLOWED_SECTION: usize = 0;
 
 /// How long a Spotify request runs before the header bar's spinner shows,
 /// and how long it stays after the last one.
@@ -87,6 +73,8 @@ mod imp {
         pub artist_sorter: OnceCell<gtk::CustomSorter>,
         /// Watches the settings that show new releases.
         pub shelf_settings: RefCell<Option<gio::Settings>>,
+        /// What the new releases feed lists.
+        pub new_releases: RefCell<Vec<jewelcase_core::db::NewRelease>>,
         #[template_child]
         pub bottom_sheet: TemplateChild<adw::BottomSheet>,
         #[template_child]
@@ -95,6 +83,12 @@ mod imp {
         pub stack: TemplateChild<adw::ViewStack>,
         #[template_child]
         pub sort_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub new_releases_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub new_releases_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub new_releases_dot: TemplateChild<gtk::Box>,
         #[template_child]
         pub sort_menu: TemplateChild<gio::Menu>,
         #[template_child]
@@ -975,32 +969,23 @@ impl JewelcaseWindow {
 
     /// The saved albums and followed artists on Spotify that aren't in the
     /// library, after the grids, and the followed artists' new releases
-    /// before the artist grid (§9.8).
+    /// under the bell in the header bar (§9.8).
     fn setup_spotify_shelves(&self) {
-        use crate::widgets::Place;
         let imp = self.imp();
         // Translators: {} is a number of albums.
-        let saved = imp.album_grid.add_section(
-            Place::After,
-            &gettext("Saved on Spotify ({})"),
-            "show-spotify-albums",
-        );
-        // Translators: {} is a number of albums and singles.
-        let new = imp.artist_grid.add_section(
-            Place::Before,
-            &gettext("New Releases ({})"),
-            "show-new-releases",
-        );
+        let saved = imp
+            .album_grid
+            .add_section(&gettext("Saved on Spotify ({})"), "show-spotify-albums");
         // Translators: {} is a number of artists.
-        let followed = imp.artist_grid.add_section(
-            Place::After,
-            &gettext("Followed on Spotify ({})"),
-            "show-spotify-artists",
-        );
-        debug_assert_eq!(
-            (saved, new, followed),
-            (SAVED_SECTION, NEW_SECTION, FOLLOWED_SECTION)
-        );
+        let followed = imp
+            .artist_grid
+            .add_section(&gettext("Followed on Spotify ({})"), "show-spotify-artists");
+        debug_assert_eq!((saved, followed), (SAVED_SECTION, FOLLOWED_SECTION));
+        imp.new_releases_popover.connect_show(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |popover| window.show_new_releases(popover)
+        ));
         let app = JewelcaseApplication::get();
         let spotify = app.spotify();
         let settings = gio::Settings::new(APP_ID);
@@ -1062,16 +1047,14 @@ impl JewelcaseWindow {
         let app = JewelcaseApplication::get();
         let spotify = app.spotify();
         let library = app.library();
+        self.refresh_new_releases();
         if !spotify.is_connected() {
             imp.album_grid
                 .set_section(SAVED_SECTION, Vec::new(), false, |_| {});
             imp.artist_grid
-                .set_section(NEW_SECTION, Vec::new(), false, |_| {});
-            imp.artist_grid
                 .set_section(FOLLOWED_SECTION, Vec::new(), false, |_| {});
             return;
         }
-        self.refresh_new_releases();
         let needs = spotify.needs_library_permission();
         // Sorted like the library (album-sort), from Spotify's order, which
         // has the most recently saved first.
@@ -1157,19 +1140,22 @@ impl JewelcaseWindow {
     }
 
     /// The followed artists' new releases from Deezer (§9.8), without
-    /// those in the library; with online lookups and `new-releases` on.
+    /// those in the library: the bell is there with online lookups,
+    /// `new-releases` on and Spotify connected, with a dot while some
+    /// weren't seen.
     fn refresh_new_releases(&self) {
-        use crate::widgets::ShelfItem;
         let imp = self.imp();
         let app = JewelcaseApplication::get();
+        let spotify = app.spotify();
         let library = app.library();
-        let shown = imp
-            .shelf_settings
-            .borrow()
-            .as_ref()
-            .is_some_and(|s| s.boolean("online-metadata") && s.boolean("new-releases"));
+        let shown = spotify.is_connected()
+            && imp
+                .shelf_settings
+                .borrow()
+                .as_ref()
+                .is_some_and(|s| s.boolean("online-metadata") && s.boolean("new-releases"));
         let releases: Vec<_> = if shown {
-            app.spotify().new_releases()
+            spotify.new_releases()
         } else {
             Vec::new()
         }
@@ -1185,33 +1171,49 @@ impl JewelcaseWindow {
             library.local_album_for(&album).is_none()
         })
         .collect();
-        let items = releases
-            .iter()
-            .map(|release| ShelfItem {
-                cover_key: release.cover_key(),
-                title: release.title.clone(),
-                // Translators: an artist, and when they released it
-                // ("today", "3 days ago").
-                subtitle: gettext("{artist} · {when}")
-                    .replace("{artist}", &release.artist)
-                    .replace("{when}", &release_day(&release.release_date)),
-                artist: false,
-            })
-            .collect();
-        imp.artist_grid.set_section(
-            NEW_SECTION,
-            items,
-            false,
+        let unseen = releases.iter().filter(|r| !r.seen).count();
+        imp.new_releases_button.set_visible(shown);
+        imp.new_releases_dot.set_visible(unseen > 0);
+        let label = if unseen > 0 {
+            // Translators: {} is a number of releases not looked at yet.
+            gettextrs::ngettext(
+                "New Releases, {} new",
+                "New Releases, {} new",
+                unseen as u32,
+            )
+            .replace("{}", &unseen.to_string())
+        } else {
+            gettext("New Releases")
+        };
+        crate::widgets::set_accessible_label(&*imp.new_releases_button, &label);
+        imp.new_releases.replace(releases);
+    }
+
+    /// The feed, as the popover opens; afterwards its releases count as
+    /// seen (their dots stay until it opens again).
+    fn show_new_releases(&self, popover: &gtk::Popover) {
+        let imp = self.imp();
+        let releases = imp.new_releases.borrow().clone();
+        crate::widgets::new_releases::fill(
+            popover,
+            &releases,
             glib::clone!(
                 #[weak(rename_to = window)]
                 self,
-                move |index| {
-                    if let Some(release) = releases.get(index) {
-                        window.open_new_release(release.clone());
-                    }
-                }
+                move |release| window.open_new_release(release)
             ),
         );
+        if releases.iter().any(|r| !r.seen) {
+            let since = jewelcase_metadata::date_string(
+                crate::metadata::now() - crate::metadata::NEW_RELEASES_KEPT_S,
+            );
+            if let Some(mut db) = JewelcaseApplication::get().library().db()
+                && let Err(err) = db.mark_new_releases_seen(&since)
+            {
+                tracing::warn!("Cannot mark the new releases as seen: {err}");
+            }
+            self.refresh_new_releases();
+        }
     }
 
     /// A new release in the album panel, once found on Spotify.
@@ -2430,6 +2432,40 @@ impl JewelcaseWindow {
                     });
                 });
             }
+            // `JEWELCASE_SCREENSHOT_NEW_RELEASES=1`: the new releases feed
+            // opened 12 s in; the screenshot saves it as `<name>-popover.png`
+            // too (popovers aren't part of the window's picture). `=open`:
+            // its first release clicked 2 s later.
+            if let Ok(which) = std::env::var("JEWELCASE_SCREENSHOT_NEW_RELEASES") {
+                let window = window.downgrade();
+                glib::timeout_add_seconds_local_once(12, move || {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    // Without a grab: headless there was no input event to
+                    // grab with.
+                    let popover = window.imp().new_releases_popover.get();
+                    popover.set_autohide(false);
+                    window.imp().new_releases_button.popup();
+                    if which == "open" {
+                        glib::timeout_add_seconds_local_once(2, move || {
+                            let row = popover
+                                .child()
+                                .and_then(|c| c.last_child())
+                                .and_then(|s| s.first_child())
+                                .and_then(|v| v.first_child())
+                                .and_downcast::<gtk::ListBox>()
+                                .and_then(|list| list.row_at_index(0));
+                            match row {
+                                Some(row) => {
+                                    row.activate();
+                                }
+                                None => tracing::warn!("Screenshot: no new release to open"),
+                            }
+                        });
+                    }
+                });
+            }
             // `JEWELCASE_SCREENSHOT_PREFS=integrations`: a Preferences page.
             if let Ok(page) = std::env::var("JEWELCASE_SCREENSHOT_PREFS") {
                 let dialog = crate::preferences_dialog::PreferencesDialog::new();
@@ -2444,18 +2480,30 @@ impl JewelcaseWindow {
                     let Some(window) = window.upgrade() else {
                         return;
                     };
-                    let paintable = gtk::WidgetPaintable::new(Some(&window));
-                    let (w, h) = (window.width(), window.height());
-                    let snapshot = gtk::Snapshot::new();
-                    paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
-                    let node = snapshot.to_node();
-                    let renderer = window.native().and_then(|n| n.renderer());
-                    if let (Some(node), Some(renderer)) = (node, renderer) {
-                        let texture = renderer.render_texture(&node, None);
-                        match texture.save_to_png(&path) {
-                            Ok(()) => tracing::info!("Screenshot saved to {}", path.display()),
-                            Err(err) => tracing::warn!("Screenshot failed: {err}"),
+                    let save = |widget: &gtk::Widget, path: &std::path::Path| {
+                        let paintable = gtk::WidgetPaintable::new(Some(widget));
+                        let (w, h) = (widget.width(), widget.height());
+                        let snapshot = gtk::Snapshot::new();
+                        paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+                        let node = snapshot.to_node();
+                        let renderer = widget.native().and_then(|n| n.renderer());
+                        if let (Some(node), Some(renderer)) = (node, renderer) {
+                            let texture = renderer.render_texture(&node, None);
+                            match texture.save_to_png(path) {
+                                Ok(()) => tracing::info!("Screenshot saved to {}", path.display()),
+                                Err(err) => tracing::warn!("Screenshot failed: {err}"),
+                            }
                         }
+                    };
+                    let path = std::path::PathBuf::from(path);
+                    save(window.upcast_ref(), &path);
+                    let popover = window.imp().new_releases_popover.get();
+                    if popover.is_visible() {
+                        let name = path.file_stem().unwrap_or_default().to_string_lossy();
+                        save(
+                            popover.upcast_ref(),
+                            &path.with_file_name(format!("{name}-popover.png")),
+                        );
                     }
                     if let Some(app) = window.application() {
                         app.activate_action("quit", None);

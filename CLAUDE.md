@@ -223,6 +223,8 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   after 4 s), `_ALBUM`, `_ARTIST`, `_PLAYLIST=name`, `_ADD_SONGS=text`, `_ADD_SPOTIFY=1`,
   `_FILTER_SONGS=text` (both 2 s after the playlist opens), `_PREFS=<page>`, `_SEARCH`,
   `_SPOTIFY=1` (connect), `_STREAM=1`, `_EDITS`, `_PUBLISH`, `_DEVICE`, `_IMPORT`,
+  `_NEW_RELEASES=1` (the bell's feed opened 12 s in, also saved as `<name>-popover.png`; use a
+  `_DELAY` of 20, a screenshot while it opens loses both; `=open` clicks its first release),
   `JEWELCASE_SCREENSHOT_UPDATE=1` (the update dialog after the check).
 - The headless library scans the owner's music folder **read-only** (through `user-dirs.dirs`).
 - **Real clicks headless**: mutter's `org.gnome.Mutter.RemoteDesktop` on the private bus. The

@@ -10,7 +10,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **Sort artists** by name or by date added, from the sort button on the Artists page.
 
-- **New releases of the artists you follow on Spotify** at the top of the Artists view: albums, EPs and singles from the last 30 days, read from Deezer once a day. Clicking one opens it from Spotify. Preferences → Online → *New Releases of Followed Artists* (needs *Look Up Artists Online*).
+- **New releases of the artists you follow on Spotify**: a bell in the header bar lists their albums, EPs and singles from the last 30 days, read from Deezer once a day; a dot on it means something new. Clicking one opens it from Spotify. Preferences → Online → *New Releases of Followed Artists* (needs *Look Up Artists Online*).
 
 ### Changed
 

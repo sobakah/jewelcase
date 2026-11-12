@@ -8,6 +8,7 @@ mod device_popover;
 mod identify_dialog;
 mod lyrics_view;
 mod mini_player;
+pub mod new_releases;
 pub mod panel_resizer;
 mod player_view;
 mod playlist_panel;
@@ -39,7 +40,7 @@ pub use playlist_panel::{DEFAULT_SORTS as DEFAULT_PLAYLIST_SORTS, PlaylistPanel}
 pub use playlist_tile::PlaylistTile;
 pub use queue_view::QueueView;
 pub use search_view::SearchView;
-pub use sectioned_grid::{Place, SectionedGrid};
+pub use sectioned_grid::SectionedGrid;
 pub use slide_view::SlideView;
 pub use spotify_tile::{ShelfItem, tile_content};
 pub use track_row::TrackRow;

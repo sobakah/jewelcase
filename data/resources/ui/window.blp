@@ -80,6 +80,35 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
             tooltip-text: _("Search (Ctrl+F)");
           }
 
+          // New releases of followed artists (window.rs, widgets/new_releases.rs).
+          [end]
+          Gtk.MenuButton new_releases_button {
+            tooltip-text: _("New Releases");
+            visible: false;
+            // A child instead of an icon name (for the dot): flat like the
+            // other header bar buttons.
+            has-frame: false;
+            popover: Gtk.Popover new_releases_popover {};
+
+            child: Gtk.Overlay {
+              child: Gtk.Image {
+                icon-name: "preferences-system-notifications-symbolic";
+              };
+
+              [overlay]
+              Gtk.Box new_releases_dot {
+                halign: end;
+                valign: start;
+                can-target: false;
+                visible: false;
+
+                styles [
+                  "new-dot",
+                ]
+              }
+            };
+          }
+
           // While something on screen loads from Spotify (window.rs).
           [end]
           Gtk.Revealer spotify_loading {
