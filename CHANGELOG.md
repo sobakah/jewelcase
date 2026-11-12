@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The app icon is as large as other apps' icons in the dock and the app grid, instead of a size smaller.
+
 ## [0.6.0] — 2026-11-12
 
 The library database gets two new tables (for new releases); 0.5.1 can't open it any more.
