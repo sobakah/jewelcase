@@ -48,6 +48,14 @@
   </branding>
 
   <releases>
+    <release version="0.6.1" date="2026-11-12" type="development">
+      <description>
+        <ul>
+          <li>The app icon is as large as other apps' icons in the dock and the app grid</li>
+          <li>The Spotify icon before songs from Spotify is the size of the other icons again, and the artist under such a song starts under the title</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-11-12" type="development">
       <description>
         <ul>

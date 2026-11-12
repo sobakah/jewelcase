@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.6.0
+Version:        0.6.1
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,10 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Thu Nov 12 2026 sobakah - 0.6.1-1
+- App icon as large as other apps' icons
+- Smaller Spotify icon; the artist lines up with the song title
+
 * Thu Nov 12 2026 sobakah - 0.6.0-1
 - New releases of followed Spotify artists under a bell (from Deezer)
 - Artists sortable; Spotify's albums and artists sorted like the library
