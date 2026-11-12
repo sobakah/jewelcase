@@ -138,8 +138,9 @@ const CHOSEN_ELSEWHERE_MS: u64 = 15_000;
 /// A left-over that left Soloist's queue report is still recognised
 /// this long (the report can come before the song starts).
 const PRUNED_KEPT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Jewelcase's song ending this soon after it started is suspicious ...
-const QUICK_END: std::time::Duration = std::time::Duration::from_secs(2);
+/// Jewelcase's song ending this soon after it started is suspicious (a race
+/// through an album once ended each song 2.1 s in) ...
+const QUICK_END: std::time::Duration = std::time::Duration::from_secs(5);
 /// ... and this many in a row are a loop: Jewelcase stops.
 const RUNAWAY_ENDS: u32 = 4;
 /// A pause Jewelcase asked for is reported within this.
@@ -147,6 +148,13 @@ const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 /// Soloist moving on this soon after a seek, long before the end, was the
 /// seek going wrong (seen after Next), not the song ending.
 const SEEK_SLIP: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Soloist reports Jewelcase's song starting again with `left` ms of it
+/// left: a copy of it left in Soloist's queue plays only at its end;
+/// before, it's Soloist repeating the start (it does, about 2 s in).
+fn copy_plays(left: Option<u64>) -> bool {
+    left.is_some_and(|left| left <= CHOSEN_ELSEWHERE_MS)
+}
 
 /// Soloist changed songs with `left` ms of Jewelcase's song left: if that
 /// was right after Jewelcase's seek (`last_seek`) and long before the end,
@@ -696,11 +704,10 @@ impl Spotify {
                     soloist.seek(ms);
                 }
                 self.schedule_end();
-            } else if self.started_a_while_ago() && self.take_stale(uri) {
-                // The same song again, from what was left in Soloist's
-                // queue: Jewelcase's song is over. (Not Soloist reporting
-                // the start twice: the song was loaded while a copy of it
-                // waited in the queue.)
+            } else if copy_plays(left) && self.take_stale(uri) {
+                // The same song again at the end, from what was left in
+                // Soloist's queue: Jewelcase's song is over. Earlier it's
+                // Soloist reporting the start again (about 2 s in).
                 self.soloist_ended("the copy left in Soloist's queue plays");
             }
         } else if started
@@ -793,11 +800,6 @@ impl Spotify {
         );
         soloist.play(Some(&wanted));
         self.watch_start(&wanted);
-    }
-
-    fn started_a_while_ago(&self) -> bool {
-        let state = &self.imp().stream.borrow().soloist;
-        state.started_at.is_some_and(|at| at.elapsed() >= QUICK_END)
     }
 
     /// Whether `uri` was left in Soloist's queue (and now isn't).
@@ -1535,6 +1537,20 @@ fn as_track(item: &Item) -> jewelcase_spotify::Track {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The real log (2026-11-12, 23:56): a song picked while its copy waited
+    /// in Soloist's queue ended 2 s in, when Soloist reported its start
+    /// again, and so did every song after it.
+    #[test]
+    fn a_repeated_start_report_is_not_the_left_over_copy() {
+        // 2 s into a song of 2:52.
+        assert!(!copy_plays(Some(170_000)));
+        // At the end, the copy really plays.
+        assert!(copy_plays(Some(300)));
+        assert!(copy_plays(Some(0)));
+        // Unknown: the song goes on.
+        assert!(!copy_plays(None));
+    }
 
     #[test]
     fn soloist_moving_on_right_after_a_seek_is_a_slip() {
