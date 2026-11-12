@@ -162,29 +162,51 @@ pub fn disconnect_with(
     let _ = owner.add_weak_ref_notify_local(move || source.disconnect(id));
 }
 
-/// A song title, with the Spotify icon before it for songs that play from
-/// Spotify (§9.4).
-pub fn spotify_title(title: &str, from_spotify: bool) -> gtk::Widget {
+/// A song's title and the line under it (the artist), with the Spotify
+/// icon before the title for songs that play from Spotify (§9.4): the
+/// line under starts under the title, not under the icon (like the mini
+/// player).
+pub fn song_lines(title: &str, from_spotify: bool, subtitle: Option<&str>) -> gtk::Widget {
     use gtk::prelude::*;
+    let grid = gtk::Grid::builder()
+        .column_spacing(6)
+        .valign(gtk::Align::Center)
+        .hexpand(true)
+        .build();
+    if from_spotify {
+        grid.attach(&spotify_icon(), 0, 0, 1, 1);
+    }
     let label = gtk::Label::builder()
         .label(title)
         .xalign(0.0)
+        .hexpand(true)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .build();
-    if !from_spotify {
-        return label.upcast();
+    grid.attach(&label, 1, 0, 1, 1);
+    if let Some(subtitle) = subtitle {
+        grid.attach(
+            &gtk::Label::builder()
+                .label(subtitle)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .css_classes(["dim-label", "caption"])
+                .build(),
+            1,
+            1,
+            1,
+            1,
+        );
     }
-    let line = gtk::Box::builder().spacing(6).build();
-    line.append(&spotify_icon());
-    line.append(&label);
-    line.upcast()
+    grid.upcast()
 }
 
-/// Spotify's guidelines: its icon is never smaller than this (pixels).
-pub const SPOTIFY_ICON_SIZE: i32 = 21;
+/// The Spotify icon's size in lists and the mini player (pixels). Spotify's
+/// guidelines ask for 21 at least; the owner chose a smaller one, in line
+/// with the other icons (§9.4).
+pub const SPOTIFY_ICON_SIZE: i32 = 16;
 
-/// Spotify's icon for content from Spotify: its size and colours as
-/// Spotify's guidelines ask (data/resources/icons/README.md).
+/// Spotify's icon for content from Spotify, in the colours Spotify's
+/// guidelines ask (data/resources/icons/README.md).
 pub fn spotify_logo(tooltip: &str) -> gtk::Image {
     gtk::Image::builder()
         .icon_name("jewelcase-spotify-symbolic")

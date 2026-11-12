@@ -30,16 +30,23 @@ template $JewelcaseMiniPlayer: Adw.Bin {
         valign: center;
         width-request: 180;
 
-        Gtk.Box {
-          spacing: 6;
+        // The Spotify icon on the title's line, the artist under the
+        // title (not under the icon).
+        Gtk.Grid {
+          column-spacing: 6;
 
-          // Spotify's guidelines: at least 21 px, black or white.
+          // Spotify's icon in black or white (style.css: .spotify-logo).
           Gtk.Image spotify_mark {
             icon-name: "jewelcase-spotify-symbolic";
-            pixel-size: 21;
+            pixel-size: 16;
             valign: center;
             visible: false;
             tooltip-text: _("Plays from Spotify");
+
+            layout {
+              column: 0;
+              row: 0;
+            }
 
             styles [
               "spotify-logo",
@@ -49,25 +56,36 @@ template $JewelcaseMiniPlayer: Adw.Bin {
           Gtk.Label title {
             label: _("Not Playing");
             xalign: 0;
+            hexpand: true;
             ellipsize: end;
             max-width-chars: 30;
+
+            layout {
+              column: 1;
+              row: 0;
+            }
 
             styles [
               "title-4",
             ]
           }
-        }
 
-        Gtk.Label artist {
-          xalign: 0;
-          ellipsize: end;
-          max-width-chars: 28;
-          visible: false;
+          Gtk.Label artist {
+            xalign: 0;
+            ellipsize: end;
+            max-width-chars: 28;
+            visible: false;
 
-          styles [
-            "dim-label",
-            "caption",
-          ]
+            layout {
+              column: 1;
+              row: 1;
+            }
+
+            styles [
+              "dim-label",
+              "caption",
+            ]
+          }
         }
       }
 

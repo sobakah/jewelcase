@@ -107,30 +107,14 @@ impl TrackRow {
 
         // Songs that play from Spotify (a Spotify album's songs that aren't
         // in the library) show its icon (§9.4).
-        let title = super::spotify_title(&track.title(), track.is_stand_in());
-        let text = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .valign(gtk::Align::Center)
-            .hexpand(true)
-            .build();
-        text.append(&title);
-        if let Some(artist) = track
+        let artist = track
             .track()
             .record
             .tags
             .artist
-            .as_deref()
-            .filter(|a| !a.eq_ignore_ascii_case(album_artist))
-        {
-            text.append(
-                &gtk::Label::builder()
-                    .label(artist)
-                    .xalign(0.0)
-                    .ellipsize(gtk::pango::EllipsizeMode::End)
-                    .css_classes(["dim-label", "caption"])
-                    .build(),
-            );
-        }
+            .clone()
+            .filter(|a| !a.eq_ignore_ascii_case(album_artist));
+        let text = super::song_lines(&track.title(), track.is_stand_in(), artist.as_deref());
 
         let duration = gtk::Label::builder()
             .label(format::duration(track.duration_ms()))

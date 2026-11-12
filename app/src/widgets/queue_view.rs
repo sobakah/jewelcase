@@ -413,22 +413,11 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
         .property("natural-size", 40)
         .build();
     cover.set_cover(track.cover_key());
-    let text = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .valign(gtk::Align::Center)
-        .hexpand(true)
-        .build();
-    text.append(&super::spotify_title(&track.title(), track.is_stand_in()));
-    if let Some(artist) = track.artist() {
-        text.append(
-            &gtk::Label::builder()
-                .label(artist)
-                .xalign(0.0)
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .css_classes(["dim-label", "caption"])
-                .build(),
-        );
-    }
+    let text = super::song_lines(
+        &track.title(),
+        track.is_stand_in(),
+        track.artist().as_deref(),
+    );
     let line = gtk::Box::builder()
         .spacing(12)
         .margin_start(12)
@@ -675,12 +664,6 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
         .property("natural-size", 40)
         .build();
     cover.set_cover(track.cover_key());
-    let text = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .valign(gtk::Align::Center)
-        .hexpand(true)
-        .build();
-    text.append(&super::spotify_title(&track.title(), streamed));
     // Smart shuffle's picks say so (§7).
     let suggested = entry.entry().origin == Origin::Suggested;
     let subtitle = match (track.artist(), suggested) {
@@ -688,16 +671,7 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
         (None, true) => Some(gettext("Mixed in")),
         (artist, false) => artist,
     };
-    if let Some(subtitle) = subtitle {
-        text.append(
-            &gtk::Label::builder()
-                .label(subtitle)
-                .xalign(0.0)
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .css_classes(["dim-label", "caption"])
-                .build(),
-        );
-    }
+    let text = super::song_lines(&track.title(), streamed, subtitle.as_deref());
     let line = gtk::Box::builder()
         .spacing(12)
         .margin_start(6)

@@ -10,6 +10,8 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - The app icon is as large as other apps' icons in the dock and the app grid, instead of a size smaller.
 
+- The Spotify icon before songs from Spotify is back to the size of the other icons, and the artist under such a song now starts under the title instead of under the icon (mini player, queue, album songs).
+
 ## [0.6.0] — 2026-11-12
 
 The library database gets two new tables (for new releases); 0.5.1 can't open it any more.
