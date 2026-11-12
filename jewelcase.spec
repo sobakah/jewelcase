@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.5.1
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,11 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Thu Nov 12 2026 sobakah - 0.6.0-1
+- New releases of followed Spotify artists under a bell (from Deezer)
+- Artists sortable; Spotify's albums and artists sorted like the library
+- New app icon; half the cover cache; chosen playlist covers kept
+
 * Wed Nov 11 2026 sobakah - 0.5.1-1
 - Editing tags works with cdport 1.0.0; D-Bus setup offered again
 - Spinner while loading from Spotify; mode tooltips on Shuffle and Repeat

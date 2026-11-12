@@ -180,14 +180,24 @@ pub fn spotify_title(title: &str, from_spotify: bool) -> gtk::Widget {
     line.upcast()
 }
 
-/// The small Spotify icon for songs that play from Spotify.
-pub fn spotify_icon() -> gtk::Image {
+/// Spotify's guidelines: its icon is never smaller than this (pixels).
+pub const SPOTIFY_ICON_SIZE: i32 = 21;
+
+/// Spotify's icon for content from Spotify: its size and colours as
+/// Spotify's guidelines ask (data/resources/icons/README.md).
+pub fn spotify_logo(tooltip: &str) -> gtk::Image {
     gtk::Image::builder()
         .icon_name("jewelcase-spotify-symbolic")
-        .pixel_size(12)
+        .pixel_size(SPOTIFY_ICON_SIZE)
         .valign(gtk::Align::Center)
-        .tooltip_text(gettextrs::gettext("Plays from Spotify"))
+        .tooltip_text(tooltip)
+        .css_classes(["spotify-logo"])
         .build()
+}
+
+/// The Spotify icon for songs that play from Spotify.
+pub fn spotify_icon() -> gtk::Image {
+    spotify_logo(&gettextrs::gettext("Plays from Spotify"))
 }
 
 /// The artist or album page of a Spotify song (`uri`): the library's when

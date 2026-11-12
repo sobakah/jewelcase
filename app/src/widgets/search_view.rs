@@ -387,11 +387,7 @@ impl SearchView {
                 .css_classes(["dim-label"])
                 .build()
         } else {
-            gtk::Image::builder()
-                .icon_name("jewelcase-spotify-symbolic")
-                .valign(gtk::Align::Center)
-                .tooltip_text(gettext("On Spotify, not in your library"))
-                .build()
+            super::spotify_logo(&gettext("On Spotify, not in your library"))
         }
     }
 

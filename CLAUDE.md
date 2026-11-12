@@ -116,7 +116,8 @@ build-aux/  headless.sh (test session), flatpak/ (test Flatpak manifest), cargo-
   "-dirty" with uncommitted changes).
 - Target: Fedora 45 (GNOME 51, GTK 4.24, libadwaita 1.10). Other distributions are meant to come
   through the Flatpak, not through lower version floors or native packages.
-- Repository: `sobakah/jewelcase` on GitHub, private.
+- Repository: `sobakah/jewelcase` on GitHub, public (since 0.6.0): everything committed, history
+  included, can be read by anyone; personal details belong in `CLAUDE.local.md`.
 
 ## Commands
 
@@ -191,7 +192,10 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 ## Conventions
 
 - Commits go directly on `main` (history is linear) and end with
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. They are authored as
+  `sobakah <88095929+sobakah@users.noreply.github.com>` (the repository's git config): the
+  owner's name and personal email must not appear in commits (the history was rewritten for
+  that at 0.6.0).
 - **Change UI elements everywhere they appear**, unasked: grips, panel slides, buttons. Grep for
   the style class or widget (`.grip`, `SlideView`, `panel-close-handle`, `sheet-close-handle`) and
   bring every place in line, or say why one can't follow.

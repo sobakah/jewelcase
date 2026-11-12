@@ -660,12 +660,9 @@ impl PlaylistPanel {
         row.set_subtitle(subtitle);
         row.add_prefix(cover);
         if spotify {
-            let icon = gtk::Image::builder()
-                .icon_name("jewelcase-spotify-symbolic")
-                .tooltip_text(gettext("On Spotify, not in your library"))
-                .css_classes(["dim-label"])
-                .build();
-            row.add_suffix(&icon);
+            row.add_suffix(&super::spotify_logo(&gettext(
+                "On Spotify, not in your library",
+            )));
         }
         let add = gtk::Button::builder()
             .icon_name("list-add-symbolic")
@@ -1146,14 +1143,18 @@ impl PlaylistPanel {
             ),
             _ => (None, None),
         };
-        if let Some(icon) = icon {
-            line.append(
+        match icon {
+            Some("jewelcase-spotify-symbolic") => {
+                line.append(&super::spotify_logo(&tooltip.unwrap_or_default()));
+            }
+            Some(icon) => line.append(
                 &gtk::Image::builder()
                     .icon_name(icon)
                     .tooltip_text(tooltip.unwrap_or_default())
                     .css_classes(["dim-label"])
                     .build(),
-            );
+            ),
+            None => {}
         }
         let duration = track
             .as_ref()

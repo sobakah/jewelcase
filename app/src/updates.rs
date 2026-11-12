@@ -3,9 +3,9 @@
 //! day, shown in a banner and installed only when asked.
 //!
 //! - **Jewelcase** (the RPM from GitHub releases): the newest release
-//!   above this version. While the repository is private, GitHub answers
-//!   only logged-in requests, so it's asked through the `gh` command when
-//!   it's installed and logged in, else directly. The RPM is downloaded,
+//!   above this version. Asked through the `gh` command when it's
+//!   installed and logged in (needed while the repository was private),
+//!   else GitHub's API directly. The RPM is downloaded,
 //!   checked against the SHA-256 GitHub lists for it, and installed with
 //!   `pkexec dnf install` (GNOME asks for the password); then Jewelcase
 //!   offers to restart. Off in development builds and in a build with
@@ -213,7 +213,7 @@ fn check(window: glib::WeakRef<JewelcaseWindow>) {
 }
 
 /// `JEWELCASE_UPDATE_REPO=owner/name` asks another (public) repository
-/// for Jewelcase's releases (tests: the private one needs `gh`'s login).
+/// for Jewelcase's releases (tests).
 fn jewelcase_repo() -> &'static str {
     static REPO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     REPO.get_or_init(|| {

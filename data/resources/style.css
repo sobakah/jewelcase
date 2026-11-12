@@ -428,3 +428,16 @@ slide-view > dimming {
   border-radius: 9999px;
   background-color: var(--accent-bg-color);
 }
+
+/* Spotify's icon, in the colours Spotify's guidelines allow: black on light
+   backgrounds, white on dark ones (icons/README.md). */
+.spotify-logo {
+  color: #000000;
+  opacity: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .spotify-logo {
+    color: #ffffff;
+  }
+}

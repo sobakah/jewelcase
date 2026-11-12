@@ -230,12 +230,17 @@ template $JewelcasePlayerView: Adw.Bin {
                   halign: center;
                   spacing: 8;
 
+                  // Spotify's guidelines: at least 21 px, black or white.
                   Gtk.Image spotify_mark {
                     icon-name: "jewelcase-spotify-symbolic";
-                    pixel-size: 20;
+                    pixel-size: 21;
                     valign: center;
                     visible: false;
                     tooltip-text: _("Plays from Spotify");
+
+                    styles [
+                      "spotify-logo",
+                    ]
                   }
 
                   Gtk.Label title {

@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-12
+
+The library database gets two new tables (for new releases); 0.5.1 can't open it any more.
+
 ### Added
 
 - **Sort artists** by name or by date added, from the sort button on the Artists page.
@@ -17,6 +21,8 @@ All notable changes to Jewelcase are documented here. The format follows
 - Albums saved on Spotify and artists followed there are sorted like your own albums and artists, instead of in the order you saved or followed them.
 
 - **A new app icon**: a clear CD case with the disc inside, drawn flat like GNOME's own icons.
+
+- Songs, albums and playlists from Spotify are marked with Spotify's official icon, in black or white and a little larger, as Spotify's guidelines ask.
 
 ### Fixed
 
@@ -99,6 +105,7 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.5.1...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/sobakah/jewelcase/releases/tag/0.6.0
 [0.5.1]: https://github.com/sobakah/jewelcase/releases/tag/0.5.1
 [0.5.0]: https://github.com/sobakah/jewelcase/releases/tag/0.5.0

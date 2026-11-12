@@ -48,6 +48,17 @@
   </branding>
 
   <releases>
+    <release version="0.6.0" date="2026-11-12" type="development">
+      <description>
+        <ul>
+          <li>New releases of the artists you follow on Spotify, under a bell in the header bar, read from Deezer once a day</li>
+          <li>Artists can be sorted by name or date added; albums saved and artists followed on Spotify are sorted like your own</li>
+          <li>A new app icon: a clear CD case with the disc inside</li>
+          <li>The cover cache takes about half the space</li>
+          <li>Playlist covers you choose are kept with your library data, so clearing the cache no longer loses them</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-11-11" type="development">
       <description>
         <ul>

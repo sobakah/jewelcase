@@ -201,14 +201,25 @@ template $JewelcasePlaylistPanel: Adw.Bin {
 
                 // Only while adding: also Spotify's songs (on by default
                 // for Spotify playlists).
+                // Spotify's icon as its guidelines ask: at least 21 px,
+                // black or white.
                 Gtk.ToggleButton spotify_toggle {
-                  icon-name: "jewelcase-spotify-symbolic";
                   tooltip-text: _("Also Search Spotify");
                   valign: center;
                   visible: false;
 
+                  child: Gtk.Image {
+                    icon-name: "jewelcase-spotify-symbolic";
+                    pixel-size: 21;
+
+                    styles [
+                      "spotify-logo",
+                    ]
+                  };
+
                   styles [
                     "flat",
+                    "image-button",
                   ]
                 }
 
