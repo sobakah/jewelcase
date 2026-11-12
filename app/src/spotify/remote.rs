@@ -818,7 +818,7 @@ fn repeat_mode(repeat: &str) -> RepeatMode {
 }
 
 fn cover_cache() -> jewelcase_core::library::covers::CoverCache {
-    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir())
+    crate::config::cover_cache()
 }
 
 /// A stand-in track for a Spotify song that isn't in the library. Its ID

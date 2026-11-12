@@ -22,7 +22,7 @@ enum Kind {
 
 thread_local! {
     static CACHE: RefCell<HashMap<(Kind, String, CoverSize), gdk::Texture>> = RefCell::default();
-    static COVERS: CoverCache = CoverCache::new(config::cover_dir());
+    static COVERS: CoverCache = config::cover_cache();
     static PORTRAITS: CoverCache = CoverCache::new(config::portrait_dir());
 }
 

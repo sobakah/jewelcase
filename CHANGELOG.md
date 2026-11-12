@@ -20,6 +20,8 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - The cover cache took about twice the space it needs: covers and artist pictures smaller than a thumbnail size were stored again at each bigger size (every Spotify cover three times). The copies are removed by the weekly cache cleanup.
 
+- **Playlist covers you choose** are kept with your library data instead of in the cache folder, so clearing the cache no longer loses them. Covers chosen before are moved there on the first start.
+
 ## [0.5.1] — 2026-11-11
 
 The library database is unchanged; 0.5.0 still opens it.

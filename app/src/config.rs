@@ -56,6 +56,22 @@ pub fn portrait_dir() -> std::path::PathBuf {
 }
 
 /// `~/.cache/<app id>/covers/` (CONCEPT.md §4.3).
-pub fn cover_dir() -> std::path::PathBuf {
+fn cover_dir() -> std::path::PathBuf {
     gtk::glib::user_cache_dir().join(APP_ID).join("covers")
+}
+
+/// `~/.local/share/<app id>/playlist-covers/`: playlist covers the user
+/// chose. Like custom portraits they exist nowhere else, so they live with
+/// the data, not in the cache.
+fn playlist_cover_dir() -> std::path::PathBuf {
+    gtk::glib::user_data_dir()
+        .join(APP_ID)
+        .join("playlist-covers")
+}
+
+/// Album covers, Spotify images and playlist mosaics in the cache folder;
+/// chosen playlist covers in the data folder.
+pub fn cover_cache() -> jewelcase_core::library::covers::CoverCache {
+    jewelcase_core::library::covers::CoverCache::new(cover_dir())
+        .with_chosen_dir(playlist_cover_dir())
 }

@@ -76,8 +76,7 @@ pub fn fetch_covers_in_batches(urls: Vec<String>, done: impl Fn(Vec<String>) + '
         for chunk in urls.chunks(BATCH) {
             let chunk = chunk.to_vec();
             let ready = gtk::gio::spawn_blocking(move || {
-                let covers =
-                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                let covers = crate::config::cover_cache();
                 chunk
                     .into_iter()
                     .filter(|url| {
@@ -106,8 +105,7 @@ pub fn fetch_covers(urls: Vec<String>, done: impl FnOnce() + 'static) {
     }
     gtk::glib::spawn_future_local(async move {
         let made = gtk::gio::spawn_blocking(move || {
-            let covers =
-                jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
+            let covers = crate::config::cover_cache();
             let mut made = 0;
             for url in urls {
                 let key = image_cover_key(&url);

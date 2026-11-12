@@ -52,15 +52,82 @@ const FOLDER_COVER_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 #[derive(Debug, Clone)]
 pub struct CoverCache {
     dir: PathBuf,
+    /// Where pictures the user chose (keys starting with 'c') are kept,
+    /// when not in `dir`: they exist nowhere else, so they can't be in a
+    /// cache folder that may be cleared.
+    chosen_dir: Option<PathBuf>,
 }
+
+/// The key prefix of pictures the user chose (custom portraits and
+/// playlist covers).
+const CHOSEN: char = 'c';
 
 impl CoverCache {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            dir: dir.into(),
+            chosen_dir: None,
+        }
+    }
+
+    /// Keeps the pictures the user chose in `dir` instead.
+    pub fn with_chosen_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.chosen_dir = Some(dir.into());
+        self
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The folder a key's files are in.
+    fn dir_for(&self, key: &str) -> &Path {
+        match &self.chosen_dir {
+            Some(dir) if key.starts_with(CHOSEN) => dir,
+            _ => &self.dir,
+        }
+    }
+
+    /// Both folders.
+    fn dirs(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(self.dir.as_path()).chain(self.chosen_dir.as_deref())
+    }
+
+    /// Moves chosen pictures that earlier versions kept in the cache folder
+    /// into the chosen folder. Returns how many pictures (keys) moved.
+    pub fn move_chosen_from_cache(&self) -> io::Result<usize> {
+        let Some(chosen_dir) = &self.chosen_dir else {
+            return Ok(0);
+        };
+        let entries = match fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(err) => return Err(err),
+        };
+        let mut moved = std::collections::HashSet::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if !name.starts_with(CHOSEN) {
+                continue;
+            }
+            fs::create_dir_all(chosen_dir)?;
+            let target = chosen_dir.join(name);
+            // A key is its content's hash: one already there is the same.
+            if !target.exists() && fs::rename(entry.path(), &target).is_err() {
+                // Another file system: copy under a temporary name first,
+                // so a half-copied file is never taken for a thumbnail.
+                let partial = chosen_dir.join(format!("{name}.part"));
+                fs::copy(entry.path(), &partial)?;
+                fs::rename(&partial, &target)?;
+            }
+            if entry.path().exists() {
+                fs::remove_file(entry.path())?;
+            }
+            let key = name.split(['-', '.']).next().unwrap_or_default();
+            moved.insert(key.to_owned());
+        }
+        Ok(moved.len())
     }
 
     /// Removes cached images whose key starts with one of `kinds` (e.g.
@@ -69,9 +136,10 @@ impl CoverCache {
     /// referred to yet). Returns how many.
     pub fn remove_unused(&self, keep: &std::collections::HashSet<String>, kinds: &[char]) -> usize {
         const MIN_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return 0;
-        };
+        let entries = self
+            .dirs()
+            .filter_map(|dir| fs::read_dir(dir).ok())
+            .flatten();
         let mut removed = std::collections::HashSet::new();
         for entry in entries.flatten() {
             let name = entry.file_name();
@@ -112,7 +180,8 @@ impl CoverCache {
     }
 
     fn size_path(&self, key: &str, size: CoverSize) -> PathBuf {
-        self.dir.join(format!("{key}-{}.jpg", size.pixels()))
+        self.dir_for(key)
+            .join(format!("{key}-{}.jpg", size.pixels()))
     }
 
     /// Whether the thumbnails are made. The grid one is written last.
@@ -124,9 +193,10 @@ impl CoverCache {
     /// versions wrote a small picture again under every bigger name (a
     /// 640 px Spotify image as 720 and 1200 px). Returns how many.
     pub fn remove_repeated_sizes(&self) -> usize {
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return 0;
-        };
+        let entries = self
+            .dirs()
+            .filter_map(|dir| fs::read_dir(dir).ok())
+            .flatten();
         let grid = format!("-{}.jpg", CoverSize::Grid.pixels());
         let keys: Vec<String> = entries
             .flatten()
@@ -155,7 +225,7 @@ impl CoverCache {
     }
 
     fn color_path(&self, key: &str) -> PathBuf {
-        self.dir.join(format!("{key}.color"))
+        self.dir_for(key).join(format!("{key}.color"))
     }
 
     /// The cover's dominant color (CONCEPT.md §4.3), once computed.
@@ -254,7 +324,7 @@ impl CoverCache {
     }
 
     fn write_thumbnails(&self, key: &str, image: &DynamicImage) -> Result<(), CoverError> {
-        fs::create_dir_all(&self.dir)?;
+        fs::create_dir_all(self.dir_for(key))?;
         let longest = image.width().max(image.height());
         // Biggest first: the grid thumbnail is the sign they're all made
         // (`has`).
@@ -446,6 +516,87 @@ mod tests {
         // Nothing stored: the grid path, missing.
         assert!(!cache.has("missing"));
         assert!(!cache.path("missing", CoverSize::Player).is_file());
+    }
+
+    #[test]
+    fn chosen_pictures_are_kept_out_of_the_cache_folder() {
+        let root = tempfile::TempDir::new().unwrap();
+        let cache_dir = root.path().join("cache");
+        let chosen_dir = root.path().join("data");
+        // What earlier versions left: a chosen cover among cached ones.
+        let old = CoverCache::new(&cache_dir);
+        old.write_thumbnails("cmine", &picture(800, 800)).unwrap();
+        old.write_thumbnails("salbum", &picture(640, 640)).unwrap();
+        // One already moved by an earlier start that stopped halfway.
+        old.write_thumbnails("cboth", &picture(100, 100)).unwrap();
+        CoverCache::new(&chosen_dir)
+            .write_thumbnails("cboth", &picture(100, 100))
+            .unwrap();
+
+        let cache = CoverCache::new(&cache_dir).with_chosen_dir(&chosen_dir);
+        assert_eq!(cache.move_chosen_from_cache().unwrap(), 2);
+        let names = |dir: &Path| {
+            let mut names: Vec<String> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(
+            names(&cache_dir),
+            ["salbum-360.jpg", "salbum-720.jpg", "salbum.color"]
+        );
+        assert_eq!(
+            names(&chosen_dir),
+            [
+                "cboth-360.jpg",
+                "cboth.color",
+                "cmine-1200.jpg",
+                "cmine-360.jpg",
+                "cmine-720.jpg",
+                "cmine.color"
+            ]
+        );
+        assert_eq!(cache.move_chosen_from_cache().unwrap(), 0);
+
+        // Read and written in the chosen folder from now on.
+        assert!(cache.has("cmine") && cache.color("cmine").is_some());
+        assert!(
+            cache
+                .path("cmine", CoverSize::Player)
+                .starts_with(&chosen_dir)
+        );
+        assert!(
+            cache
+                .path("salbum", CoverSize::Player)
+                .starts_with(&cache_dir)
+        );
+        cache.write_thumbnails("cnew", &picture(50, 50)).unwrap();
+        assert!(chosen_dir.join("cnew-360.jpg").is_file());
+        // The weekly cleanup looks in both folders.
+        let keep = std::collections::HashSet::from(["cmine".to_owned()]);
+        let old_enough = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86400);
+        for dir in [&cache_dir, &chosen_dir] {
+            for name in names(dir) {
+                let file = fs::File::options()
+                    .write(true)
+                    .open(dir.join(name))
+                    .unwrap();
+                file.set_modified(old_enough).unwrap();
+            }
+        }
+        assert_eq!(cache.remove_unused(&keep, &['c', 's']), 3);
+        assert_eq!(names(&cache_dir), Vec::<String>::new());
+        assert_eq!(names(&chosen_dir).len(), 4);
+
+        // Without a chosen folder (portraits): everything in one.
+        let portraits = CoverCache::new(&cache_dir);
+        portraits
+            .write_thumbnails("cface", &picture(50, 50))
+            .unwrap();
+        assert!(cache_dir.join("cface-360.jpg").is_file());
+        assert_eq!(portraits.move_chosen_from_cache().unwrap(), 0);
     }
 
     #[test]

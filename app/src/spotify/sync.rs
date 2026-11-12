@@ -397,8 +397,7 @@ impl Op {
             Self::Rename { name } => client.rename_playlist(id, name).map(|()| None),
             Self::Replace { uris } => client.replace_items(id, uris).map(Some),
             Self::Cover { key } => {
-                let covers =
-                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                let covers = crate::config::cover_cache();
                 match covers.upload_jpeg(key, MAX_COVER_BYTES) {
                     Ok(jpeg) => client.upload_cover(id, &jpeg).map(|()| None),
                     // Gone from the cache (replaced again): nothing to send.
@@ -1172,8 +1171,7 @@ impl Spotify {
         for (id, url, key) in wanted {
             let job_key = key.clone();
             let made = gtk::gio::spawn_blocking(move || {
-                let covers =
-                    jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
+                let covers = crate::config::cover_cache();
                 if covers.has(&job_key) {
                     return true;
                 }

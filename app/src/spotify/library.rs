@@ -165,7 +165,7 @@ impl Spotify {
         self.emit_by_name::<()>("library-changed", &[]);
         // Only covers not downloaded yet: each batch that arrives shows the
         // sections again, which is wasted work for covers already there.
-        let covers = jewelcase_core::library::covers::CoverCache::new(crate::config::cover_dir());
+        let covers = crate::config::cover_cache();
         urls.retain(|url| !covers.has(&super::image_cover_key(url)));
         let spotify = self.downgrade();
         super::fetch_covers_in_batches(urls, move |_| {

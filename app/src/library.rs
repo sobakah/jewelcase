@@ -16,7 +16,6 @@ use jewelcase_core::db::LinkedPlaylist;
 use jewelcase_core::db::{Album, Database, PlaylistItem, SearchResults, Track};
 use jewelcase_core::library::artists::AlbumRole;
 use jewelcase_core::library::artists::Aliases;
-use jewelcase_core::library::covers::CoverCache;
 use jewelcase_core::library::scanner::{self, ScanProgress, ScanSummary};
 use jewelcase_core::library::watch::LibraryWatcher;
 use jewelcase_core::playlist_files::{self, Entry as PlaylistFileEntry, Format};
@@ -65,6 +64,25 @@ struct LoadedLibrary {
     barcodes: HashMap<i64, String>,
     artists: Vec<jewelcase_core::db::Artist>,
     index: jewelcase_core::matching::MatchIndex,
+}
+
+/// Once: custom playlist covers from the cache folder, where versions up
+/// to 0.5.1 kept them, into the data folder (`config::cover_cache`).
+fn move_chosen_covers(db: &mut Database) {
+    const KEY: &str = "chosen-covers-moved";
+    if db.app_state(KEY).ok().flatten().is_some() {
+        return;
+    }
+    match config::cover_cache().move_chosen_from_cache() {
+        Ok(moved) => {
+            if moved > 0 {
+                tracing::info!("Moved {moved} custom playlist covers out of the cache");
+            }
+            let _ = db.set_app_state(KEY, "1");
+        }
+        // Tried again next start.
+        Err(err) => tracing::warn!("Cannot move custom playlist covers: {err}"),
+    }
 }
 
 /// Reads the library and matches the Spotify playlist entries to it again
@@ -213,7 +231,8 @@ impl Library {
     /// Opens the database, shows what's in it and starts a scan.
     pub fn start(&self) -> Result<(), String> {
         let imp = self.imp();
-        let db = Database::open(&config::database_path()).map_err(|e| e.to_string())?;
+        let mut db = Database::open(&config::database_path()).map_err(|e| e.to_string())?;
+        move_chosen_covers(&mut db);
         imp.db.set(RefCell::new(db)).map_err(|_| "started twice")?;
 
         let settings = gio::Settings::new(APP_ID);
@@ -933,7 +952,7 @@ impl Library {
             }
             None => return,
         };
-        let covers = CoverCache::new(config::cover_dir());
+        let covers = config::cover_cache();
         let mut missing_mosaics = Vec::new();
         let objects: Vec<PlaylistObject> = playlists
             .into_iter()
@@ -1375,7 +1394,7 @@ impl Library {
         let key = jewelcase_core::library::covers::cover_key('c', &data);
         let job_key = key.clone();
         gio::spawn_blocking(move || {
-            let covers = CoverCache::new(config::cover_dir());
+            let covers = config::cover_cache();
             if covers.has(&job_key) {
                 Ok(())
             } else {
@@ -1497,7 +1516,7 @@ impl Library {
             let result = Database::open(&config::database_path())
                 .map_err(|e| e.to_string())
                 .and_then(|mut db| {
-                    let covers = CoverCache::new(config::cover_dir());
+                    let covers = config::cover_cache();
                     let progress = |p| {
                         let _ = tx.send_blocking(ScanMessage::Progress(p));
                     };
