@@ -3,26 +3,28 @@
 //! albums, followed artists) are sorted by the same rules, each on its own
 //! (CONCEPT.md §9.8).
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use jewelcase_core::db::{Album, Artist, SpotifyAlbum, SpotifyArtist};
 use jewelcase_core::library::titles::sort_key;
 
-/// What an album is sorted by.
+/// What an album is sorted by: borrowed from a library album (sorting
+/// compares the same albums many times), made for a Spotify one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AlbumKey {
-    pub artist: String,
-    pub title: String,
+pub struct AlbumKey<'a> {
+    pub artist: Cow<'a, str>,
+    pub title: Cow<'a, str>,
     pub year: Option<i32>,
     /// Larger is newer.
     pub added: i64,
 }
 
-impl AlbumKey {
-    pub fn local(album: &Album) -> Self {
+impl<'a> AlbumKey<'a> {
+    pub fn local(album: &'a Album) -> Self {
         Self {
-            artist: album.artist_sort.clone(),
-            title: album.sort_title.clone(),
+            artist: Cow::Borrowed(&album.artist_sort),
+            title: Cow::Borrowed(&album.sort_title),
             year: album.year,
             added: album.added,
         }
@@ -32,8 +34,8 @@ impl AlbumKey {
     /// which has the most recently saved first.
     pub fn spotify(album: &SpotifyAlbum, position: usize) -> Self {
         Self {
-            artist: sort_key(&album.artist),
-            title: sort_key(&album.name),
+            artist: Cow::Owned(sort_key(&album.artist)),
+            title: Cow::Owned(sort_key(&album.name)),
             year: album.year,
             added: -(position as i64),
         }
@@ -57,18 +59,18 @@ pub fn compare_albums(sort: &str, a: &AlbumKey, b: &AlbumKey) -> Ordering {
     }
 }
 
-/// What an artist is sorted by.
+/// What an artist is sorted by (borrowed or made, as `AlbumKey`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArtistKey {
-    pub name: String,
+pub struct ArtistKey<'a> {
+    pub name: Cow<'a, str>,
     /// Larger is newer.
     pub added: i64,
 }
 
-impl ArtistKey {
-    pub fn local(artist: &Artist) -> Self {
+impl<'a> ArtistKey<'a> {
+    pub fn local(artist: &'a Artist) -> Self {
         Self {
-            name: artist.sort_name.clone(),
+            name: Cow::Borrowed(&artist.sort_name),
             added: artist.added,
         }
     }
@@ -77,7 +79,7 @@ impl ArtistKey {
     /// artists, which has the most recently followed first.
     pub fn spotify(artist: &SpotifyArtist, position: usize) -> Self {
         Self {
-            name: sort_key(&artist.name),
+            name: Cow::Owned(sort_key(&artist.name)),
             added: -(position as i64),
         }
     }
@@ -182,7 +184,7 @@ mod tests {
 
     #[test]
     fn local_albums_sort_as_before() {
-        let album = |title: &str, artist: &str, year, added| AlbumKey {
+        let album = |title: &'static str, artist: &'static str, year, added| AlbumKey {
             artist: artist.into(),
             title: title.into(),
             year: Some(year),
@@ -227,7 +229,7 @@ mod tests {
         assert_eq!(by("name"), ["Arca", "The Beatles", "SOPHIE"]);
         assert_eq!(by("added"), ["SOPHIE", "The Beatles", "Arca"]);
 
-        let local = |name: &str, added| ArtistKey {
+        let local = |name: &'static str, added| ArtistKey {
             name: name.into(),
             added,
         };

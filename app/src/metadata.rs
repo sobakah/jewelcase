@@ -251,9 +251,14 @@ impl Worker {
         if removed > 0 {
             tracing::info!("Removed {removed} unused portraits from the cache");
         }
-        let repeated = self.portraits.remove_repeated_sizes();
-        if repeated > 0 {
-            tracing::info!("Removed {repeated} portraits that repeated a smaller size");
+        // What versions before 0.6.0 wrote: once.
+        const REPEATS_KEY: &str = "portrait-repeats-removed";
+        if matches!(self.db.app_state(REPEATS_KEY), Ok(None)) {
+            let repeated = self.portraits.remove_repeated_sizes();
+            if repeated > 0 {
+                tracing::info!("Removed {repeated} portraits that repeated a smaller size");
+            }
+            let _ = self.db.set_app_state(REPEATS_KEY, "1");
         }
         let _ = self.db.set_app_state(KEY, &now().to_string());
     }

@@ -103,6 +103,8 @@ mod imp {
         pub rebuild: std::cell::Cell<bool>,
         pub playlist: RefCell<Option<PlaylistObject>>,
         pub entries: RefCell<Vec<PlaylistItem>>,
+        /// Each entry's text for the search, lowercase (`search_text`).
+        pub search_texts: RefCell<Vec<String>>,
         /// Rows are built a batch per idle moment (playlists can have
         /// thousands of songs); a newer refresh stops an older fill.
         pub fill_generation: std::cell::Cell<u64>,
@@ -519,14 +521,23 @@ impl PlaylistPanel {
         if words.is_empty() {
             return true;
         }
-        let entries = imp.entries.borrow();
-        let Some(entry) = usize::try_from(row.index())
+        let texts = imp.search_texts.borrow();
+        let Some(text) = usize::try_from(row.index())
             .ok()
-            .and_then(|index| entries.get(index))
+            .and_then(|index| texts.get(index))
         else {
             return true;
         };
-        entry_matches(entry, &words)
+        text_matches(text, &words)
+    }
+
+    /// The playlist's entries, with their search texts; returns the old
+    /// entries.
+    fn set_entries(&self, entries: Vec<PlaylistItem>) -> Vec<PlaylistItem> {
+        let imp = self.imp();
+        imp.search_texts
+            .replace(entries.iter().map(search_text).collect());
+        imp.entries.replace(entries)
     }
 
     /// While searching the playlist: how many songs match.
@@ -540,18 +551,18 @@ impl PlaylistPanel {
             imp.search_status.set_visible(false);
             return;
         }
-        let entries = imp.entries.borrow();
-        let found = entries.iter().filter(|e| entry_matches(e, &words)).count() as u32;
+        let texts = imp.search_texts.borrow();
+        let found = texts.iter().filter(|t| text_matches(t, &words)).count() as u32;
         imp.search_status.set_label(&if found == 0 {
             gettext("No songs in this playlist match")
         } else {
             ngettext(
                 "{found} of {total} song",
                 "{found} of {total} songs",
-                entries.len() as u32,
+                texts.len() as u32,
             )
             .replace("{found}", &found.to_string())
-            .replace("{total}", &entries.len().to_string())
+            .replace("{total}", &texts.len().to_string())
         });
         imp.search_status.set_visible(true);
     }
@@ -637,11 +648,16 @@ impl PlaylistPanel {
         }
     }
 
-    fn result_cover() -> CoverImage {
-        let cover: CoverImage = glib::Object::builder()
+    /// A song's cover in the list and the search results (40 px).
+    fn song_cover() -> CoverImage {
+        glib::Object::builder()
             .property("min-size", 40)
             .property("natural-size", 40)
-            .build();
+            .build()
+    }
+
+    fn result_cover() -> CoverImage {
+        let cover = Self::song_cover();
         cover.set_valign(gtk::Align::Center);
         cover
     }
@@ -957,7 +973,7 @@ impl PlaylistPanel {
             .filter(|(value, _)| *value > 0.0);
         imp.items.remove_all();
         imp.spotify_covers.borrow_mut().clear();
-        imp.entries.replace(entries.clone());
+        self.set_entries(entries.clone());
         imp.shown.set(Some(id));
         let generation = imp.fill_generation.get() + 1;
         imp.fill_generation.set(generation);
@@ -981,7 +997,7 @@ impl PlaylistPanel {
     /// (wherever they are now).
     fn update_rows(&self, playlist: &PlaylistObject, entries: Vec<PlaylistItem>) {
         let imp = self.imp();
-        let old = imp.entries.replace(entries.clone());
+        let old = self.set_entries(entries.clone());
         let mut kept: std::collections::HashMap<i64, (PlaylistItem, gtk::ListBoxRow)> =
             std::collections::HashMap::new();
         for (index, entry) in old.into_iter().enumerate() {
@@ -1041,10 +1057,7 @@ impl PlaylistPanel {
         let editable = info.editable;
         let linked = info.spotify_id.is_some();
         let track = entry.track.clone().map(TrackObject::new);
-        let cover: CoverImage = glib::Object::builder()
-            .property("min-size", 40)
-            .property("natural-size", 40)
-            .build();
+        let cover = Self::song_cover();
         // Spotify-only songs: Spotify's cover, once downloaded.
         let spotify_cover = entry
             .image_url
@@ -1827,10 +1840,9 @@ fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
     }
 }
 
-/// The track ID an entry adds to a playlist: the library song, or the
-/// Spotify song (as one to stream, a negative ID).
-/// The entry's title, artists and album contain all `words` (lowercase).
-fn entry_matches(entry: &PlaylistItem, words: &[String]) -> bool {
+/// What the search looks in: the entry's title, artists and album,
+/// lowercase.
+fn search_text(entry: &PlaylistItem) -> String {
     let mut text = String::new();
     let mut add = |part: Option<&str>| {
         if let Some(part) = part {
@@ -1851,9 +1863,16 @@ fn entry_matches(entry: &PlaylistItem, words: &[String]) -> bool {
     add(entry.title.as_deref());
     add(entry.artist.as_deref());
     add(entry.album.as_deref());
+    text
+}
+
+/// A `search_text` contains all `words` (lowercase).
+fn text_matches(text: &str, words: &[String]) -> bool {
     words.iter().all(|word| text.contains(word.as_str()))
 }
 
+/// The track ID an entry adds to a playlist: the library song, or the
+/// Spotify song (as one to stream, a negative ID).
 fn entry_track_id(entry: &PlaylistItem) -> Option<i64> {
     entry_track_ids(std::slice::from_ref(entry)).pop().flatten()
 }

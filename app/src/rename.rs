@@ -78,10 +78,10 @@ fn copy_settings(old: &str, new: &str) {
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
     };
-    let Some(settings) = dump(old).filter(|s| !s.trim().is_empty()) else {
+    let Some(settings) = dump(old).and_then(|dump| own_settings(&dump)) else {
         return;
     };
-    if dump(new).is_none_or(|s| !s.trim().is_empty()) {
+    if dump(new).is_none_or(|dump| own_settings(&dump).is_some()) {
         return;
     }
     let loaded = Command::new("dconf")
@@ -104,6 +104,23 @@ fn copy_settings(old: &str, new: &str) {
         Ok(status) => tracing::warn!("Cannot copy the settings from {old}: dconf {status}"),
         Err(err) => tracing::warn!("Cannot copy the settings from {old}: {err}"),
     }
+}
+
+/// The app's own keys in a `dconf dump` of its path (the `[/]` section),
+/// or `None` without any: the dump also holds the paths below it, and the
+/// development build's settings live there (`…/Jewelcase/Devel/`).
+fn own_settings(dump: &str) -> Option<String> {
+    let mut own = false;
+    let mut keys = Vec::new();
+    for line in dump.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            own = line == "[/]";
+        } else if own && !line.is_empty() {
+            keys.push(line);
+        }
+    }
+    (!keys.is_empty()).then(|| format!("[/]\n{}\n", keys.join("\n")))
 }
 
 /// GNOME Shell's pinned apps: Gatefold's launcher becomes Jewelcase's, in
@@ -143,6 +160,17 @@ mod tests {
         assert_eq!(
             dconf_path("io.github.sobakah.Gatefold.Devel"),
             "/io/github/sobakah/Gatefold/Devel/"
+        );
+    }
+
+    #[test]
+    fn only_the_apps_own_settings_count() {
+        // Only the development build's settings below it: none of its own.
+        assert_eq!(own_settings("[Devel]\nvolume=0.5\n"), None);
+        assert_eq!(own_settings(""), None);
+        assert_eq!(
+            own_settings("[/]\nvolume=0.5\ntile-size=180\n\n[Devel]\nvolume=1.0\n"),
+            Some("[/]\nvolume=0.5\ntile-size=180\n".to_owned())
         );
     }
 }

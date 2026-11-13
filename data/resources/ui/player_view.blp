@@ -38,7 +38,9 @@ template $JewelcasePlayerView: Adw.Bin {
         [top]
         Adw.HeaderBar {
           // No × (the sheet's close button): the grip, dragging down,
-          // Escape and a click beside the player close it.
+          // Escape and a click beside the player close it. Both sides: a
+          // button layout can put the × on the left.
+          show-start-title-buttons: false;
           show-end-title-buttons: false;
 
           title-widget: Gtk.Box header_track {

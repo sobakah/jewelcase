@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{Client, DeezerArtist, Error, Result, album_key, album_overlap, deezer_error, text};
+use super::{Client, Error, Result, album_key, album_overlap, deezer_error, text};
 
 /// Between Deezer requests (Deezer allows 50 in 5 seconds).
 pub const DEEZER_INTERVAL: Duration = Duration::from_millis(250);
@@ -76,7 +76,7 @@ impl Client {
             }
         }
         let json = self.deezer("/search/artist", &[("q", name), ("limit", "10")])?;
-        let found = artists_named(&json, name);
+        let found = super::deezer_artists_named(&json, name);
         let wanted: Vec<String> = titles.iter().map(|t| album_key(t)).collect();
         let mut ranked = Vec::new();
         for artist in found.iter().take(super::DEEZER_COMPARED) {
@@ -132,25 +132,6 @@ pub fn artist_in_album(album: &Value, name: &str) -> Option<u64> {
         .and_then(|a| a.get("id")?.as_u64())
 }
 
-/// The artists of exactly this name (ignoring case), with or without a
-/// picture, in Deezer's order.
-pub fn artists_named(json: &Value, name: &str) -> Vec<DeezerArtist> {
-    let wanted = name.trim().to_lowercase();
-    json.get("data")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|artist| text(artist, "name").is_some_and(|n| n.to_lowercase() == wanted))
-        .filter_map(|artist| {
-            Some(DeezerArtist {
-                id: artist.get("id")?.as_u64()?,
-                fans: artist.get("nb_fan").and_then(Value::as_u64).unwrap_or(0),
-                picture: text(artist, "picture_xl").unwrap_or_default(),
-            })
-        })
-        .collect()
-}
-
 pub fn parse_releases(json: &Value) -> Vec<DeezerRelease> {
     json.get("data")
         .and_then(Value::as_array)
@@ -170,8 +151,9 @@ pub fn parse_releases(json: &Value) -> Vec<DeezerRelease> {
 
 /// The releases from `since` to `today` (YYYY-MM-DD), newest first:
 /// no compilations, no upcoming ones, and no reissues (a title the
-/// artist released before, under an earlier date); of the same title
-/// twice (clean and explicit), one.
+/// artist released before as the same kind of release or a bigger one,
+/// under an earlier date: an album named after its lead single is new);
+/// of the same title twice (clean and explicit), one.
 pub fn recent_releases(all: &[DeezerRelease], since: &str, today: &str) -> Vec<DeezerRelease> {
     // Every letter and digit, also in brackets: "Blue Hour (Japanese
     // ver.)" is a release of its own.
@@ -188,9 +170,11 @@ pub fn recent_releases(all: &[DeezerRelease], since: &str, today: &str) -> Vec<D
         .filter(dated)
         .filter(|r| r.kind != "compile" && r.date.as_str() >= since && r.date.as_str() <= today)
         .filter(|r| {
-            !all.iter()
-                .filter(dated)
-                .any(|other| other.date < r.date && key(&other.title) == key(&r.title))
+            !all.iter().filter(dated).any(|other| {
+                other.date < r.date
+                    && key(&other.title) == key(&r.title)
+                    && kind_rank(&other.kind) >= kind_rank(&r.kind)
+            })
         })
         .cloned()
         .collect();
@@ -198,6 +182,16 @@ pub fn recent_releases(all: &[DeezerRelease], since: &str, today: &str) -> Vec<D
     let mut seen = std::collections::HashSet::new();
     recent.retain(|r| seen.insert(key(&r.title)));
     recent
+}
+
+/// Singles below EPs below albums (and anything else Deezer calls a
+/// release).
+fn kind_rank(kind: &str) -> u8 {
+    match kind {
+        "single" => 0,
+        "ep" => 1,
+        _ => 2,
+    }
 }
 
 /// A Unix time's date (UTC) as YYYY-MM-DD.
@@ -297,8 +291,25 @@ mod tests {
             {"id": 2, "name": "Nova", "nb_fan": 300},
             {"id": 3, "name": "Novas", "nb_fan": 5}
         ]});
-        let found = artists_named(&search, "NOVA");
+        let found = crate::deezer_artists_named(&search, "NOVA");
         assert_eq!(found.iter().map(|a| a.id).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(found[1].picture, "");
+    }
+
+    #[test]
+    fn an_album_named_after_its_lead_single_is_new() {
+        let all = [
+            release(1, "Neon", "2026-10-01", "single"),
+            release(2, "Neon", "2026-11-05", "album"),
+            release(3, "Glass", "2024-03-01", "album"),
+            release(4, "Glass", "2026-11-01", "single"),
+        ];
+        let ids: Vec<u64> = recent_releases(&all, "2026-10-13", "2026-11-12")
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        // The album, not the single again; a single from an older album is
+        // a reissue.
+        assert_eq!(ids, [2]);
     }
 }

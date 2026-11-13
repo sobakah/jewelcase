@@ -14,6 +14,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - Spotify songs no longer jump to the next song when you seek in them after Next or after picking a song in the queue.
 - Clicking beside the player closes it again after songs were dragged in the queue; before, only the grip did until a restart.
+- The player shows no × also when your button layout puts it on the left.
+- New releases: an album named after a single released before it is shown; it was taken for a reissue.
+- New releases: a release by two artists you follow is listed once with both names, and stays when you unfollow one of them.
+- At the end of a Spotify song that Soloist starts once more, Jewelcase now always goes on to the next song.
+- Searching a long playlist is quicker.
 
 ## [0.6.1] — 2026-11-12
 

@@ -43,11 +43,27 @@ fn renamed_marker(kind: &str) -> std::path::PathBuf {
 }
 
 fn mark_renamed(kind: &str) {
-    let marker = renamed_marker(kind);
+    mark(&renamed_marker(kind));
+}
+
+fn mark(marker: &std::path::Path) {
     if let Some(dir) = marker.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(marker, b"");
+}
+
+/// A copy made once: `marker` is left only when `copy` succeeded, so a
+/// copy that failed (a dismissed unlock prompt) is tried again next time.
+async fn once<T, E>(
+    marker: &std::path::Path,
+    copy: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    let result = copy.await;
+    if result.is_ok() {
+        mark(marker);
+    }
+    result
 }
 
 fn mark_own_entry(kind: &str) {
@@ -114,17 +130,23 @@ async fn load_text(kind: &'static str) -> Result<Option<String>, String> {
         let former = crate::rename::former_app_id();
         let renamed = renamed_marker(kind);
         if !renamed.exists() {
-            let old = keyring
-                .search_items(&[("application", former.as_str()), ("kind", kind)])
-                .await?;
-            mark_renamed(kind);
-            if let Some(item) = old.first() {
+            let copied = once(&renamed, async {
+                let old = keyring
+                    .search_items(&[("application", former.as_str()), ("kind", kind)])
+                    .await?;
+                let Some(item) = old.first() else {
+                    return Ok(None);
+                };
                 let text = String::from_utf8_lossy(item.secret().await?.as_bytes()).into_owned();
                 let label = item.label().await?.replacen("Gatefold", "Jewelcase", 1);
                 keyring
                     .create_item(&label, &attributes(kind), text.clone(), true)
                     .await?;
-                return Ok(Some(text));
+                Ok::<_, oo7::Error>(Some(text))
+            })
+            .await?;
+            if copied.is_some() {
+                return Ok(copied);
             }
         }
         if SHARED_APPLICATIONS.contains(&crate::config::APP_ID) || own_entry_marker(kind).exists() {
@@ -414,4 +436,23 @@ pub async fn save_soloist_key(key: String) -> Result<(), String> {
 
 pub async fn delete_soloist_key() -> Result<(), String> {
     delete_kind(SOLOIST_KEY).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_copy_is_tried_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("data/keyring-renamed-token");
+        let failed: Result<(), &str> =
+            futures_lite::future::block_on(once(&marker, async { Err("prompt dismissed") }));
+        assert!(failed.is_err());
+        assert!(!marker.exists());
+        let copied: Result<Option<&str>, &str> =
+            futures_lite::future::block_on(once(&marker, async { Ok(Some("login")) }));
+        assert_eq!(copied, Ok(Some("login")));
+        assert!(marker.exists());
+    }
 }

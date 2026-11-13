@@ -844,6 +844,16 @@ fn deezer_error(json: &Value) -> Result<()> {
 /// The artists of exactly this name (ignoring case) that have a picture,
 /// in Deezer's order.
 pub fn parse_deezer_artists(json: &Value, name: &str) -> Vec<DeezerArtist> {
+    deezer_artists_named(json, name)
+        .into_iter()
+        .filter(|artist| !artist.picture.is_empty())
+        .collect()
+}
+
+/// The artists of exactly this name in a Deezer artist search (ignoring
+/// case and spaces around it), in Deezer's order; `picture` is empty for
+/// those without one.
+pub fn deezer_artists_named(json: &Value, name: &str) -> Vec<DeezerArtist> {
     let wanted = name.trim().to_lowercase();
     json.get("data")
         .and_then(Value::as_array)
@@ -851,11 +861,11 @@ pub fn parse_deezer_artists(json: &Value, name: &str) -> Vec<DeezerArtist> {
         .flatten()
         .filter(|artist| text(artist, "name").is_some_and(|n| n.trim().to_lowercase() == wanted))
         .filter_map(|artist| {
-            let picture = text(artist, "picture_xl").or_else(|| text(artist, "picture_big"))?;
-            // Artists without a picture have an empty image ID here.
-            if picture.contains("/images/artist//") {
-                return None;
-            }
+            let picture = text(artist, "picture_xl")
+                .or_else(|| text(artist, "picture_big"))
+                // Artists without a picture have an empty image ID here.
+                .filter(|picture| !picture.contains("/images/artist//"))
+                .unwrap_or_default();
             Some(DeezerArtist {
                 id: artist.get("id")?.as_u64()?,
                 fans: artist.get("nb_fan").and_then(Value::as_u64).unwrap_or(0),

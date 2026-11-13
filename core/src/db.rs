@@ -57,6 +57,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/027_play_log.sql")),
     M::up(include_str!("db/028_unknown_lengths.sql")),
     M::up(include_str!("db/029_new_releases.sql")),
+    M::up(include_str!("db/030_release_artists.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once

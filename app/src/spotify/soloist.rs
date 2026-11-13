@@ -151,9 +151,17 @@ const SEEK_SLIP: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Soloist reports Jewelcase's song starting again with `left` ms of it
 /// left: a copy of it left in Soloist's queue plays only at its end;
-/// before, it's Soloist repeating the start (it does, about 2 s in).
-fn copy_plays(left: Option<u64>) -> bool {
-    left.is_some_and(|left| left <= CHOSEN_ELSEWHERE_MS)
+/// before, it's Soloist repeating the start (it does, about 2 s in, loud
+/// and long before the end). The end is also known by Soloist being muted
+/// for it (`ducked`: `left` can be the copy's own start when its position
+/// came first) or, without a length to tell, by the song having played a
+/// while (`playing_for`).
+fn copy_plays(left: Option<u64>, ducked: bool, playing_for: Option<std::time::Duration>) -> bool {
+    match left {
+        _ if ducked => true,
+        Some(left) => left <= CHOSEN_ELSEWHERE_MS,
+        None => playing_for.is_some_and(|played| played >= QUICK_END),
+    }
 }
 
 /// Soloist changed songs with `left` ms of Jewelcase's song left: if that
@@ -704,7 +712,11 @@ impl Spotify {
                     soloist.seek(ms);
                 }
                 self.schedule_end();
-            } else if copy_plays(left) && self.take_stale(uri) {
+            } else if {
+                let state = &self.imp().stream.borrow().soloist;
+                copy_plays(left, state.ducked, state.started_at.map(|at| at.elapsed()))
+            } && self.take_stale(uri)
+            {
                 // The same song again at the end, from what was left in
                 // Soloist's queue: Jewelcase's song is over. Earlier it's
                 // Soloist reporting the start again (about 2 s in).
@@ -1543,13 +1555,26 @@ mod tests {
     /// again, and so did every song after it.
     #[test]
     fn a_repeated_start_report_is_not_the_left_over_copy() {
+        const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
         // 2 s into a song of 2:52.
-        assert!(!copy_plays(Some(170_000)));
+        assert!(!copy_plays(Some(170_000), false, Some(2 * SECOND)));
         // At the end, the copy really plays.
-        assert!(copy_plays(Some(300)));
-        assert!(copy_plays(Some(0)));
+        assert!(copy_plays(Some(300), false, Some(172 * SECOND)));
+        assert!(copy_plays(Some(0), false, Some(172 * SECOND)));
         // Unknown: the song goes on.
-        assert!(!copy_plays(None));
+        assert!(!copy_plays(None, false, None));
+    }
+
+    #[test]
+    fn the_copy_at_the_end_is_known_without_its_remaining_time() {
+        let second = std::time::Duration::from_secs(1);
+        // Muted for the end, while the copy's own start (0:00, 2:52 left)
+        // came in first.
+        assert!(copy_plays(Some(172_000), true, Some(172 * second)));
+        // No length known: a while in, it's the end; 2 s in, the repeated
+        // start report.
+        assert!(copy_plays(None, false, Some(60 * second)));
+        assert!(!copy_plays(None, false, Some(2 * second)));
     }
 
     #[test]

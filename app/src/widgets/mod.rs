@@ -278,3 +278,31 @@ pub fn open_song_page(uri: String, artist: bool) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    /// The panels and the player have no ×: a header bar that hides the
+    /// title buttons on the right hides them on the left too, where a
+    /// button layout such as `close:` puts the ×.
+    #[test]
+    fn no_close_button_on_either_side() {
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/resources/ui");
+        let mut one_sided = Vec::new();
+        for entry in std::fs::read_dir(&ui).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "blp") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let start = text.matches("show-start-title-buttons: false;").count();
+            let end = text.matches("show-end-title-buttons: false;").count();
+            if start != end {
+                one_sided.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+        assert!(
+            one_sided.is_empty(),
+            "one side's title buttons hidden: {one_sided:?}"
+        );
+    }
+}
