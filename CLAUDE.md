@@ -304,6 +304,10 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   find new releases. `releases/latest` answers 404 while every release is a pre-release.
 - Logs of Gatefold builds are under `journalctl --user -t gatefold`.
 - soloistd's `device_name` is the owner's config; don't change it unasked.
+- **Never edit a migration** (`core/src/db/0NN_*.sql`) once a build has run it, development builds
+  and the test Flatpak included: add a new one. 029 was edited the day it was written, and a
+  Flatpak database stayed without `new_release.seen` until 030 refused it;
+  `release_seen_column` in `core/src/db.rs` repairs such databases.
 - R128 gain tags are ignored when ReplayGain tags exist (some cyanrip rips have R128 tags 10 dB
   too high). Some M4A files stop decoding partway in plain GStreamer too: check with
   `gst-launch-1.0` before calling it a Jewelcase bug.

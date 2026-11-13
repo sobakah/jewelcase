@@ -402,6 +402,28 @@ mod tests {
     }
 
     #[test]
+    fn a_database_from_the_first_new_releases_migration_opens() {
+        use rusqlite_migration::Migrations;
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Up to 029_new_releases.sql, as development builds first had it.
+        Migrations::from_slice(&crate::db::MIGRATIONS[..29])
+            .to_latest(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE new_release DROP COLUMN seen;
+             INSERT INTO new_release (deezer_id, artist_spotify_id, artist, title, kind,
+                 release_date)
+             VALUES (5, 'a', 'A', 'Duet', 'single', '2026-11-01');",
+        )
+        .unwrap();
+        let mut db = Database::setup(conn).unwrap();
+        followed(&mut db, &["a"]);
+        let releases = db.new_releases("2026-01-01").unwrap();
+        assert_eq!(releases.len(), 1);
+        assert!(!releases[0].seen);
+    }
+
+    #[test]
     fn deezer_artists_and_known_albums() {
         let mut db = Database::open_in_memory().unwrap();
         assert_eq!(db.deezer_artist("a").unwrap(), None);

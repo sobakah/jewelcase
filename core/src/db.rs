@@ -87,6 +87,23 @@ fn album_ids_autoincrement(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// Development builds of 0.6.0 ran a first version of
+/// `029_new_releases.sql` without `new_release.seen` (added to the same
+/// file the same day): their databases get it here, before migrating on.
+/// Don't edit a migration once it has run anywhere; add one.
+fn release_seen_column(conn: &Connection) -> Result<()> {
+    let columns: Vec<String> = conn
+        .prepare("SELECT name FROM pragma_table_info('new_release')")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let has = |name: &str| columns.iter().any(|c| c == name);
+    // Only the table 029 made (030 rebuilds it with `seen`).
+    if has("artist_spotify_id") && !has("seen") {
+        conn.execute_batch("ALTER TABLE new_release ADD COLUMN seen INTEGER NOT NULL DEFAULT 0")?;
+    }
+    Ok(())
+}
+
 /// Separates the values of multi-value tags in one column.
 const LIST_SEPARATOR: char = '\u{1f}';
 
@@ -297,6 +314,7 @@ impl Database {
         // Foreign keys only after migrating: rebuilding a table drops the
         // old one, which would otherwise empty the tables referring to it.
         conn.pragma_update(None, "foreign_keys", false)?;
+        release_seen_column(&conn)?;
         Migrations::from_slice(MIGRATIONS).to_latest(&mut conn)?;
         album_ids_autoincrement(&mut conn)?;
         conn.pragma_update(None, "foreign_keys", true)?;
