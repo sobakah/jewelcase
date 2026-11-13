@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Only the songs you own in a playlist**: *Only Songs in My Library* in a playlist's sort menu hides the songs that would come from Spotify; Play, Shuffle and the queue take only the songs shown. Each playlist remembers it.
+
 ### Changed
 
 - The player has no × any more; close it with the grip on top, by dragging it down, with Esc or by clicking beside it.

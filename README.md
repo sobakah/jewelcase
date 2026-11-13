@@ -21,7 +21,7 @@ Jewelcase is built around your local library: covers to browse, albums and artis
 - **Artists**: album artists only, so featured guests don't clutter the list; sorted by name or date added. Artist pages group albums, EPs & singles, soundtracks and collaborations, and list the artist's songs on other albums. Portraits, a short bio and links come from online sources if you allow it.
 - **Player**: a cover-coloured full player with synced lyrics. Korean, Japanese and Chinese lyrics show with a romanization. Crossfade follows where songs really fade, and albums stay gapless. Media keys and GNOME's media controls work.
 - **Queue and smart shuffle**: *Play Next*, *Add to Queue*, a reorderable queue that's kept between starts. Shuffle songs or albums, or mix in similar songs by genre, tempo, artist or sound.
-- **Playlists and search**: mosaic covers, drag and drop, search within a playlist, import and export (M3U8, XSPF). One search (Ctrl+F) finds artists, albums, songs and playlists.
+- **Playlists and search**: mosaic covers, drag and drop, search within a playlist, import and export (M3U8, XSPF). *Only Songs in My Library* in a playlist's sort menu hides the songs that would come from Spotify. One search (Ctrl+F) finds artists, albums, songs and playlists.
 - **Listening statistics**: your top artists, albums, songs and genres of the last week, month, year or all time. They stay on your computer; Preferences → Playback turns them off or deletes them.
 - **Your files stay yours**: Jewelcase never writes to your music files. Separate programs do, and Jewelcase picks up their changes (see below).
 

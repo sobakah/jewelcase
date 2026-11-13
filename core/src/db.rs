@@ -58,6 +58,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/028_unknown_lengths.sql")),
     M::up(include_str!("db/029_new_releases.sql")),
     M::up(include_str!("db/030_release_artists.sql")),
+    M::up(include_str!("db/031_playlist_library_only.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once
@@ -1107,6 +1108,27 @@ impl Database {
         self.conn.execute(
             "UPDATE playlist SET sort_by = ?2, sort_reversed = ?3 WHERE id = ?1",
             params![id, by, reversed],
+        )?;
+        Ok(())
+    }
+
+    /// The playlist shows only the songs that play from the library.
+    pub fn playlist_library_only(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT library_only FROM playlist WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
+    }
+
+    pub fn set_playlist_library_only(&mut self, id: i64, only: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE playlist SET library_only = ?2 WHERE id = ?1",
+            params![id, only],
         )?;
         Ok(())
     }
@@ -2752,6 +2774,13 @@ mod tests {
         );
         db.set_playlist_sort(playlist, None).unwrap();
         assert_eq!(db.playlist_sort(playlist).unwrap(), None);
+        // Only the library's songs: also remembered, apart from the sort.
+        assert!(!db.playlist_library_only(playlist).unwrap());
+        db.set_playlist_library_only(playlist, true).unwrap();
+        db.set_playlist_sort(playlist, Some(("title", false)))
+            .unwrap();
+        assert!(db.playlist_library_only(playlist).unwrap());
+        assert!(!db.playlist_library_only(playlist + 1).unwrap());
         let before = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

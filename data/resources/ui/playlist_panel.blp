@@ -161,8 +161,10 @@ template $JewelcasePlaylistPanel: Adw.Bin {
                 }
 
                 // Sorted like on Spotify; only the view, remembered per
-                // playlist (else Preferences' default).
-                Gtk.MenuButton {
+                // playlist (else Preferences' default). Also "Only Songs in
+                // My Library" while some aren't (tooltip and accent set in
+                // code, like the album grid's).
+                Gtk.MenuButton sort_button {
                   icon-name: "view-sort-descending-symbolic";
                   tooltip-text: _("Sort");
                   menu-model: sort_menu;
@@ -387,6 +389,14 @@ menu sort_menu {
     item {
       label: _("Use _Default Sort");
       action: "sort.default";
+    }
+  }
+
+  section {
+    item {
+      label: _("_Only Songs in My Library");
+      action: "sort.library-only";
+      hidden-when: "action-disabled";
     }
   }
 }

@@ -448,6 +448,7 @@ Match results are cached in the DB and re-checked when the library changes, so a
 **UI:**
 - Playlist panel rows show a small source icon per track: local (no icon, the normal case), *Spotify* (stream icon), or *unavailable* (greyed out, e.g. streaming off and no local copy, with "Open in Spotify").
 - A header line: *"38 of 50 tracks play from your library"*.
+- *Only Songs in My Library* in the sort menu (offered while some songs don't play from the library): only those are listed, and Play, Shuffle, Play Next and Add to Queue take only them (on a Spotify device too, as a list of songs). Only the view, remembered per playlist like the sort (migration 031); the sort button turns accent-coloured, like the album grid's with a genre filter. Songs can't be dragged meanwhile (a row's place isn't the song's place then); *Change Order on Spotify* shows them all while arranging.
 - Row menu:
   - *Use local file…* (pick or override a match)
   - *Always play from Spotify* (`user_pinned_spotify`, e.g. for a different master)

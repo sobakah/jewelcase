@@ -121,6 +121,12 @@ mod imp {
         pub sort_chosen: std::cell::Cell<bool>,
         /// The "sort.by" and "sort.reversed" actions, to show the sort.
         pub sort_actions: std::cell::OnceCell<(gio::SimpleAction, gio::SimpleAction)>,
+        #[template_child]
+        pub sort_button: TemplateChild<gtk::MenuButton>,
+        /// "sort.library-only": only the songs that play from the library.
+        pub library_only_action: std::cell::OnceCell<gio::SimpleAction>,
+        /// Only those are shown now (chosen, and some others there).
+        pub library_only: std::cell::Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -928,11 +934,36 @@ impl PlaylistPanel {
         self.show_sort(&sort);
         let mut entries = library.playlist_items(id);
         sort_entries(&mut entries, &sort.0, sort.1);
-        let sort_changed = *imp.sort.borrow() != sort;
+        // Only the songs that play from the library: offered while some
+        // don't; all of them show while arranging (dragging needs them).
+        let chosen_only = library
+            .db()
+            .and_then(|db| db.playlist_library_only(id).ok())
+            .unwrap_or(false);
+        let offered = partial && info.readable;
+        let library_only = chosen_only && offered && !imp.arranging.get();
+        let all_empty = entries.is_empty();
+        if library_only {
+            entries.retain(|e| e.track.is_some());
+        }
+        self.show_library_only(offered, chosen_only, library_only);
+        let sort_changed =
+            *imp.sort.borrow() != sort || imp.library_only.replace(library_only) != library_only;
         imp.sort.replace(sort);
         let hidden = !info.readable;
         imp.hidden.set_visible(hidden);
         imp.empty.set_visible(entries.is_empty() && !hidden);
+        if all_empty {
+            imp.empty.set_title(&gettext("Empty Playlist"));
+            imp.empty.set_description(Some(&gettext(
+                "Add songs with the + button above, or use “Add to Playlist…” on an album or song.",
+            )));
+        } else {
+            imp.empty.set_title(&gettext("None in Your Library"));
+            imp.empty.set_description(Some(&gettext(
+                "None of this playlist’s songs play from your library. “Only Songs in My Library” in the sort menu shows them all again.",
+            )));
+        }
         imp.items.set_visible(!entries.is_empty());
         // Unchanged (another playlist changed, a sync): keep the rows.
         let rebuild = imp.rebuild.take() || kind_changed;
@@ -1127,8 +1158,12 @@ impl PlaylistPanel {
             .build();
         // Spotify playlists only after choosing "Change Order on Spotify".
         // Sorted, the order can't be changed by dragging.
-        let reorderable =
-            editable && (!linked || self.imp().arranging.get()) && self.in_own_order();
+        // Not while only the library's songs show: a row's place isn't the
+        // song's place in the playlist then.
+        let reorderable = editable
+            && (!linked || self.imp().arranging.get())
+            && self.in_own_order()
+            && !self.imp().library_only.get();
         if reorderable {
             line.append(
                 &gtk::Image::builder()
@@ -1309,8 +1344,9 @@ impl PlaylistPanel {
                         .count() as u32
                 })
                 .unwrap_or(0);
-            // Sorted: the songs in this order, not Spotify's playlist.
-            let order = (!self.in_own_order()).then(|| {
+            // Sorted or filtered: these songs in this order, not Spotify's
+            // playlist.
+            let order = (!self.in_own_order() || imp.library_only.get()).then(|| {
                 entries
                     .iter()
                     .filter_map(|e| e.spotify_uri.clone())
@@ -1423,11 +1459,37 @@ impl PlaylistPanel {
             self,
             move |_, _| panel.store_sort(None)
         ));
+        // Only the songs that play from the library (remembered per
+        // playlist, like the sort).
+        let library_only =
+            gio::SimpleAction::new_stateful("library-only", None, &false.to_variant());
+        library_only.connect_activate(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |action, _| {
+                let only = !action
+                    .state()
+                    .and_then(|s| s.get::<bool>())
+                    .unwrap_or(false);
+                let Some(id) = panel.playlist_id() else {
+                    return;
+                };
+                let library = JewelcaseApplication::get().library();
+                if let Some(mut db) = library.db()
+                    && let Err(err) = db.set_playlist_library_only(id, only)
+                {
+                    tracing::warn!("Cannot keep the playlist's filter: {err}");
+                }
+                panel.refresh();
+            }
+        ));
         group.add_action(&by);
         group.add_action(&reversed);
         group.add_action(&default);
+        group.add_action(&library_only);
         self.insert_action_group("sort", Some(&group));
         let _ = self.imp().sort_actions.set((by, reversed));
+        let _ = self.imp().library_only_action.set(library_only);
     }
 
     /// Lists the playlist sorted (remembered per playlist).
@@ -1451,6 +1513,30 @@ impl PlaylistPanel {
         if let Some((by_action, reversed_action)) = self.imp().sort_actions.get() {
             by_action.set_state(&by.to_variant());
             reversed_action.set_state(&reversed.to_variant());
+        }
+    }
+
+    /// The "Only Songs in My Library" item (`offered`: some songs don't
+    /// play from the library), and the sort button saying when it hides
+    /// songs, like the album grid's.
+    fn show_library_only(&self, offered: bool, chosen: bool, active: bool) {
+        let imp = self.imp();
+        if let Some(action) = imp.library_only_action.get() {
+            action.set_enabled(offered);
+            action.set_state(&chosen.to_variant());
+        }
+        let button = &imp.sort_button;
+        button.set_tooltip_text(Some(&if active {
+            gettext("Sort and Filter (Filtered)")
+        } else if offered {
+            gettext("Sort and Filter")
+        } else {
+            gettext("Sort")
+        }));
+        if active {
+            button.add_css_class("accent");
+        } else {
+            button.remove_css_class("accent");
         }
     }
 
