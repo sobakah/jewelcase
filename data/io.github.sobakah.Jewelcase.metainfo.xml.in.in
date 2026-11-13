@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.7.0" date="2026-11-13" type="development">
+      <description>
+        <ul>
+          <li>A playlist can show only the songs in your library, from its sort menu; Play and the queue then take only those</li>
+          <li>Spotify songs no longer jump to the next song when you seek in them after Next</li>
+          <li>Clicking beside the player closes it again; the player has no × any more</li>
+          <li>New releases show albums named after an earlier single, and releases by two artists you follow once, with both names</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.1" date="2026-11-12" type="development">
       <description>
         <ul>

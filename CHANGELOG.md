@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-13
+
+The library database changes (new releases can have several artists; playlists remember the
+library-only filter); 0.6.1 can't open it any more.
+
 ### Added
 
 - **Only the songs you own in a playlist**: *Only Songs in My Library* in a playlist's sort menu hides the songs that would come from Spotify; Play, Shuffle and the queue take only the songs shown. Each playlist remembers it.
@@ -133,7 +138,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.6.1...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.7.0...HEAD
+[0.7.0]: https://github.com/sobakah/jewelcase/releases/tag/0.7.0
 [0.6.1]: https://github.com/sobakah/jewelcase/releases/tag/0.6.1
 [0.6.0]: https://github.com/sobakah/jewelcase/releases/tag/0.6.0
 [0.5.1]: https://github.com/sobakah/jewelcase/releases/tag/0.5.1

@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.6.1
+Version:        0.7.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Fri Nov 13 2026 sobakah - 0.7.0-1
+- Spotify playlists can show only the songs in the library
+- Spotify songs no longer jump to the next one after a seek
+- The player closes again when clicking beside it; no × in the player
+- New releases: albums named after a single, releases by two artists
+
 * Thu Nov 12 2026 sobakah - 0.6.1-1
 - App icon as large as other apps' icons
 - Smaller Spotify icon; the artist lines up with the song title
