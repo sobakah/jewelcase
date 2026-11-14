@@ -305,4 +305,24 @@ mod tests {
             "one side's title buttons hidden: {one_sided:?}"
         );
     }
+
+    /// The mini player's visualizer is centred between the song and the
+    /// controls: the song's box doesn't take half the free space (its
+    /// title expands, which GTK passes on to the box unless it says no).
+    #[test]
+    fn the_mini_players_song_leaves_the_space_to_the_visualizer() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../data/resources/ui/mini_player.blp");
+        let text = std::fs::read_to_string(path).unwrap();
+        let start = text.find("Gtk.Box text_box {").expect("the song's box");
+        // Its own properties, before its first child.
+        let own = &text[start..];
+        let own = &own[..own.find("Gtk.Grid").expect("its grid")];
+        assert!(own.contains("hexpand: false;"), "text_box expands");
+        let title = &text[text.find("Gtk.Label title {").expect("the title")..];
+        assert!(
+            title[..title.find('}').unwrap()].contains("hexpand: true;"),
+            "the title no longer expands: is this test still needed?"
+        );
+    }
 }

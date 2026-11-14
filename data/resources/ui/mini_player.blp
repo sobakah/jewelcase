@@ -25,10 +25,14 @@ template $JewelcaseMiniPlayer: Adw.Bin {
         valign: center;
       }
 
+      // Not expanding (the title's hexpand would spread to it): the free
+      // space goes to the visualizer's box, so the bars sit in the middle
+      // of it, not of its right half.
       Gtk.Box text_box {
         orientation: vertical;
         valign: center;
         width-request: 180;
+        hexpand: false;
 
         // The Spotify icon on the title's line, the artist under the
         // title (not under the icon).
