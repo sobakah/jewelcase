@@ -8,7 +8,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ### Added
 
-- **Choose the app icon's disc**: Preferences → Library → *App Icon* offers nine discs for the icon's jewel case, shown in the dash and the app grid.
+- **Choose the app icon's disc**: Preferences → Library → *App Icon* offers nine discs for the icon's jewel case, shown in the dash and the app grid within a few seconds.
 - **A Flatpak for Fedora Silverblue, Bluefin and other image-based systems**: each release has a `.flatpak` file next to the RPM. Its update notice points to the next release's file.
 - On image-based systems, Preferences → Integrations shows how to install lyrembed there (pipx into the home folder) and cdport (in a toolbox).
 

@@ -93,24 +93,37 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
-    // The disc in the app icon's case (app_icon.rs); filled in code, hidden
-    // in a Flatpak.
+    // The disc in the app icon's case (app_icon.rs): one row of discs to
+    // scroll through, the chosen one first; filled in code, hidden in a
+    // Flatpak that can't reach ~/.local/share/icons.
     Adw.PreferencesGroup app_icon_group {
       title: _("App Icon");
-      description: _("The disc in Jewelcase’s jewel case, in the dash and the app grid");
 
-      Gtk.FlowBox app_icon_box {
-        selection-mode: single;
-        activate-on-single-click: true;
-        homogeneous: true;
-        min-children-per-line: 3;
-        max-children-per-line: 9;
-        column-spacing: 6;
-        row-spacing: 6;
+      Gtk.ScrolledWindow {
+        hscrollbar-policy: automatic;
+        vscrollbar-policy: never;
+        propagate-natural-height: true;
 
-        accessibility {
-          labelled-by: app_icon_group;
-        }
+        styles [
+          "card",
+        ]
+
+        // Vertical with one child per line: a single row.
+        child: Gtk.FlowBox app_icon_box {
+          orientation: vertical;
+          selection-mode: single;
+          activate-on-single-click: true;
+          max-children-per-line: 1;
+          column-spacing: 6;
+          margin-top: 6;
+          margin-bottom: 6;
+          margin-start: 6;
+          margin-end: 6;
+
+          accessibility {
+            labelled-by: app_icon_group;
+          }
+        };
       }
     }
 

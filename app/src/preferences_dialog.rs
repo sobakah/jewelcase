@@ -280,43 +280,36 @@ mod imp {
                 return;
             }
             let picker = &*self.app_icon_box;
-            for icon in crate::app_icon::ICONS {
+            // In the order of the dialog's opening, so a click doesn't
+            // move the discs under the pointer.
+            let order = crate::app_icon::picker_order(&settings.string("app-icon"));
+            for icon in &order {
                 let image = gtk::Image::builder()
                     .icon_name(crate::app_icon::preview_name(icon))
-                    .pixel_size(64)
-                    .build();
-                image.add_css_class("icon-dropshadow");
-                let label = gtk::Label::builder()
-                    .label(crate::app_icon::title(icon))
-                    .wrap(true)
-                    .justify(gtk::Justification::Center)
-                    .build();
-                label.add_css_class("caption");
-                let content = gtk::Box::builder()
-                    .orientation(gtk::Orientation::Vertical)
-                    .spacing(6)
+                    .pixel_size(48)
                     .margin_top(6)
                     .margin_bottom(6)
                     .margin_start(6)
                     .margin_end(6)
                     .build();
-                content.append(&image);
-                content.append(&label);
-                let child = gtk::FlowBoxChild::builder().child(&content).build();
-                child.update_property(&[gtk::accessible::Property::Label(
-                    &crate::app_icon::title(icon),
-                )]);
+                image.add_css_class("icon-dropshadow");
+                let title = crate::app_icon::title(icon);
+                let child = gtk::FlowBoxChild::builder()
+                    .child(&image)
+                    .tooltip_text(&title)
+                    .build();
+                child.update_property(&[gtk::accessible::Property::Label(&title)]);
                 picker.append(&child);
             }
+            let order = std::rc::Rc::new(order);
             let select = glib::clone!(
                 #[weak]
                 picker,
+                #[strong]
+                order,
                 move |settings: &gio::Settings| {
                     let chosen = settings.string("app-icon");
-                    let index = crate::app_icon::ICONS
-                        .iter()
-                        .position(|icon| *icon == chosen)
-                        .unwrap_or(0);
+                    let index = order.iter().position(|icon| *icon == chosen).unwrap_or(0);
                     if let Some(child) = picker.child_at_index(index as i32) {
                         picker.select_child(&child);
                     }
@@ -329,7 +322,7 @@ mod imp {
                 settings,
                 move |_, child| {
                     let index = child.index().max(0) as usize;
-                    if let Some(icon) = crate::app_icon::ICONS.get(index) {
+                    if let Some(icon) = order.get(index) {
                         let _ = settings.set_string("app-icon", icon);
                     }
                 }

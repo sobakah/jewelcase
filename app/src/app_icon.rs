@@ -8,6 +8,11 @@
 //! bundled as `jewelcase-icon-<name>` (data/resources/icons/scalable/apps),
 //! which also puts them in the icon theme for the picker's previews.
 //!
+//! GNOME Shell looks at the theme folder's (`icons/hicolor`) modification
+//! time before an icon lookup, at most every 5 s, and reloads every icon when
+//! it changed; a file written deeper down doesn't change it, so it's moved
+//! forward after each change (as `touch` after installing icons does).
+//!
 //! A Flatpak reaches the host's `~/.local/share/icons` only when allowed
 //! (`--filesystem=xdg-data/icons:create`, as the test Flatpak is); without
 //! it there's no picker.
@@ -62,6 +67,18 @@ pub fn title(icon: &str) -> String {
         "camouflage" => gettext("Camouflage"),
         _ => gettext("Water Slide"),
     }
+}
+
+/// The discs in the picker: the chosen one first, then the others in
+/// [`ICONS`]'s order.
+pub fn picker_order(chosen: &str) -> Vec<&'static str> {
+    let chosen = ICONS
+        .iter()
+        .find(|icon| **icon == chosen)
+        .unwrap_or(&ICONS[0]);
+    std::iter::once(*chosen)
+        .chain(ICONS.iter().copied().filter(|icon| icon != chosen))
+        .collect()
 }
 
 /// The icon name of a disc's preview. Not the app ID for the first: a
@@ -120,8 +137,9 @@ fn apply(settings: &gio::Settings) {
             svg
         }
     });
-    let path = icon_path(&data_home(), APP_ID);
-    match install(&path, svg.as_deref()) {
+    let data_dir = data_home();
+    let path = icon_path(&data_dir, APP_ID);
+    match set_icon(&data_dir, APP_ID, svg.as_deref()) {
         Ok(Change::Unchanged) => {}
         Ok(change) => tracing::info!("App icon {icon}: {change:?} {}", path.display()),
         Err(err) => tracing::warn!("Cannot set the app icon at {}: {err}", path.display()),
@@ -143,6 +161,34 @@ pub fn icon_path(data_dir: &Path, app_id: &str) -> PathBuf {
     data_dir
         .join("icons/hicolor/scalable/apps")
         .join(format!("{app_id}.svg"))
+}
+
+/// Installs (or removes, for `None`) the icon and tells the icon theme.
+fn set_icon(data_dir: &Path, app_id: &str, svg: Option<&str>) -> io::Result<Change> {
+    let change = install(&icon_path(data_dir, app_id), svg)?;
+    if matches!(change, Change::Written | Change::Removed) {
+        touch_theme(&data_dir.join("icons/hicolor"))?;
+    }
+    Ok(change)
+}
+
+/// Moves the theme folder's modification time forward: to now, or a second
+/// on when it is there already (the shell compares whole seconds).
+fn touch_theme(dir: &Path) -> io::Result<()> {
+    let folder = std::fs::File::open(dir)?;
+    let before = folder.metadata()?.modified()?;
+    let now = std::time::SystemTime::now();
+    let whole = |time: std::time::SystemTime| {
+        time.duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs())
+            .unwrap_or(0)
+    };
+    let to = if whole(now) > whole(before) {
+        now
+    } else {
+        before + std::time::Duration::from_secs(1)
+    };
+    folder.set_modified(to)
 }
 
 /// The disc with the development build's stripes, drawn over the case like
@@ -279,6 +325,49 @@ mod tests {
         // Nothing left over from writing.
         let left: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
         assert!(left.is_empty());
+    }
+
+    #[test]
+    fn the_chosen_disc_comes_first_in_the_picker() {
+        assert_eq!(picker_order("water-slide"), ICONS);
+        let order = picker_order("pearl");
+        assert_eq!(order[0], "pearl");
+        assert_eq!(order.len(), ICONS.len());
+        let rest: Vec<_> = ICONS
+            .iter()
+            .copied()
+            .filter(|icon| *icon != "pearl")
+            .collect();
+        assert_eq!(order[1..], rest);
+        // A value from a newer version: the installed one first.
+        assert_eq!(picker_order("unknown"), ICONS);
+    }
+
+    #[test]
+    fn the_theme_folder_is_touched_so_the_shell_reloads_the_icon() {
+        let dir = tempfile::tempdir().unwrap();
+        let theme = dir.path().join("icons/hicolor");
+        let modified = || std::fs::metadata(&theme).unwrap().modified().unwrap();
+
+        assert_eq!(
+            set_icon(dir.path(), "org.example.App", Some(&disc("waves"))).unwrap(),
+            Change::Written
+        );
+        // Written twice within a second still moves on (whole seconds).
+        let first = modified();
+        set_icon(dir.path(), "org.example.App", Some(&disc("flow"))).unwrap();
+        let second = modified();
+        assert!(second.duration_since(first).unwrap().as_secs() >= 1);
+        // Back to the installed icon: the theme changes again.
+        assert_eq!(
+            set_icon(dir.path(), "org.example.App", None).unwrap(),
+            Change::Removed
+        );
+        assert!(modified().duration_since(second).unwrap().as_secs() >= 1);
+        // Nothing changed: left alone.
+        let last = modified();
+        set_icon(dir.path(), "org.example.App", None).unwrap();
+        assert_eq!(modified(), last);
     }
 
     #[test]
