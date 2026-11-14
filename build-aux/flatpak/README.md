@@ -57,8 +57,11 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Jewelcase.Devel`
   builds), so it runs next to the installed RPM. Its library database,
   settings, covers and Spotify login are its own (in
   `~/.var/app/io.github.sobakah.Jewelcase.Devel`); it scans the library anew.
-- **The music folder is read-only** (`--filesystem=xdg-music:ro`). Folders
-  outside it would come through the folder chooser's portal (untested).
+- **The music folder is read-only** (`--filesystem=xdg-music:ro`). A folder
+  added in Preferences comes through the folder chooser's portal as
+  `/run/flatpak/doc/<id>/…`, also the music folder itself; paths handed to
+  cdport and lyrembed are translated to the host's (the portal's
+  `user.document-portal.host-path` attribute, `tools.rs` `host_path`).
 - **The app icon's disc** (Preferences › Library › App Icon) is written to
   the host's `~/.local/share/icons` (`--filesystem=xdg-data/icons:create`),
   where the dash finds it before the Flatpak's own icon.

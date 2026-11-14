@@ -785,8 +785,7 @@ impl Tools {
     /// The library folder to hand cdport (`None`: its own is in the
     /// player's folders).
     fn cdport_library(&self, config: &cdport::Config) -> Option<PathBuf> {
-        let folders = library_folders::load(self.settings());
-        cdport::library_arg(config, &folders).map(Path::to_path_buf)
+        cdport_library_of(config, &library_folders::load(self.settings()))
     }
 
     /// "Import CD…"
@@ -993,7 +992,7 @@ impl Tools {
         let generation = self.imp().page_generation.get();
         let folder_text = folder
             .as_ref()
-            .map(|f| f.to_string_lossy().into_owned())
+            .map(|f| host_path(f).to_string_lossy().into_owned())
             .unwrap_or_default();
         let (method, args, reply) = match tool {
             PageTool::Cdport if job == PageJob::EditTags => (
@@ -1613,6 +1612,55 @@ pub fn romanize_over_dbus(lyrics: &str, hint: Option<&str>) -> Result<Option<Str
     Ok(Some(romanized))
 }
 
+/// The `-l`/`Library` for cdport from the player's folders, as the host
+/// sees them.
+fn cdport_library_of(config: &cdport::Config, folders: &[PathBuf]) -> Option<PathBuf> {
+    let folders: Vec<PathBuf> = folders.iter().map(|f| host_path(f)).collect();
+    cdport::library_arg(config, &folders).map(Path::to_path_buf)
+}
+
+/// Where the host has `path`: a folder chosen in a Flatpak through the
+/// folder chooser comes as a document portal path
+/// (`/run/flatpak/doc/<id>/Musik/…`), which exists only in the sandbox.
+/// cdport and lyrembed run on the host, so paths handed to them are
+/// translated through the portal's `user.document-portal.host-path`
+/// attribute (on the files below the chosen folder too). Any other path is
+/// returned as it is.
+pub fn host_path(path: &Path) -> PathBuf {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    const NAME: &std::ffi::CStr = c"user.document-portal.host-path";
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return path.to_path_buf();
+    };
+    // SAFETY: both strings are NUL-terminated and the buffer is as long as
+    // given; a value that grew in between fails with ERANGE.
+    let value = unsafe {
+        let size = libc::getxattr(c_path.as_ptr(), NAME.as_ptr(), std::ptr::null_mut(), 0);
+        if size <= 0 {
+            return path.to_path_buf();
+        }
+        let mut buf = vec![0u8; size as usize];
+        let read = libc::getxattr(
+            c_path.as_ptr(),
+            NAME.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        );
+        if read <= 0 {
+            return path.to_path_buf();
+        }
+        buf.truncate(read as usize);
+        buf
+    };
+    let value = value.strip_suffix(&[0]).unwrap_or(&value).to_vec();
+    let host = PathBuf::from(OsString::from_vec(value));
+    if host.is_absolute() {
+        host
+    } else {
+        path.to_path_buf()
+    }
+}
+
 fn ear_tag_installed() -> bool {
     std::process::Command::new("flatpak")
         .args(["info", editor::EAR_TAG_ID])
@@ -1697,6 +1745,58 @@ fn runnable(template: &[String]) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the document portal puts on its files.
+    fn set_host_path(path: &Path, host: &str) {
+        use std::os::unix::ffi::OsStrExt;
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: NUL-terminated strings, the value's length given.
+        let done = unsafe {
+            libc::setxattr(
+                c_path.as_ptr(),
+                c"user.document-portal.host-path".as_ptr(),
+                host.as_ptr().cast(),
+                host.len(),
+                0,
+            )
+        };
+        assert_eq!(done, 0, "user xattrs in {}", path.display());
+    }
+
+    #[test]
+    fn cdport_gets_the_hosts_paths_for_a_flatpaks_portal_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        // The library folder as a Flatpak got it from the folder chooser.
+        let doc = dir.path().join("doc/bcc9d238/Musik");
+        let album = doc.join("Album");
+        std::fs::create_dir_all(&album).unwrap();
+        set_host_path(&doc, "/home/u/Musik");
+        set_host_path(&album, "/home/u/Musik/Album");
+
+        assert_eq!(host_path(&album), Path::new("/home/u/Musik/Album"));
+        let plain = dir.path().join("doc");
+        assert_eq!(host_path(&plain), plain);
+        assert_eq!(
+            host_path(Path::new("/nonexistent/x")),
+            Path::new("/nonexistent/x")
+        );
+
+        // cdport's own library is that folder: no `Library` to pass.
+        let inside = cdport::Config {
+            library_dir: Some("/home/u/Musik/Rips".into()),
+            ..Default::default()
+        };
+        assert_eq!(cdport_library_of(&inside, std::slice::from_ref(&doc)), None);
+        // Elsewhere: the folder, as the host has it.
+        let outside = cdport::Config {
+            library_dir: Some("/data/Rips".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cdport_library_of(&outside, &[doc]),
+            Some(PathBuf::from("/home/u/Musik"))
+        );
+    }
 
     fn program(version: Option<Version>) -> Option<ToolInfo> {
         Some(ToolInfo {
