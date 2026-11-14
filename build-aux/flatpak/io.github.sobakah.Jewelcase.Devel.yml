@@ -97,7 +97,7 @@ modules:
     buildsystem: meson
     config-opts:
       - -Dprofile=development
-      # Flatpaks update through their repository, not Jewelcase's own check.
+      # A test build: no update notice (the release Flatpak has one).
       - -Dupdate_check=false
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin

@@ -4,8 +4,8 @@ Jewelcase is a GNOME music player for a local album library with Spotify woven i
 play from your files (also inside Spotify playlists), songs you don't stream through Spotify
 Soloist in the same queue. Rust (edition 2024, rust ≥ 1.95), gtk4-rs 0.11, libadwaita 0.9
 (feature `v1_10`), GStreamer 1.28, SQLite, Blueprint UI, built by Meson driving Cargo; packaged
-as an RPM for Fedora 45. User docs: [README.md](README.md); the design and its reasons:
-[CONCEPT.md](CONCEPT.md); the test Flatpak: [build-aux/flatpak/README.md](build-aux/flatpak/README.md).
+as an RPM for Fedora 45 and as a Flatpak bundle for image-based systems. User docs: [README.md](README.md); the design and its reasons:
+[CONCEPT.md](CONCEPT.md); the Flatpaks: [build-aux/flatpak/README.md](build-aux/flatpak/README.md).
 
 ## The program family
 
@@ -27,6 +27,16 @@ The file journal format is specified in picktag's `docs/JOURNAL_SPEC.md`. The pr
 share its look (libadwaita's design language): `static/base.css` and `static/icons.js` are
 lyrembed's, copied unchanged into cdport, keepbest and media-optimizer; change them in lyrembed and
 copy them back. Setup details of the owner's machine are in `CLAUDE.local.md` (not in git).
+
+On image-based systems (Fedora Silverblue, Bluefin) the programs run on the host where the image
+has what they need (pipx from its zipapp, or layered with `rpm-ostree`); cdport runs in a toolbox,
+where cyanrip can be built, and Jewelcase comes as a Flatpak bundle on its releases. In a toolbox
+or distrobox, what the host starts (app-menu entry, D-Bus service) enters the container, and what
+a program opens in other apps (browser, Flatpaks, file manager) leaves it: `container.py`,
+lyrembed's, copied unchanged into cdport, keepbest and media-optimizer; picktag's
+`core/desktop.py`. The suites of the four make no container unless a test asks (an autouse
+fixture), so they run alike in a toolbox. Each README has a section *Fedora Silverblue, Bluefin
+and other image-based systems* under its installation.
 
 ### Working rules
 
@@ -106,7 +116,7 @@ stream/     optional librespot streaming (feature `spotify-stream`)
 tools/      lyrembed, cdport and tag editors: commands, configs, D-Bus names
 data/       desktop file, metainfo, settings schema, icons, UI (data/resources: Blueprint, CSS)
 po/         translations
-build-aux/  headless.sh (test session), flatpak/ (test Flatpak manifest), cargo-build.sh
+build-aux/  headless.sh (test session), flatpak/ (test and release Flatpak manifests), cargo-build.sh
 ```
 
 - Meson builds the UI resources (Blueprint, CSS, icons) and runs Cargo, which embeds the GResource
@@ -142,6 +152,7 @@ make lint       # fmt --check + clippy (without the spotify-stream feature)
 make rpm        # local rpmbuild into rpmbuild/ (several minutes)
 make mock       # clean Fedora 45 chroot (needs the mock group)
 make flatpak    # test Flatpak io.github.sobakah.Jewelcase.Devel, installed for this user
+make flatpak-release  # the release Flatpak as a bundle file in _build/flatpak-release (not installed)
 ```
 
 Before committing, run each and check its exit status:
@@ -278,15 +289,17 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 4. Commit `Jewelcase X.Y.Z: <what it brings>`, `git tag -a X.Y.Z -m "Jewelcase X.Y.Z"`, push
    `main` and the tag.
 5. The tag starts `.github/workflows/rpm.yml` (plain version tags only; it checks the tag against
-   `meson.build`): it builds the RPMs in a clean Fedora 45 container (20–30 min) and creates a
-   **draft** pre-release titled "Jewelcase X.Y.Z" with the version's CHANGELOG section as notes.
+   `meson.build`): it builds the RPMs in a clean Fedora 45 container (20–30 min) and the release
+   Flatpak bundle (`make flatpak-release` in a privileged one), and creates a **draft**
+   pre-release titled "Jewelcase X.Y.Z" with both and the version's CHANGELOG section as notes.
    Check it (`gh release view X.Y.Z`, download the RPM and inspect it), then publish it with
    `gh release edit X.Y.Z --draft=false --prerelease`. Don't also create the release by hand: that
    leaves a duplicate draft.
 6. Installed copies find the release through their update banner (`app/src/updates.rs`: GitHub
    releases via `gh api` or HTTPS, tags with or without `v`, any `*.x86_64.rpm` asset, installed
-   with `pkexec dnf install`, restarted with `exec jewelcase`). The banner is off in development
-   builds and Flatpaks.
+   with `pkexec dnf install`, restarted with `exec jewelcase`). The release Flatpak's banner names
+   the release's `.flatpak` asset instead (no *Install*: a bundle has no repository and the
+   sandbox can't install). The banner is off in development builds and the test Flatpak.
 7. Before a *public* release (Flathub, public repository): check the icon and texts for anything
    borrowed.
 

@@ -86,6 +86,27 @@ pub fn expand_home(path: &str) -> PathBuf {
 /// too), and to put the programs it installs on PATH.
 pub const PIPX_INSTALL_COMMAND: &str = "sudo dnf install pipx";
 pub const PIPX_PATH_COMMAND: &str = "pipx ensurepath";
+/// The same on an image-based system, whose image has no pipx: pipx's own
+/// zipapp installs it into the home folder, without changing the image.
+pub const PIPX_ZIPAPP_COMMAND: &str = "curl -LO https://github.com/pypa/pipx/releases/latest/download/pipx.pyz && python3 pipx.pyz install pipx && rm pipx.pyz";
+pub const PIPX_ZIPAPP_PATH_COMMAND: &str = "~/.local/bin/pipx ensurepath";
+
+/// Whether the computer runs an image-based system (Fedora Silverblue,
+/// Bluefin, …), where dnf can't install: rpm-ostree writes `OSTREE_VERSION`
+/// into os-release. A Flatpak reads the host's in `/run/host`.
+pub fn image_based_host() -> bool {
+    ["/run/host/os-release", "/etc/os-release"]
+        .iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())
+        .is_some_and(|text| is_image_based(&text))
+}
+
+/// `image_based_host` for an os-release file's text.
+pub fn is_image_based(os_release: &str) -> bool {
+    os_release
+        .lines()
+        .any(|line| line.starts_with("OSTREE_VERSION="))
+}
 
 /// `~/.config/<tool>/config.json`.
 pub fn config_path(tool: &str) -> PathBuf {
@@ -104,6 +125,16 @@ pub(crate) fn read_json(path: &Path) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_based_systems_by_their_os_release() {
+        let silverblue =
+            "NAME=\"Fedora Linux\"\nVARIANT_ID=silverblue\nOSTREE_VERSION='45.20261114.0'\n";
+        assert!(is_image_based(silverblue));
+        assert!(!is_image_based(
+            "NAME=\"Fedora Linux\"\nVARIANT_ID=workstation\n"
+        ));
+    }
 
     #[test]
     fn versions() {

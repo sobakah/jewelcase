@@ -677,6 +677,7 @@ impl PreferencesDialog {
             .tools()
             .detected();
         let flatpak = crate::config::is_flatpak();
+        let image_based = jewelcase_tools::image_based_host();
 
         // lyrembed
         let lyrembed = &detected.lyrembed;
@@ -697,7 +698,7 @@ impl PreferencesDialog {
         self.show_setup(
             &imp.lyrembed_setup,
             &imp.lyrembed_steps,
-            lyrembed_setup(lyrembed, flatpak),
+            lyrembed_setup(lyrembed, flatpak, image_based),
         );
 
         // cdport
@@ -716,7 +717,7 @@ impl PreferencesDialog {
         self.show_setup(
             &imp.cdport_setup,
             &imp.cdport_steps,
-            cdport_setup(cdport, flatpak),
+            cdport_setup(cdport, flatpak, image_based),
         );
 
         imp.ear_tag_status.set_subtitle(&if detected.ear_tag {
@@ -874,8 +875,26 @@ fn found(version: Option<jewelcase_tools::Version>, path: Option<&Path>) -> Stri
 }
 
 /// Installing pipx and putting its programs on PATH (the first steps).
-fn pipx_steps() -> Vec<Step> {
-    use jewelcase_tools::{PIPX_INSTALL_COMMAND, PIPX_PATH_COMMAND};
+/// An image-based system (Fedora Silverblue, Bluefin) has no pipx package
+/// to install: pipx installs itself into the home folder there.
+fn pipx_steps(image_based: bool) -> Vec<Step> {
+    use jewelcase_tools::{
+        PIPX_INSTALL_COMMAND, PIPX_PATH_COMMAND, PIPX_ZIPAPP_COMMAND, PIPX_ZIPAPP_PATH_COMMAND,
+    };
+    if image_based {
+        return vec![
+            Step::command(
+                gettext("Install pipx into your home folder (the system image has none)"),
+                PIPX_ZIPAPP_COMMAND,
+            ),
+            Step::command(
+                gettext(
+                    "Let the terminal find the programs pipx installs (once, then open a new terminal)",
+                ),
+                PIPX_ZIPAPP_PATH_COMMAND,
+            ),
+        ];
+    }
     vec![
         Step::command(
             gettext("Install pipx (on Fedora; other distributions have a pipx package too)"),
@@ -912,7 +931,11 @@ fn companion_status<C>(tool: &crate::tools::Companion<C>, flatpak: bool) -> Stri
 }
 
 /// The steps to install lyrembed or set up its D-Bus service.
-fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Setup> {
+fn lyrembed_setup(
+    lyrembed: &crate::tools::Lyrembed,
+    flatpak: bool,
+    image_based: bool,
+) -> Option<Setup> {
     use jewelcase_tools::lyrembed::{INSTALL_COMMAND, SERVICE_COMMAND};
     const ACTION: &str = "app.set-up-lyrembed";
     let has_program = lyrembed.program.is_some();
@@ -968,7 +991,7 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
         title: gettext("Install lyrembed"),
         description,
         steps: [
-            pipx_steps(),
+            pipx_steps(image_based),
             vec![
                 Step::command(
                     gettext("Install lyrembed, with romanization"),
@@ -984,7 +1007,7 @@ fn lyrembed_setup(lyrembed: &crate::tools::Lyrembed, flatpak: bool) -> Option<Se
     })
 }
 
-fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
+fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool, image_based: bool) -> Option<Setup> {
     use jewelcase_tools::cdport::{INSTALL_COMMAND, SERVICE_COMMAND};
     let service_step = || {
         Step::command(
@@ -1031,6 +1054,24 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
             )],
         });
     }
+    if image_based {
+        use jewelcase_tools::cdport::{TOOLBOX_COMMAND, TOOLBOX_PACKAGES_COMMAND};
+        return Some(Setup {
+            title: gettext("Install cdport"),
+            description: gettext(
+                "In a terminal. cdport rips with cyanrip, which has to be built, and the system image can't do that: cdport goes into a toolbox, where it builds cyanrip when it first needs it. Its D-Bus service, set up inside the toolbox, starts it there for Jewelcase.",
+            ),
+            steps: vec![
+                Step::command(
+                    gettext("Make a toolbox for cdport and enter it"),
+                    TOOLBOX_COMMAND,
+                ),
+                Step::command(gettext("Install pipx in it"), TOOLBOX_PACKAGES_COMMAND),
+                Step::command(gettext("Install cdport"), INSTALL_COMMAND),
+                service_step(),
+            ],
+        });
+    }
     let description = if flatpak {
         gettext(
             "In a terminal on your computer (not inside Jewelcase). Jewelcase, as a Flatpak, reaches cdport through its D-Bus service, the last step. cdport offers to install cyanrip, which it rips with, when it first needs it.",
@@ -1044,7 +1085,7 @@ fn cdport_setup(cdport: &crate::tools::Cdport, flatpak: bool) -> Option<Setup> {
         title: gettext("Install cdport"),
         description,
         steps: [
-            pipx_steps(),
+            pipx_steps(image_based),
             vec![
                 Step::command(gettext("Install cdport"), INSTALL_COMMAND),
                 service_step(),

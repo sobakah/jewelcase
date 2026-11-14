@@ -1,7 +1,32 @@
+# Flatpaks
+
+- `io.github.sobakah.Jewelcase.yml`: the **release Flatpak**, for Fedora
+  Silverblue, Bluefin and other image-based systems (README.md).
+  `make flatpak-release` builds it as a bundle,
+  `_build/flatpak-release/jewelcase-VERSION.flatpak`, without installing it;
+  the release workflow attaches that file to each release. It differs from
+  the test Flatpak below only in its app ID (the RPM's), its MPRIS name and
+  its update notice, which names the next release's bundle.
+- `io.github.sobakah.Jewelcase.Devel.yml`: the **test Flatpak** of the
+  working tree, described in the rest of this file.
+
+To try the release bundle without touching your own Flatpak installation,
+install it into a scratch one and give it a scratch home (its data goes to
+`$HOME/.var/app`):
+
+```sh
+export FLATPAK_USER_DIR=/tmp/fp-user
+flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak --user install -y _build/flatpak-release/jewelcase-*.flatpak
+HOME=/tmp/fp-home build-aux/headless.sh flatpak run --env=GSETTINGS_BACKEND=memory \
+  --env=JEWELCASE_SILENT=1 --env=JEWELCASE_NO_KEYRING=1 --env=JEWELCASE_NO_BROWSER=1 \
+  --env=GDK_DEBUG=no-portals io.github.sobakah.Jewelcase
+```
+
 # Test Flatpak
 
 A Flatpak of the working tree, for trying Jewelcase the way it would run as a
-Flatpak (CONCEPT.md §13, phase 9). It isn't the release Flatpak yet.
+Flatpak (CONCEPT.md §13, phase 9).
 
 ## Build and run
 

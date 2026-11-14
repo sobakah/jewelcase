@@ -6,7 +6,7 @@ MOCK_CHROOT ?= fedora-45-x86_64
 VERSION  := $(shell sed -n "s/^  version: '\(.*\)',$$/\1/p" meson.build)
 NAME     := jewelcase
 
-.PHONY: all build run test lint fmt tarballs srpm rpm mock flatpak flatpak-bundle clean
+.PHONY: all build run test lint fmt tarballs srpm rpm mock flatpak flatpak-bundle flatpak-release clean
 
 all: build
 
@@ -78,6 +78,18 @@ flatpak:
 flatpak-bundle: flatpak
 	flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
 	    $(FLATPAK_DIR)/repo $(FLATPAK_DIR)/jewelcase-devel.flatpak io.github.sobakah.Jewelcase.Devel
+
+# The release Flatpak as one file, for image-based systems (README.md):
+# $(BUILDDIR)/flatpak-release/jewelcase-VERSION.flatpak. Built, not installed.
+FLATPAK_RELEASE_DIR := $(BUILDDIR)/flatpak-release
+flatpak-release:
+	mkdir -p $(FLATPAK_RELEASE_DIR)
+	$(FLATPAK_BUILDER) --user --force-clean \
+	    --install-deps-from=flathub \
+	    --state-dir=$(FLATPAK_RELEASE_DIR)/state --repo=$(FLATPAK_RELEASE_DIR)/repo \
+	    $(FLATPAK_RELEASE_DIR)/build build-aux/flatpak/io.github.sobakah.Jewelcase.yml
+	flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+	    $(FLATPAK_RELEASE_DIR)/repo $(FLATPAK_RELEASE_DIR)/$(NAME)-$(VERSION).flatpak io.github.sobakah.Jewelcase
 
 clean:
 	rm -rf $(BUILDDIR) target vendor $(RPMDIR)

@@ -8,8 +8,10 @@
 //!   else GitHub's API directly. The RPM is downloaded,
 //!   checked against the SHA-256 GitHub lists for it, and installed with
 //!   `pkexec dnf install` (GNOME asks for the password); then Jewelcase
-//!   offers to restart. Off in development builds and in a build with
-//!   `-Dupdate_check=false` (a Flatpak updates through its repository).
+//!   offers to restart. The release Flatpak, a bundle without a
+//!   repository to update from, only names the release and its `.flatpak`
+//!   file. Off in development builds and in a build with
+//!   `-Dupdate_check=false`.
 //! - **Soloist** (managed by soloistd): Spotify's build on its CDN has
 //!   another ETag than the one soloistd installed (`release.json`).
 //!   Updating runs `soloistd update` and restarts the service; Jewelcase
@@ -83,6 +85,8 @@ struct Release {
     notes: String,
     page: String,
     rpm: Option<Asset>,
+    /// The release's Flatpak bundle (its file name), for a Flatpak.
+    bundle: Option<String>,
     /// Asked through `gh` (also downloaded through it).
     via_gh: bool,
     repo: &'static str,
@@ -146,16 +150,17 @@ fn settings() -> gio::Settings {
     gio::Settings::new(config::APP_ID)
 }
 
-/// Whether this Jewelcase looks for its own updates: the RPM build (not a
-/// development build, not a Flatpak), installed by dnf.
+/// Whether this Jewelcase looks for its own updates: the RPM build
+/// installed by dnf, or the release Flatpak (not development builds).
 fn checks_itself() -> bool {
     if std::env::var_os("JEWELCASE_UPDATE_TEST").is_some() {
         return true;
     }
     config::update_check()
         && !config::is_development()
-        && std::env::current_exe().is_ok_and(|exe| exe == Path::new("/usr/bin/jewelcase"))
-        && rpm_version("jewelcase").is_some()
+        && (config::is_flatpak()
+            || std::env::current_exe().is_ok_and(|exe| exe == Path::new("/usr/bin/jewelcase"))
+                && rpm_version("jewelcase").is_some())
 }
 
 fn check(window: glib::WeakRef<JewelcaseWindow>) {
@@ -197,6 +202,9 @@ fn check(window: glib::WeakRef<JewelcaseWindow>) {
         let Some(window) = window.upgrade() else {
             return;
         };
+        for update in &found {
+            tracing::info!("{}", update.title());
+        }
         let skipped = settings().strv("skipped-updates");
         PENDING.with_borrow_mut(|pending| {
             *pending = found
@@ -250,7 +258,14 @@ pub fn show_dialog(window: &JewelcaseWindow) {
     let (body, install_label) = match &update {
         Update::Jewelcase(release) | Update::Soloistd(release) => {
             let mut body = notes_text(&release.notes);
-            if release.rpm.is_none() {
+            if let Some(bundle) = release.bundle.as_ref().filter(|_| release.rpm.is_none()) {
+                body.push_str("\n\n");
+                // Translators: {} is a file name like jewelcase-1.0.0.flatpak.
+                body.push_str(
+                    &gettext("Download {} from the release page and open it to install it over this version.")
+                        .replace("{}", bundle),
+                );
+            } else if release.rpm.is_none() {
                 body.push_str("\n\n");
                 body.push_str(&gettext(
                     "It can't be installed from here; the release page has it.",
@@ -551,7 +566,13 @@ fn newest_release(repo: &'static str, current: &str) -> Result<Option<Release>, 
         version,
         notes: r["body"].as_str().unwrap_or_default().to_owned(),
         page: r["html_url"].as_str().unwrap_or_default().to_owned(),
-        rpm: rpm_asset(r),
+        // A Flatpak can't install an RPM; it gets its bundle's name instead.
+        rpm: if config::is_flatpak() {
+            None
+        } else {
+            rpm_asset(r)
+        },
+        bundle: config::is_flatpak().then(|| bundle_asset(r)).flatten(),
         via_gh,
         repo,
     }))
@@ -608,6 +629,16 @@ fn rpm_asset(release: &Value) -> Option<Asset> {
             .and_then(|d| d.strip_prefix("sha256:"))
             .map(str::to_owned),
     })
+}
+
+/// The release's Flatpak bundle: the file name of its `.flatpak` asset.
+fn bundle_asset(release: &Value) -> Option<String> {
+    release["assets"]
+        .as_array()?
+        .iter()
+        .filter_map(|a| a["name"].as_str())
+        .find(|name| name.ends_with(".flatpak"))
+        .map(str::to_owned)
 }
 
 /// "fc45", from /etc/os-release.
@@ -819,6 +850,19 @@ mod tests {
             Some("2026-11-06T18:32:51Z")
         );
         assert_eq!(http_date_to_iso("garbage"), None);
+    }
+
+    #[test]
+    fn the_flatpak_bundle_of_a_release() {
+        let release = serde_json::json!({"assets": [
+            {"name": "jewelcase-1.0.0-1.fc45.x86_64.rpm"},
+            {"name": "jewelcase-1.0.0.flatpak"},
+        ]});
+        assert_eq!(
+            bundle_asset(&release).as_deref(),
+            Some("jewelcase-1.0.0.flatpak")
+        );
+        assert_eq!(bundle_asset(&serde_json::json!({"assets": []})), None);
     }
 
     #[test]

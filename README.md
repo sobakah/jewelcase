@@ -38,6 +38,20 @@ Jewelcase tells you when a new version is out and installs it for you (Preferenc
 
 Your library is kept in `~/.local/share/io.github.sobakah.Jewelcase/`, and cover thumbnails in `~/.cache/io.github.sobakah.Jewelcase/`.
 
+### Fedora Silverblue, Bluefin and other image-based systems
+
+These take Jewelcase as a Flatpak. Download `jewelcase-*.flatpak` from the [releases page](https://github.com/sobakah/jewelcase/releases) and install it; it fetches the GNOME runtime from Flathub:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./jewelcase-*.flatpak
+```
+
+- **Updates**: Jewelcase tells you when a new version is out; download its `.flatpak` file from the release page and install it the same way.
+- **Your library** is read from your music folder; the Flatpak keeps its own database, settings and Spotify login in `~/.var/app/io.github.sobakah.Jewelcase/`.
+- **lyrembed and cdport** work through their D-Bus services. Preferences → Integrations has the steps for these systems: lyrembed on the computer itself, cdport in a toolbox, where it can build cyanrip.
+- **Ear Tag** can't be started from the Flatpak; cdport's own tag editor can.
+
 ## Connecting Spotify
 
 You need Spotify Premium and a Spotify developer app of your own. Preferences → Spotify walks you through it:
@@ -61,7 +75,7 @@ Preferences → Integrations shows whether they're found and the steps to instal
 
 ## Limits
 
-- Fedora 45 only, as an RPM; English only so far.
+- An RPM for Fedora 45, and a Flatpak for image-based systems; English only so far.
 - No gapless playback or crossfade between a song from your files and one from Spotify.
 - The songs of Spotify playlists you follow but don't own can't be listed (Spotify doesn't allow it); they can be played through Soloist.
 - Spotify limits how often its artist pages can be read; Jewelcase keeps an artist's releases for a week and says when Spotify asks it to wait.

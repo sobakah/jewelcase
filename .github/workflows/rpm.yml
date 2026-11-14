@@ -1,12 +1,13 @@
-# Builds the Fedora RPM in a clean Fedora 45 container (CONCEPT.md §12).
+# Builds the Fedora RPM in a clean Fedora 45 container (CONCEPT.md §12),
+# and the release Flatpak as a bundle for image-based systems (README.md).
 #
 # - Pushing a version tag like 0.5.0 (no "v") builds it and puts the
-#   packages on a draft release (a pre-release for 0.x versions and tags
+#   packages and the bundle on a draft release (a pre-release for 0.x versions and tags
 #   with "-"); check it, then publish it on GitHub. Its notes are the
 #   version's section of CHANGELOG.md (`## [0.5.0] — date`).
 # - "Run workflow" in the Actions tab builds it as a test; tick "release"
 #   to also make a draft release for the version in meson.build.
-name: RPM
+name: RPM and Flatpak
 
 on:
   push:
@@ -66,9 +67,35 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
 
+  flatpak:
+    name: Build the Flatpak bundle
+    runs-on: ubuntu-latest
+    # flatpak-builder's sandbox (bubblewrap) needs a privileged container.
+    container:
+      image: registry.fedoraproject.org/fedora:45
+      options: --privileged
+    timeout-minutes: 120
+    steps:
+      - name: Install the tools
+        run: dnf -y install git make flatpak flatpak-builder
+
+      - uses: actions/checkout@v7
+
+      # The GNOME SDK and the Rust extension come from Flathub.
+      - name: Build
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          make flatpak-release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jewelcase-flatpak
+          path: _build/flatpak-release/*.flatpak
+          if-no-files-found: error
+
   release:
     name: Draft release
-    needs: rpm
+    needs: [rpm, flatpak]
     if: github.ref_type == 'tag' || inputs.release
     runs-on: ubuntu-latest
     steps:
@@ -82,6 +109,11 @@ jobs:
           name: jewelcase-${{ needs.rpm.outputs.version }}-rpms
           path: dist
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: jewelcase-flatpak
+          path: dist
+
       - name: Draft release with the packages
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,9 +123,9 @@ jobs:
           # 0.x versions and tags like 1.0.0-beta1 are pre-releases.
           prerelease=""
           case "$VERSION" in 0.*|*-*) prerelease="--prerelease" ;; esac
-          # The program and the source package; debuginfo stays in the
-          # workflow's artifact.
-          files=$(find dist -name '*.rpm' ! -name '*-debuginfo-*' ! -name '*-debugsource-*')
+          # The program, the source package and the Flatpak bundle;
+          # debuginfo stays in the workflow's artifact.
+          files=$(find dist \( -name '*.rpm' ! -name '*-debuginfo-*' ! -name '*-debugsource-*' \) -o -name '*.flatpak')
           # The version's section of CHANGELOG.md (from its heading
           # "## [X.Y.Z] — date" to the next "## " or the link list at the
           # end), or GitHub's own notes.

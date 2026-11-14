@@ -13,6 +13,10 @@ use crate::{config_path, expand_home, read_json};
 
 /// How to install it (pipx, from its repository).
 pub const INSTALL_COMMAND: &str = "pipx install git+https://github.com/sobakah/cdport.git";
+/// On an image-based system cdport goes into a toolbox, where it can build
+/// cyanrip (cdport's README); its D-Bus service, made there, enters it.
+pub const TOOLBOX_COMMAND: &str = "toolbox create cdport && toolbox enter cdport";
+pub const TOOLBOX_PACKAGES_COMMAND: &str = "sudo dnf install pipx systemd-udev";
 /// Lets the session bus start cdport when Jewelcase calls it.
 pub const SERVICE_ARG: &str = "--install-dbus-service";
 pub const SERVICE_COMMAND: &str = "cdport --install-dbus-service";

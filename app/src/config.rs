@@ -30,7 +30,7 @@ pub fn is_flatpak() -> bool {
 }
 
 /// Whether Jewelcase looks for its own new releases (Meson option
-/// `update_check`; a Flatpak updates through its repository).
+/// `update_check`; off in the test Flatpak).
 pub fn update_check() -> bool {
     from_env!("JEWELCASE_UPDATE_CHECK", "true") == "true"
 }
