@@ -34,6 +34,9 @@ finish-args:
   # run: Jewelcase starts it itself (own data folder and device name).
   - --filesystem=xdg-config/soloistd:ro
   - --filesystem=xdg-data/soloistd/bin:ro
+  # Preferences → App Icon: the chosen disc goes into the host's
+  # ~/.local/share/icons, which the dash reads before the exported icons.
+  - --filesystem=xdg-data/icons:create
   # Media keys and GNOME Shell's media controls.
   - --own-name=org.mpris.MediaPlayer2.Jewelcase.Devel
   # cdport (CD imports) and lyrembed (lyrics) through their D-Bus services

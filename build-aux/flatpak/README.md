@@ -34,6 +34,9 @@ Remove it with `flatpak uninstall --user io.github.sobakah.Jewelcase.Devel`
   `~/.var/app/io.github.sobakah.Jewelcase.Devel`); it scans the library anew.
 - **The music folder is read-only** (`--filesystem=xdg-music:ro`). Folders
   outside it would come through the folder chooser's portal (untested).
+- **The app icon's disc** (Preferences › Library › App Icon) is written to
+  the host's `~/.local/share/icons` (`--filesystem=xdg-data/icons:create`),
+  where the dash finds it before the Flatpak's own icon.
 - **Spotify logins** are kept through the secret portal; on desktops without
   one, in a file only the user can read (Preferences › Spotify says so).
 - **cdport and lyrembed** work through their D-Bus services on the host

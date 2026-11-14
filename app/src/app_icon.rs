@@ -8,7 +8,9 @@
 //! bundled as `jewelcase-icon-<name>` (data/resources/icons/scalable/apps),
 //! which also puts them in the icon theme for the picker's previews.
 //!
-//! A Flatpak can't reach the host's icons, so it has no picker.
+//! A Flatpak reaches the host's `~/.local/share/icons` only when allowed
+//! (`--filesystem=xdg-data/icons:create`, as the test Flatpak is); without
+//! it there's no picker.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -70,7 +72,24 @@ pub fn preview_name(icon: &str) -> String {
 
 /// Whether the picker is offered.
 pub fn available() -> bool {
-    !is_flatpak()
+    !is_flatpak() || icons_home().is_dir()
+}
+
+/// The host's data folder: in a Flatpak, `glib::user_data_dir()` is the
+/// sandbox's own (`~/.var/app/<app id>/data`), which the dash doesn't read.
+fn data_home() -> PathBuf {
+    if !is_flatpak() {
+        return glib::user_data_dir();
+    }
+    std::env::var_os("HOST_XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .unwrap_or_else(|| glib::home_dir().join(".local/share"))
+}
+
+/// `<data home>/icons`, where the icon goes.
+fn icons_home() -> PathBuf {
+    data_home().join("icons")
 }
 
 /// Installs the chosen disc now and whenever the setting changes.
@@ -101,7 +120,7 @@ fn apply(settings: &gio::Settings) {
             svg
         }
     });
-    let path = icon_path(&glib::user_data_dir(), APP_ID);
+    let path = icon_path(&data_home(), APP_ID);
     match install(&path, svg.as_deref()) {
         Ok(Change::Unchanged) => {}
         Ok(change) => tracing::info!("App icon {icon}: {change:?} {}", path.display()),
