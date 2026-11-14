@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.8.0" date="2026-11-14" type="development">
+      <description>
+        <ul>
+          <li>Choose the disc in the app icon's jewel case, in Preferences</li>
+          <li>A Flatpak for Fedora Silverblue, Bluefin and other image-based systems</li>
+          <li>Next on a Spotify song no longer skips the song after it as well</li>
+          <li>The mini player's visualizer sits in the middle of its space again</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-11-13" type="development">
       <description>
         <ul>

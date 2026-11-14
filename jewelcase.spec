@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.7.0
+Version:        0.8.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sat Nov 14 2026 sobakah - 0.8.0-1
+- Choose the app icon's disc in Preferences
+- A Flatpak bundle for image-based systems
+- Next on a Spotify song no longer skips the song after it
+- The mini player's visualizer is centred again
+
 * Fri Nov 13 2026 sobakah - 0.7.0-1
 - Spotify playlists can show only the songs in the library
 - Spotify songs no longer jump to the next one after a seek

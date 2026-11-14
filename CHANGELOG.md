@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-14
+
+The library database doesn't change; 0.7.0 still opens it.
+
 ### Added
 
 - **Choose the app icon's disc**: Preferences → Library → *App Icon* offers nine discs for the icon's jewel case, shown in the dash and the app grid within a few seconds.
@@ -149,7 +153,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.7.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/sobakah/jewelcase/releases/tag/0.8.0
 [0.7.0]: https://github.com/sobakah/jewelcase/releases/tag/0.7.0
 [0.6.1]: https://github.com/sobakah/jewelcase/releases/tag/0.6.1
 [0.6.0]: https://github.com/sobakah/jewelcase/releases/tag/0.6.0
