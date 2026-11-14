@@ -54,6 +54,10 @@ mod imp {
         #[template_child]
         pub style_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub app_icon_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
+        pub app_icon_box: TemplateChild<gtk::FlowBox>,
+        #[template_child]
         pub playlist_sort_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub spotify_playlist_sort_row: TemplateChild<adw::ComboRow>,
@@ -169,6 +173,7 @@ mod imp {
             ));
             bind_choice(&settings, "start-view", &self.start_view_row, &START_VIEWS);
             bind_choice(&settings, "style", &self.style_row, &crate::style::STYLES);
+            self.setup_app_icon(&settings);
             let sorts = &crate::widgets::DEFAULT_PLAYLIST_SORTS;
             bind_choice(&settings, "playlist-sort", &self.playlist_sort_row, sorts);
             bind_choice(
@@ -267,6 +272,70 @@ mod imp {
     }
 
     impl PreferencesDialog {
+        /// The app icon's disc: one preview per choice, the chosen one
+        /// selected.
+        fn setup_app_icon(&self, settings: &gio::Settings) {
+            if !crate::app_icon::available() {
+                self.app_icon_group.set_visible(false);
+                return;
+            }
+            let picker = &*self.app_icon_box;
+            for icon in crate::app_icon::ICONS {
+                let image = gtk::Image::builder()
+                    .icon_name(crate::app_icon::preview_name(icon))
+                    .pixel_size(64)
+                    .build();
+                image.add_css_class("icon-dropshadow");
+                let label = gtk::Label::builder()
+                    .label(crate::app_icon::title(icon))
+                    .wrap(true)
+                    .justify(gtk::Justification::Center)
+                    .build();
+                label.add_css_class("caption");
+                let content = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .spacing(6)
+                    .margin_top(6)
+                    .margin_bottom(6)
+                    .margin_start(6)
+                    .margin_end(6)
+                    .build();
+                content.append(&image);
+                content.append(&label);
+                let child = gtk::FlowBoxChild::builder().child(&content).build();
+                child.update_property(&[gtk::accessible::Property::Label(
+                    &crate::app_icon::title(icon),
+                )]);
+                picker.append(&child);
+            }
+            let select = glib::clone!(
+                #[weak]
+                picker,
+                move |settings: &gio::Settings| {
+                    let chosen = settings.string("app-icon");
+                    let index = crate::app_icon::ICONS
+                        .iter()
+                        .position(|icon| *icon == chosen)
+                        .unwrap_or(0);
+                    if let Some(child) = picker.child_at_index(index as i32) {
+                        picker.select_child(&child);
+                    }
+                }
+            );
+            select(settings);
+            settings.connect_changed(Some("app-icon"), move |settings, _| select(settings));
+            picker.connect_child_activated(glib::clone!(
+                #[weak]
+                settings,
+                move |_, child| {
+                    let index = child.index().max(0) as usize;
+                    if let Some(icon) = crate::app_icon::ICONS.get(index) {
+                        let _ = settings.set_string("app-icon", icon);
+                    }
+                }
+            ));
+        }
+
         /// Song analysis: on/off, progress, pause (§7).
         fn setup_analysis(&self, settings: &gio::Settings) {
             settings

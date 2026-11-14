@@ -93,6 +93,27 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    // The disc in the app icon's case (app_icon.rs); filled in code, hidden
+    // in a Flatpak.
+    Adw.PreferencesGroup app_icon_group {
+      title: _("App Icon");
+      description: _("The disc in Jewelcase’s jewel case, in the dash and the app grid");
+
+      Gtk.FlowBox app_icon_box {
+        selection-mode: single;
+        activate-on-single-click: true;
+        homogeneous: true;
+        min-children-per-line: 3;
+        max-children-per-line: 9;
+        column-spacing: 6;
+        row-spacing: 6;
+
+        accessibility {
+          labelled-by: app_icon_group;
+        }
+      }
+    }
+
     // The sort of playlists that have none of their own (CONCEPT.md
     // §4.1), in the order of playlist_panel.rs: DEFAULT_SORTS.
     Adw.PreferencesGroup {

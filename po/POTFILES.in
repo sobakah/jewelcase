@@ -10,6 +10,7 @@ data/resources/ui/playlist_panel.blp
 data/resources/ui/preferences_dialog.blp
 data/resources/ui/shortcuts_dialog.blp
 data/resources/ui/window.blp
+app/src/app_icon.rs
 app/src/application.rs
 app/src/format.rs
 app/src/library.rs

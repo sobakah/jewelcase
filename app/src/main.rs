@@ -1,4 +1,5 @@
 mod analyzer;
+mod app_icon;
 mod application;
 mod config;
 mod covers;

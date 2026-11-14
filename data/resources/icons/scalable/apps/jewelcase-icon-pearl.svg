@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Jewelcase with another disc (Preferences → App Icon): the case as in
+       io.github.sobakah.Jewelcase.svg; printed on the disc: a pink sky
+       fading into haze over lilac water; the hub is a pearl. -->
+  <g transform="translate(11 12) scale(1.128) translate(-10 -28)">
+    <clipPath id="disc"><circle cx="63" cy="71" r="36"/></clipPath>
+
+    <!-- the case: its edge, the frame, the tray, the hinge -->
+    <rect x="10" y="34" width="94" height="86" rx="8" fill="#77767b"/>
+    <rect x="10" y="28" width="94" height="86" rx="8" fill="#deddda"/>
+    <rect x="24" y="32" width="76" height="78" rx="4" fill="#3d3846"/>
+    <path d="M18 28h4v86h-4a8 8 0 0 1-8-8V36a8 8 0 0 1 8-8z" fill="#c0bfbc"/>
+    <path d="M16 40v8M16 94v8" stroke="#deddda" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- the disc and its print -->
+    <g clip-path="url(#disc)">
+      <rect width="128" height="128" fill="#f5a6cf"/>
+      <rect y="52" width="128" height="10" fill="#f8c4df"/>
+      <rect y="62" width="128" height="8" fill="#fadbe9"/>
+      <rect y="70" width="128" height="58" fill="#c391e6"/>
+      <path d="M0 78q8 -3 16 0t16 0t16 0t16 0t16 0t16 0t16 0t16 0V128H0z" fill="#a875dc"/>
+      <path d="M0 88q8 -3 16 0t16 0t16 0t16 0t16 0t16 0t16 0t16 0V128H0z" fill="#9a62d0"/>
+      <path d="M0 99q8 -3 16 0t16 0t16 0t16 0t16 0t16 0t16 0t16 0V128H0z" fill="#8a52c2"/>
+    </g>
+    <circle cx="63" cy="71" r="35.25" fill="none" stroke="#c0bfbc" stroke-width="1.5"/>
+    <circle cx="63" cy="71" r="11" fill="#ffffff"/>
+    <path d="M54 68A9.5 9.5 0 0 1 66 62" fill="none" stroke="#f5c2e7" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="63" cy="71" r="5.5" fill="#3d3846"/>
+
+    <!-- glare on the clear lid -->
+    <path d="M24 32h32l-32 42z" fill="#ffffff" opacity="0.3"/>
+    <path d="M64 32h10l-50 66v-13z" fill="#ffffff" opacity="0.22"/>
+  </g>
+</svg>

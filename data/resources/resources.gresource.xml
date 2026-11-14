@@ -16,6 +16,17 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-lyrics-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-smart-shuffle-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-spotify-symbolic.svg</file>
+    <!-- The app icon's discs (app_icon.rs), also its picker's previews; the
+         first is the installed icon, which a chosen disc covers. -->
+    <file compressed="true" alias="icons/scalable/apps/jewelcase-icon-water-slide.svg">../icons/hicolor/scalable/apps/io.github.sobakah.Jewelcase.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-two-slides.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-waves.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-ridges.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-flow.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-vaporwave.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-pearl.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-cross.svg</file>
+    <file compressed="true">icons/scalable/apps/jewelcase-icon-camouflage.svg</file>
     <!-- Every other symbolic icon Jewelcase uses, copied from adwaita-icon-theme
          51 (LGPL-3.0-only OR CC-BY-SA-3.0). The desktop's icon theme wins where
          it has the icon; these fill its gaps (KDE's Breeze lacks several), so

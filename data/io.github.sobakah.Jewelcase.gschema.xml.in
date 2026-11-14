@@ -43,6 +43,22 @@
       <summary>Light or dark style</summary>
       <description>“follow” follows the desktop; where it doesn't tell (some desktops), a GTK theme whose name says dark makes Jewelcase dark too.</description>
     </key>
+    <key name="app-icon" type="s">
+      <choices>
+        <choice value="water-slide"/>
+        <choice value="two-slides"/>
+        <choice value="waves"/>
+        <choice value="ridges"/>
+        <choice value="flow"/>
+        <choice value="vaporwave"/>
+        <choice value="pearl"/>
+        <choice value="cross"/>
+        <choice value="camouflage"/>
+      </choices>
+      <default>"water-slide"</default>
+      <summary>App icon</summary>
+      <description>The disc in the app icon’s jewel case. Any other than “water-slide” is installed as the app’s icon in ~/.local/share/icons, where the dash and the app grid find it first (not in a Flatpak).</description>
+    </key>
     <key name="tile-size" type="i">
       <range min="120" max="280"/>
       <default>160</default>

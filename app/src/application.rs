@@ -40,6 +40,7 @@ mod imp {
             app.setup_actions();
             app.setup_accels();
             crate::style::start();
+            crate::app_icon::start();
 
             let tools = Tools::new();
             tools.start();

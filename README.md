@@ -23,6 +23,7 @@ Jewelcase is built around your local library: covers to browse, albums and artis
 - **Queue and smart shuffle**: *Play Next*, *Add to Queue*, a reorderable queue that's kept between starts. Shuffle songs or albums, or mix in similar songs by genre, tempo, artist or sound.
 - **Playlists and search**: mosaic covers, drag and drop, search within a playlist, import and export (M3U8, XSPF). *Only Songs in My Library* in a playlist's sort menu hides the songs that would come from Spotify. One search (Ctrl+F) finds artists, albums, songs and playlists.
 - **Listening statistics**: your top artists, albums, songs and genres of the last week, month, year or all time. They stay on your computer; Preferences → Playback turns them off or deletes them.
+- **Your own icon**: Preferences → Library → *App Icon* puts another disc in the icon's jewel case. It's saved in `~/.local/share/icons`, which the dash and the app grid read first.
 - **Your files stay yours**: Jewelcase never writes to your music files. Separate programs do, and Jewelcase picks up their changes (see below).
 
 ## Install
