@@ -10,6 +10,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **Choose the app icon's disc**: Preferences → Library → *App Icon* offers nine discs for the icon's jewel case, shown in the dash and the app grid.
 
+### Fixed
+
+- Next on a Spotify song no longer skips the song after it as well.
+- The mini player's visualizer sits in the middle of the space between the song and the controls again, not to the right of it.
+
 ## [0.7.0] — 2026-11-13
 
 The library database changes (new releases can have several artists; playlists remember the

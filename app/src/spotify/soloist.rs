@@ -102,6 +102,8 @@ pub struct SoloistState {
     /// seamlessly and Next in the Spotify app skips to it.
     next_uri: Option<String>,
     queued_next: Option<String>,
+    /// When `queued_next` was handed over.
+    handed_at: Option<std::time::Instant>,
     /// Songs handed to Soloist's queue that Jewelcase didn't need after all
     /// (Next pressed, the queue changed): they're still in Soloist's queue
     /// (it can't be emptied), so when Soloist gets to one, Jewelcase's song
@@ -148,6 +150,35 @@ const PAUSE_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 /// Soloist moving on this soon after a seek, long before the end, was the
 /// seek going wrong (seen after Next), not the song ending.
 const SEEK_SLIP: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Jewelcase's next song goes into Soloist's queue only this far into the
+/// current one: a song Soloist played from its queue (Jewelcase's play of a
+/// song that waited there counts too) slips on to a song handed over right
+/// after its start (seen 50-95 ms after it, 2026-11-12 and 2026-11-14).
+const HAND_OVER_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
+/// The handed-over song starting this soon after it was handed over, long
+/// before the end, is such a slip, not the song ending or Next in the
+/// Spotify app.
+const HAND_OVER_SLIP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether Jewelcase's next song may be handed over, `played` after the
+/// current one started.
+fn may_hand_over(played: Option<std::time::Duration>) -> bool {
+    played.is_some_and(|played| played >= HAND_OVER_AFTER)
+}
+
+/// Soloist moved on to the handed-over song (handed over at `handed_at`)
+/// with `left` ms of Jewelcase's song left: whether it slipped on.
+fn hand_over_slip(
+    handed_at: Option<std::time::Instant>,
+    left: Option<u64>,
+    now: std::time::Instant,
+) -> bool {
+    handed_at
+        .and_then(|at| now.checked_duration_since(at))
+        .is_some_and(|since| since < HAND_OVER_SLIP)
+        && left.is_some_and(|left| left > CHOSEN_ELSEWHERE_MS)
+}
 
 /// Soloist reports Jewelcase's song starting again with `left` ms of it
 /// left: a copy of it left in Soloist's queue plays only at its end;
@@ -468,7 +499,7 @@ impl Spotify {
                 options,
                 ..
             } => {
-                let left = self.ours_left();
+                let progress = self.ours_progress();
                 {
                     let mut stream = self.imp().stream.borrow_mut();
                     let state = &mut stream.soloist;
@@ -485,7 +516,7 @@ impl Spotify {
                     state.status = status;
                 }
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri, left);
+                    self.soloist_item(&item.uri, progress);
                 }
                 if let Some(status) = status {
                     self.soloist_status(status);
@@ -496,10 +527,10 @@ impl Spotify {
                 }
             }
             Event::TrackChanged(item) => {
-                let left = self.ours_left();
+                let progress = self.ours_progress();
                 self.imp().stream.borrow_mut().soloist.current = item.clone();
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri, left);
+                    self.soloist_item(&item.uri, progress);
                 }
                 self.receiver_check();
             }
@@ -676,7 +707,8 @@ impl Spotify {
     /// Soloist plays `uri`: Jewelcase's song started, or Soloist moved on
     /// (the song ended and it continued, or someone skipped in the app).
     /// How much of Jewelcase's song was left (ms), while it plays.
-    fn ours_left(&self) -> Option<u64> {
+    /// Where Jewelcase's song is, and how much of it is left (ms).
+    fn ours_progress(&self) -> Option<(u64, u64)> {
         let state = &self.imp().stream.borrow().soloist;
         let wanted = state.wanted.as_deref()?;
         if !state.started {
@@ -688,12 +720,13 @@ impl Spotify {
             .filter(|c| c.uri == wanted)
             .and_then(|c| c.duration_ms)?;
         let position = state.position?.now();
-        Some(duration.saturating_sub(position))
+        Some((position, duration.saturating_sub(position)))
     }
 
-    /// Soloist plays `uri`; `left`: how much of Jewelcase's song was left
-    /// just before.
-    fn soloist_item(&self, uri: &str, left: Option<u64>) {
+    /// Soloist plays `uri`; `progress`: where Jewelcase's song was just
+    /// before, and how much of it was left.
+    fn soloist_item(&self, uri: &str, progress: Option<(u64, u64)>) {
+        let left = progress.map(|(_, left)| left);
         let (wanted, started) = {
             let state = &self.imp().stream.borrow().soloist;
             (state.wanted.clone(), state.started)
@@ -737,7 +770,15 @@ impl Spotify {
                     state.next_uri.as_deref() == Some(uri),
                 )
             };
-            if chained && !expected {
+            let slipped = chained && {
+                let state = &self.imp().stream.borrow().soloist;
+                hand_over_slip(state.handed_at, left, std::time::Instant::now())
+            };
+            if let (true, Some((position, _))) = (slipped, progress) {
+                // Soloist slipped on to the song just handed over (the one
+                // Next skipped to was skipped too): Jewelcase's song goes on.
+                self.resume_after_slip(uri, position);
+            } else if chained && !expected {
                 // Handed over, but Jewelcase's queue changed meanwhile.
                 self.imp().stream.borrow_mut().soloist.queued_next = None;
                 self.soloist_ended("the handed-over song, but Jewelcase's queue changed");
@@ -797,6 +838,7 @@ impl Spotify {
             if state.queued_next.as_deref() == Some(uri) {
                 state.queued_next = None;
             }
+            state.handed_at = None;
             state.last_seek = None;
             state.started = false;
             state.end_generation += 1;
@@ -1009,12 +1051,15 @@ impl Spotify {
                 state.queued_next.is_none()
                     && state.stale_queue.is_empty()
                     && Some(next) != state.wanted.as_ref()
+                    && may_hand_over(state.started_at.map(|at| at.elapsed()))
             })
         };
         if let (Some(next), Some(soloist)) = (next, self.soloist()) {
             tracing::info!("Soloist: handing {next} to its queue");
             soloist.add_to_queue(&next);
-            self.imp().stream.borrow_mut().soloist.queued_next = Some(next);
+            let mut stream = self.imp().stream.borrow_mut();
+            stream.soloist.queued_next = Some(next);
+            stream.soloist.handed_at = Some(std::time::Instant::now());
         }
     }
 
@@ -1050,6 +1095,33 @@ impl Spotify {
             state.end_generation == generation && state.wanted.as_deref() == Some(wanted.as_str())
         };
         self.hand_over_next();
+        // Too early to hand the next song over: again when it's time.
+        let wait = {
+            let state = &self.imp().stream.borrow().soloist;
+            (state.next_uri.is_some() && state.queued_next.is_none())
+                .then(|| {
+                    state
+                        .started_at
+                        .map(|at| HAND_OVER_AFTER.saturating_sub(at.elapsed()))
+                })
+                .flatten()
+                .filter(|wait| !wait.is_zero())
+        };
+        if let Some(wait) = wait {
+            let still = still.clone();
+            glib::timeout_add_local_once(
+                wait,
+                glib::clone!(
+                    #[weak(rename_to = spotify)]
+                    self,
+                    move || {
+                        if still(&spotify) {
+                            spotify.schedule_end();
+                        }
+                    }
+                ),
+            );
+        }
         glib::timeout_add_local_once(
             std::time::Duration::from_millis(remaining.saturating_sub(DUCK_BEFORE_MS)),
             glib::clone!(
@@ -1593,6 +1665,34 @@ mod tests {
         // No seek, or nothing known about what was left.
         assert_eq!(seek_slip(None, Some(140_000), now), None);
         assert_eq!(seek_slip(seek, None, now), None);
+    }
+
+    /// The real log (2026-11-14, 01:01:57): Next to the song waiting in
+    /// Soloist's queue; the song after it was handed over as it started,
+    /// and Soloist moved on to that one 54 ms in.
+    #[test]
+    fn the_next_song_is_handed_over_only_a_while_in() {
+        let ms = std::time::Duration::from_millis;
+        assert!(!may_hand_over(None));
+        assert!(!may_hand_over(Some(ms(50))));
+        assert!(!may_hand_over(Some(ms(2_000))));
+        assert!(may_hand_over(Some(HAND_OVER_AFTER)));
+        assert!(may_hand_over(Some(ms(60_000))));
+    }
+
+    #[test]
+    fn moving_on_right_after_the_hand_over_is_a_slip() {
+        let now = std::time::Instant::now();
+        let ms = std::time::Duration::from_millis;
+        // 112 ms after the hand-over, 2:33 of the song left: a slip.
+        assert!(hand_over_slip(Some(now - ms(112)), Some(153_000), now));
+        // At the end the handed-over song really follows.
+        assert!(!hand_over_slip(Some(now - ms(112)), Some(300), now));
+        // A minute after the hand-over: Next in the Spotify app.
+        assert!(!hand_over_slip(Some(now - ms(60_000)), Some(90_000), now));
+        // Nothing handed over, or nothing known about what was left.
+        assert!(!hand_over_slip(None, Some(153_000), now));
+        assert!(!hand_over_slip(Some(now - ms(112)), None, now));
     }
 
     #[test]
