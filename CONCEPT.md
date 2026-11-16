@@ -523,6 +523,23 @@ Spotify's albums and artists are shown **apart from the library**, never mixed i
 - **Permissions**: `user-library-read` and `user-follow-read`. Logins from before ask to connect again: Spotify answers 403, and the shelves show "Connect Again".
 - **Saving and following**: a Spotify album's panel has a Save button (+, a check mark once saved) next to Shuffle; artist pages have Follow / Following next to their links, for Spotify artists and for library artists whose Spotify ID is known (the online lookup, or found by name while connected). Both use `PUT`/`DELETE /me/library?uris=spotify:album:…|spotify:artist:…` (the per-type endpoints are gone since February 2026; Spotify's reference lists albums but not artists, its migration guide shows artists too). The change shows at once (the database is updated, the shelves follow); a toast says so with Undo. Permissions `user-library-modify` and `user-follow-modify`; a login without them gets Spotify's 403 and a notice with Connect Again. Preferences → Spotify has Connect Again next to Disconnect (a new login while connected: playlists stay; cancelled, the old login stays in use; another account's login drops the old account's playlists like Disconnect).
 
+### 9.9 Other streaming services (looked at Nov 2026, not pursued)
+**Decision:** Spotify stays the only streaming service. Of the others, only **YouTube Music** would have been of use to the owner, and it has no official route (below). Nothing was tried in code; the facts about the services come from community and third-party sources, not their developer documentation.
+
+**What a second service would take.** Some of Jewelcase is already neutral: `stream_track` holds a URI, matching (ISRC, then title, artist and duration, §9.5) doesn't care where a song comes from, new releases come from Deezer, lyrics know nothing of Spotify. The rest is Spotify's alone: `playlist_item.spotify_uri`, about 54 checks for `spotify:` URIs, and login, sync, two-way editing, search sections, discographies, the device popover and Preferences (about 2,000 mentions in `app/`, 600 in `core/`). A second service needs, before its own work starts: an interface per service (search, albums, artists, playlists, login, a song to something playable); migrations from Spotify's columns to a service and URI; and one of the two kinds of playback Jewelcase already has — the audio in Jewelcase's own pipeline as with librespot (ReplayGain, crossfade, gapless work), or an outside player steered as with Soloist (they don't). That refactor is about a phase; each service is about another, comparable to phases 7 and 8 together.
+
+| Service | Official access for a Linux app | Playback | Verdict |
+|---|---|---|---|
+| **YouTube Music** | No API (YouTube's Data API v3 doesn't cover YouTube Music) | Only unofficial: ytmusicapi (search, library, playlists) and yt-dlp (streams into GStreamer). Breaks again and again: in 2026 proof-of-origin (PO) tokens became required for most clients, the web client moved to SABR streaming, Premium formats (itag 141) disappeared; projects such as Music Assistant need a PO-token helper kept up to date | Against the terms of use, constant upkeep, and many uploads have no ISRC to match by. Not pursued |
+| **TIDAL** | Official API (catalogue, playlists, collections); audio only through TIDAL's Player SDKs for Web, iOS and Android | Unofficial clients (python-tidal, behind mopidy-tidal) get FLAC streams for GStreamer | The most realistic second service, as an unofficial option like librespot. Only if the owner subscribes |
+| **Qobuz** | Partner-only: an app ID by email to Qobuz, not guaranteed; Qobuz Connect is closed to other apps | Unofficial tools take the web player's app ID, which changes with its releases | Only with a granted key |
+| **Apple Music** | MusicKit has no Linux version and needs a paid developer account | DRM (Widevine/FairPlay): Linux clients wrap the web player in Electron with Widevine, or decrypt the streams themselves | No: WebKitGTK has no Widevine; decrypting is circumventing DRM |
+| **Deezer** | The catalogue API stays open (new releases, portraits); new app registrations and full-track playback for third parties not available (not confirmed for 2026) | Only through tools that amount to piracy | No |
+| **Amazon Music** | Closed beta at most, no playback | — | No |
+| **Navidrome/Gonic (Subsonic API), Jellyfin** | Open, stable APIs | Plain HTTP streams in GStreamer | The only clean option, but it plays music already owned, from a server; only of use for the library away from its folder |
+
+**Cheap step either way:** a migration that touches the playlist or stream tables names new columns for a service and URI, not for Spotify, so a later second service needs no large migrations.
+
 ---
 
 ## 10. Companion Tools: lyrembed, cdport & Ear Tag
@@ -765,6 +782,7 @@ Reviews of the whole program, every file read in full, left these:
 - **Q8** No app-only metadata overrides (except portraits and Spotify match choices). Tag and cover editing goes to Ear Tag (§10.3).
 - **Q9** Distribution: RPM on GitHub releases for now (§12); a Flatpak with updates is phase 9 (§13).
 - **Q15** Name: **Jewelcase**, app ID `io.github.sobakah.Jewelcase` (§12).
+- **Q16** Other streaming services: none for now; YouTube Music, the only relevant one, has no official route (§9.9).
 
 ### Still open
 None at the moment.
