@@ -3,6 +3,7 @@
 //! and the dragged row fades while it's carried (styles in style.css).
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
@@ -13,10 +14,17 @@ thread_local! {
     static DRAGGED_FROM: RefCell<glib::WeakRef<gtk::Widget>> = RefCell::default();
 }
 
+/// The list `row` is in: a list box, or a list view (whose rows' content
+/// carries the drag, see `attach_item`).
+fn list_of(row: &gtk::Widget) -> Option<gtk::Widget> {
+    row.ancestor(gtk::ListBox::static_type())
+        .or_else(|| row.ancestor(gtk::ListView::static_type()))
+}
+
 /// Whether the drag in progress came from `row`'s list.
-fn from_same_list(row: &gtk::ListBoxRow) -> bool {
+fn from_same_list(row: &gtk::Widget) -> bool {
     let from = DRAGGED_FROM.with_borrow(glib::WeakRef::upgrade);
-    from.is_some() && from == row.parent()
+    from.is_some() && from == list_of(row)
 }
 
 /// Makes `row` draggable and a drop target; `index()` is its place (asked
@@ -29,10 +37,39 @@ pub fn attach(
     index: impl Fn() -> u32 + 'static,
     on_move: impl Fn(u32, u32) + 'static,
 ) {
-    let on_move = std::rc::Rc::new(on_move);
-    let index: std::rc::Rc<dyn Fn() -> u32> = std::rc::Rc::new(index);
+    let on_move = Rc::new(on_move);
+    let index: Rc<dyn Fn() -> u32> = Rc::new(index);
     keyboard(row, index.clone(), on_move.clone());
-    let on_move = move |from, to| on_move(from, to);
+    let last = row.downgrade();
+    drag_and_drop(
+        row.upcast_ref(),
+        index,
+        Rc::new(move || {
+            last.upgrade()
+                .is_some_and(|row| row.next_sibling().is_none())
+        }),
+        on_move,
+    );
+}
+
+/// `attach` for a row of a list view: `item` is the row's content (the
+/// list view's own row widgets are reused for other items). `is_last()`:
+/// it's the list's last row. For the keyboard, see `attach_list_keys`.
+pub fn attach_item(
+    item: &gtk::Widget,
+    index: impl Fn() -> u32 + 'static,
+    is_last: impl Fn() -> bool + 'static,
+    on_move: impl Fn(u32, u32) + 'static,
+) {
+    drag_and_drop(item, Rc::new(index), Rc::new(is_last), Rc::new(on_move));
+}
+
+fn drag_and_drop(
+    row: &gtk::Widget,
+    index: Rc<dyn Fn() -> u32>,
+    is_last: Rc<dyn Fn() -> bool>,
+    on_move: Rc<dyn Fn(u32, u32)>,
+) {
     let drag = gtk::DragSource::builder()
         .actions(gdk::DragAction::MOVE)
         .build();
@@ -47,7 +84,7 @@ pub fn attach(
             let paintable = gtk::WidgetPaintable::new(Some(&row));
             source.set_icon(Some(&paintable), 24, 24);
             row.add_css_class("dragging");
-            let list = row.parent();
+            let list = list_of(&row);
             DRAGGED_FROM.with_borrow_mut(|from| from.set(list.as_ref()));
         }
     ));
@@ -66,9 +103,9 @@ pub fn attach(
     // The gap opens above the row under the pointer; only the last row
     // also offers "after it", in its lower quarter. One direction per row
     // keeps rows from flipping back and forth as the pointer moves.
-    let after = |row: &gtk::ListBoxRow, y: f64| {
-        row.next_sibling().is_none() && y > f64::from(row.height()) * 0.75
-    };
+    let after = move |row: &gtk::Widget, y: f64| is_last() && y > f64::from(row.height()) * 0.75;
+    let after = Rc::new(after);
+    let gap_after = after.clone();
     let update_gap = glib::clone!(
         #[weak]
         row,
@@ -78,7 +115,7 @@ pub fn attach(
             if !from_same_list(&row) {
                 return gdk::DragAction::empty();
             }
-            set_gap(&row, Some(!after(&row, y)));
+            set_gap(&row, Some(!gap_after(&row, y)));
             gdk::DragAction::MOVE
         }
     );
@@ -119,7 +156,7 @@ pub fn attach(
 }
 
 /// Opens a gap above (`Some(true)`) or below the row, or closes it.
-fn set_gap(row: &gtk::ListBoxRow, gap: Option<bool>) {
+fn set_gap(row: &gtk::Widget, gap: Option<bool>) {
     row.remove_css_class("drop-before");
     row.remove_css_class("drop-after");
     match gap {
@@ -246,6 +283,40 @@ fn keyboard(
         }
     ));
     row.add_controller(keys);
+}
+
+/// Alt+Up/Down in a list view, whose focus is on its own row widgets:
+/// `focused()` gives the focused row's index and the number of rows (or
+/// `None`: not a row that moves); `focus(index)` focuses a row again once
+/// the list has changed.
+pub fn attach_list_keys(
+    list: &gtk::ListView,
+    focused: impl Fn() -> Option<(u32, u32)> + 'static,
+    on_move: impl Fn(u32, u32) + 'static,
+    focus: impl Fn(u32) + 'static,
+) {
+    let focus = Rc::new(focus);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        if !modifiers.contains(gdk::ModifierType::ALT_MASK)
+            || !matches!(key, gdk::Key::Up | gdk::Key::Down)
+        {
+            return glib::Propagation::Proceed;
+        }
+        let Some((index, count)) = focused() else {
+            return glib::Propagation::Proceed;
+        };
+        let to = match key {
+            gdk::Key::Up if index > 0 => index - 1,
+            gdk::Key::Down if index + 1 < count => index + 1,
+            _ => return glib::Propagation::Stop,
+        };
+        on_move(index, to);
+        let focus = focus.clone();
+        glib::idle_add_local_once(move || focus(to));
+        glib::Propagation::Stop
+    });
+    list.add_controller(keys);
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ mod app_icon;
 mod application;
 mod config;
 mod covers;
+mod diff;
 mod format;
 mod frame_stats;
 mod icons;

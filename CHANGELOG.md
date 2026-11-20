@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Large playlists stay smooth**: scrolling through a playlist of thousands of songs no longer stutters, it opens at once instead of filling in over a few seconds, and adding, removing, moving or searching songs in it no longer makes the window hang.
+- Changing one playlist, or syncing with Spotify, no longer rebuilds the tiles of all the others.
+
 ## [0.8.0] — 2026-11-14
 
 The library database doesn't change; 0.7.0 still opens it.

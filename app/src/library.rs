@@ -1039,6 +1039,12 @@ impl Library {
         };
         let covers = config::cover_cache();
         let mut missing_mosaics = Vec::new();
+        let store = self.playlists();
+        let old: Vec<PlaylistObject> = (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
+            .collect();
+        let mut unchanged: std::collections::HashMap<i64, PlaylistObject> =
+            old.iter().map(|p| (p.id(), p.clone())).collect();
         let objects: Vec<PlaylistObject> = playlists
             .into_iter()
             .map(|playlist| {
@@ -1064,11 +1070,17 @@ impl Library {
                         }
                     }
                 });
-                PlaylistObject::new(playlist, cover)
+                // Unchanged: the same object, so its tile stays.
+                match unchanged.remove(&playlist.id) {
+                    Some(kept) if *kept.playlist() == playlist && kept.cover_key() == cover => kept,
+                    _ => PlaylistObject::new(playlist, cover),
+                }
             })
             .collect();
-        let store = self.playlists();
-        store.splice(0, store.n_items(), &objects);
+        // Only the playlists that changed get new tiles (a sync reloads
+        // them often).
+        let (start, removed, added) = crate::diff::changed_range(&old, &objects, |a, b| a == b);
+        store.splice(start as u32, removed as u32, &objects[start..start + added]);
         self.emit_by_name::<()>("playlists-changed", &[]);
 
         if !missing_mosaics.is_empty() {

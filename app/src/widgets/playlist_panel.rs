@@ -1,6 +1,6 @@
 //! A playlist in the side panel (CONCEPT.md §4.1, §9.5).
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::sync::OnceLock;
 
 use adw::prelude::*;
@@ -11,7 +11,7 @@ use gtk::{gio, glib};
 use jewelcase_core::db::PlaylistItem;
 
 use super::playlist_picker::ask_name;
-use super::{CoverBackdrop, CoverImage};
+use super::{CoverBackdrop, CoverImage, ListCard};
 use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 use crate::format;
@@ -92,8 +92,23 @@ mod imp {
         pub hidden: TemplateChild<adw::StatusPage>,
         #[template_child]
         pub empty: TemplateChild<adw::StatusPage>,
+        /// The songs, below `header` (their first row).
         #[template_child]
-        pub items: TemplateChild<gtk::ListBox>,
+        pub items: TemplateChild<gtk::ListView>,
+        #[template_child]
+        pub header: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub scroller: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
+        pub list_card: TemplateChild<ListCard>,
+        /// The songs shown (`Song`s), in order; `filtered` to the search.
+        pub songs: OnceCell<gio::ListStore>,
+        pub filtered: OnceCell<gtk::FilterListModel>,
+        /// The list items showing rows now (restyled when others come and
+        /// go, see `restyle_rows`).
+        pub bound: RefCell<Vec<glib::WeakRef<gtk::ListItem>>>,
+        /// The list item showing `header`.
+        pub header_item: glib::WeakRef<gtk::ListItem>,
         #[template_child]
         pub arrange_banner: TemplateChild<adw::Banner>,
         /// A Spotify playlist's songs can be dragged (see `arrange`).
@@ -105,9 +120,6 @@ mod imp {
         pub entries: RefCell<Vec<PlaylistItem>>,
         /// Each entry's text for the search, lowercase (`search_text`).
         pub search_texts: RefCell<Vec<String>>,
-        /// Rows are built a batch per idle moment (playlists can have
-        /// thousands of songs); a newer refresh stops an older fill.
-        pub fill_generation: std::cell::Cell<u64>,
         /// The playlist the rows are of (`playlist` is already the next
         /// one when another opens).
         pub shown: std::cell::Cell<Option<i64>>,
@@ -137,6 +149,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             CoverImage::ensure_type();
+            ListCard::ensure_type();
             CoverBackdrop::ensure_type();
             klass.bind_template();
             klass.install_action("playlist.close", None, |panel, _, _| {
@@ -238,11 +251,7 @@ mod imp {
             self.parent_constructed();
             self.backdrop.follow(&self.cover);
             let obj = self.obj();
-            self.items.connect_row_activated(glib::clone!(
-                #[weak]
-                obj,
-                move |_, row| obj.activate_entry(row.index() as usize)
-            ));
+            obj.setup_list();
             // Renaming by clicking the name.
             let click = gtk::GestureClick::new();
             click.connect_released(glib::clone!(
@@ -296,10 +305,6 @@ mod imp {
                 obj,
                 move |_| obj.search_changed()
             ));
-            let panel = obj.downgrade();
-            self.items.set_filter_func(move |row| {
-                panel.upgrade().is_none_or(|panel| panel.row_matches(row))
-            });
             // Spotify can be searched only while connected.
             let spotify = JewelcaseApplication::get().spotify();
             let status = spotify.connect_status_notify(glib::clone!(
@@ -377,6 +382,281 @@ impl PlaylistPanel {
             .map(PlaylistObject::id)
     }
 
+    /// The songs' list: the top of the panel as its first row, then the
+    /// songs that match the search, each a row built when it's on screen.
+    fn setup_list(&self) {
+        let imp = self.imp();
+        let songs = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let panel = self.downgrade();
+        let filter = gtk::CustomFilter::new(move |item| {
+            let Some(panel) = panel.upgrade() else {
+                return true;
+            };
+            let words = panel.imp().filter.borrow();
+            words.is_empty()
+                || item
+                    .downcast_ref::<glib::BoxedAnyObject>()
+                    .is_none_or(|song| text_matches(&song.borrow::<Song>().text, &words))
+        });
+        let filtered = gtk::FilterListModel::new(Some(songs.clone()), Some(filter));
+        let top = gio::ListStore::new::<gtk::StringObject>();
+        top.append(&gtk::StringObject::new("header"));
+        let parts = gio::ListStore::new::<gio::ListModel>();
+        parts.append(&top);
+        parts.append(&filtered);
+        let model = gtk::NoSelection::new(Some(gtk::FlattenListModel::new(Some(parts))));
+        let _ = imp.songs.set(songs);
+        let _ = imp.filtered.set(filtered);
+
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, item| {
+                let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                    return;
+                };
+                // A row that moved (others came or went before it) may be
+                // the first or last now.
+                item.connect_position_notify(glib::clone!(
+                    #[weak]
+                    panel,
+                    move |item| panel.restyle_row(item)
+                ));
+            }
+        ));
+        factory.connect_bind(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, item| {
+                if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+                    panel.bind_item(item);
+                }
+            }
+        ));
+        factory.connect_unbind(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, item| {
+                if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+                    panel.unbind_item(item);
+                }
+            }
+        ));
+        imp.items.set_factory(Some(&factory));
+        imp.items.set_model(Some(&model));
+        // After the list view has taken the change in.
+        model.connect_items_changed(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, _, _, _| panel.restyle_rows()
+        ));
+        // Like a list box's rows: a click plays.
+        imp.items.set_single_click_activate(true);
+        imp.items.connect_activate(glib::clone!(
+            #[weak(rename_to = panel)]
+            self,
+            move |_, position| {
+                if let Some(index) = panel.entry_index_at(position) {
+                    panel.activate_entry(index);
+                }
+            }
+        ));
+        imp.list_card.follow(&*imp.items, &imp.scroller);
+        super::reorder::attach_list_keys(
+            &imp.items,
+            glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                #[upgrade_or]
+                None,
+                move || panel.focused_entry()
+            ),
+            glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                move |from, to| panel.move_entry(from, to)
+            ),
+            glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                move |index| panel.focus_entry(index as usize)
+            ),
+        );
+    }
+
+    /// Fills a list item: the top of the panel, or a song's row.
+    fn bind_item(&self, item: &gtk::ListItem) {
+        let imp = self.imp();
+        let Some(object) = item.item() else { return };
+        match object.downcast::<glib::BoxedAnyObject>() {
+            Ok(song) => {
+                let Some(playlist) = imp.playlist.borrow().clone() else {
+                    return;
+                };
+                let (row, activatable) = self.row(&playlist, &song.borrow::<Song>().entry, item);
+                item.set_child(Some(&row));
+                item.set_activatable(activatable);
+                item.set_focusable(true);
+            }
+            Err(_) => {
+                // Only one list item at a time can hold it.
+                if let Some(old) = imp.header_item.upgrade()
+                    && old != *item
+                {
+                    old.set_child(None::<&gtk::Widget>);
+                }
+                item.set_child(Some(&*imp.header));
+                item.set_activatable(false);
+                item.set_focusable(false);
+                imp.header_item.set(Some(item));
+            }
+        }
+        item.set_selectable(false);
+        let mut bound = imp.bound.borrow_mut();
+        bound.retain(|b| b.upgrade().is_some_and(|b| b != *item));
+        bound.push(item.downgrade());
+        drop(bound);
+        self.restyle_row(item);
+    }
+
+    fn unbind_item(&self, item: &gtk::ListItem) {
+        let imp = self.imp();
+        if let Some(row) = item.child() {
+            imp.list_card.set_row(&row, false, false);
+        }
+        // The song's row goes; the top stays for its next list item.
+        item.set_child(None::<&gtk::Widget>);
+        if imp.header_item.upgrade().as_ref() == Some(item) {
+            imp.header_item.set(None);
+        }
+        imp.bound
+            .borrow_mut()
+            .retain(|b| b.upgrade().is_some_and(|b| b != *item));
+    }
+
+    /// Every row's look (after the list changed: the last one may be
+    /// another now), and whether the card shows.
+    fn restyle_rows(&self) {
+        let imp = self.imp();
+        let count = imp.items.model().map_or(0, |m| m.n_items());
+        imp.list_card.set_shown(count > 1);
+        // Not borrowed while GTK runs: letting go of a row it has dropped
+        // unbinds that row's item, here.
+        let bound: Vec<gtk::ListItem> = imp
+            .bound
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .collect();
+        for item in bound {
+            self.restyle_row(&item);
+        }
+    }
+
+    /// The rows of the first and last songs have the boxed list's rounded
+    /// corners (and the last no line below), and the card reaches from
+    /// one to the other.
+    fn restyle_row(&self, item: &gtk::ListItem) {
+        let imp = self.imp();
+        // The row's content, not the list view's own row widget: that one
+        // may not be in the list yet while an item is bound, and holding
+        // it then would end it.
+        let Some(row) = item.child() else { return };
+        let count = imp.items.model().map_or(0, |m| m.n_items());
+        let song = imp.header_item.upgrade().as_ref() != Some(item);
+        let position = item.position();
+        let is_first = song && position == 1;
+        let is_last = song && position + 1 == count;
+        for (class, on) in [("first", is_first), ("last", is_last)] {
+            if on {
+                row.add_css_class(class);
+            } else {
+                row.remove_css_class(class);
+            }
+        }
+        imp.list_card.set_row(&row, is_first, is_last);
+    }
+
+    /// The entry (index in `entries`) of the list's row at `position`.
+    fn entry_index_at(&self, position: u32) -> Option<usize> {
+        let imp = self.imp();
+        let song = imp
+            .items
+            .model()?
+            .item(position)
+            .and_downcast::<glib::BoxedAnyObject>()?;
+        let id = song.borrow::<Song>().entry.id;
+        imp.entries.borrow().iter().position(|e| e.id == id)
+    }
+
+    /// The songs can be dragged into another order now.
+    fn reorderable(&self) -> bool {
+        let imp = self.imp();
+        let Some(playlist) = imp.playlist.borrow().clone() else {
+            return false;
+        };
+        let info = playlist.playlist();
+        // Spotify playlists only after choosing "Change Order on Spotify".
+        // Sorted, the order can't be changed by dragging.
+        // Not while only the library's songs show: a row's place isn't the
+        // song's place in the playlist then.
+        info.editable
+            && (info.spotify_id.is_none() || imp.arranging.get())
+            && self.in_own_order()
+            && !imp.library_only.get()
+    }
+
+    /// The focused song (Alt+Up/Down), if it can move: its index and the
+    /// number of songs.
+    fn focused_entry(&self) -> Option<(u32, u32)> {
+        let imp = self.imp();
+        if !self.reorderable() {
+            return None;
+        }
+        let focused = imp.items.focus_child()?;
+        let bound: Vec<gtk::ListItem> = imp
+            .bound
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .collect();
+        let item = bound
+            .into_iter()
+            .find(|item| item.child().is_some() && item.child() == focused.first_child())?;
+        let index = self.entry_index_at(item.position())?;
+        Some((index as u32, imp.entries.borrow().len() as u32))
+    }
+
+    fn move_entry(&self, from: u32, to: u32) {
+        if let Some(id) = self.playlist_id() {
+            JewelcaseApplication::get()
+                .library()
+                .move_playlist_item(id, from, to);
+        }
+    }
+
+    /// Focuses the row of the entry at `index` (after it moved).
+    fn focus_entry(&self, index: usize) {
+        let imp = self.imp();
+        let Some(id) = imp.entries.borrow().get(index).map(|e| e.id) else {
+            return;
+        };
+        let Some(model) = imp.items.model() else {
+            return;
+        };
+        let position = (1..model.n_items()).find(|&position| {
+            model
+                .item(position)
+                .and_downcast::<glib::BoxedAnyObject>()
+                .is_some_and(|song| song.borrow::<Song>().entry.id == id)
+        });
+        if let Some(position) = position {
+            imp.items
+                .scroll_to(position, gtk::ListScrollFlags::FOCUS, None);
+        }
+    }
+
     pub fn set_playlist(&self, playlist: &PlaylistObject) {
         let imp = self.imp();
         let changed = self.playlist_id() != Some(playlist.id());
@@ -404,7 +684,12 @@ impl PlaylistPanel {
                 .refresh_playlist(playlist.id());
         }
         if changed && imp.add_toggle.is_active() {
-            imp.search.grab_focus();
+            // Once the list has its top row again (it may have been
+            // scrolled away, and isn't built then).
+            let search = imp.search.get();
+            glib::idle_add_local_once(move || {
+                search.grab_focus();
+            });
         }
     }
 
@@ -516,34 +801,40 @@ impl PlaylistPanel {
             .collect();
         if *imp.filter.borrow() != words {
             imp.filter.replace(words);
-            imp.items.invalidate_filter();
+            if let Some(filter) = imp.filtered.get().and_then(gtk::FilterListModel::filter) {
+                filter.changed(gtk::FilterChange::Different);
+            }
         }
         self.update_search_status();
     }
 
-    fn row_matches(&self, row: &gtk::ListBoxRow) -> bool {
+    /// The playlist's entries, with their search texts, and their rows:
+    /// all of them made anew (`all`), or only those of the entries that
+    /// changed (the others, and the scroll position, stay).
+    fn show_songs(&self, entries: Vec<PlaylistItem>, all: bool) {
         let imp = self.imp();
-        let words = imp.filter.borrow();
-        if words.is_empty() {
-            return true;
-        }
-        let texts = imp.search_texts.borrow();
-        let Some(text) = usize::try_from(row.index())
-            .ok()
-            .and_then(|index| texts.get(index))
-        else {
-            return true;
+        let texts: Vec<String> = entries.iter().map(search_text).collect();
+        let songs = imp.songs.get().expect("set in setup_list");
+        let (start, removed, added) = if all {
+            (0, songs.n_items() as usize, entries.len())
+        } else {
+            crate::diff::changed_range(&imp.entries.borrow(), &entries, same_but_place)
         };
-        text_matches(text, &words)
-    }
-
-    /// The playlist's entries, with their search texts; returns the old
-    /// entries.
-    fn set_entries(&self, entries: Vec<PlaylistItem>) -> Vec<PlaylistItem> {
-        let imp = self.imp();
-        imp.search_texts
-            .replace(entries.iter().map(search_text).collect());
-        imp.entries.replace(entries)
+        let made: Vec<glib::Object> = entries[start..start + added]
+            .iter()
+            .zip(&texts[start..start + added])
+            .map(|(entry, text)| {
+                let song = Song {
+                    entry: entry.clone(),
+                    text: text.clone(),
+                };
+                glib::BoxedAnyObject::new(song).upcast()
+            })
+            .collect();
+        imp.entries.replace(entries);
+        imp.search_texts.replace(texts);
+        songs.splice(start as u32, removed as u32, &made);
+        tracing::debug!("Playlist rows: {added} made, {removed} gone");
     }
 
     /// While searching the playlist: how many songs match.
@@ -964,125 +1255,50 @@ impl PlaylistPanel {
                 "None of this playlist’s songs play from your library. “Only Songs in My Library” in the sort menu shows them all again.",
             )));
         }
-        imp.items.set_visible(!entries.is_empty());
         // Unchanged (another playlist changed, a sync): keep the rows.
         let rebuild = imp.rebuild.take() || kind_changed;
-        let same = !sort_changed
-            && !rebuild
-            && *imp.entries.borrow() == entries
-            && imp.items.first_child().is_some();
-        if same {
-            return;
-        }
-        // The same playlist changed (a song added, removed or moved): only
-        // those rows are made, the others stay (and so does the scroll
-        // position). Not while the rows are still being filled in.
-        let filled = imp
-            .items
-            .row_at_index(imp.entries.borrow().len() as i32 - 1)
-            .is_some();
         let linked = info.spotify_id.is_some();
-        if same_playlist && !sort_changed && !rebuild && filled && !entries.is_empty() {
-            self.update_rows(&playlist, entries);
-            self.update_search_status();
-            if linked {
-                self.fetch_spotify_covers();
-            }
+        if !sort_changed && !rebuild && same_playlist && *imp.entries.borrow() == entries {
             return;
         }
-        // The same playlist changed (a song removed or moved): it stays
-        // where it was scrolled to, instead of jumping to the top.
-        let scroller = imp
-            .items
-            .ancestor(gtk::ScrolledWindow::static_type())
-            .and_downcast::<gtk::ScrolledWindow>();
-        let keep_at = scroller
-            .as_ref()
-            .filter(|_| same_playlist)
-            .map(|s| s.vadjustment())
-            .map(|a| (a.value(), a.page_size()))
-            .filter(|(value, _)| *value > 0.0);
-        imp.items.remove_all();
-        imp.spotify_covers.borrow_mut().clear();
-        self.set_entries(entries.clone());
-        imp.shown.set(Some(id));
-        let generation = imp.fill_generation.get() + 1;
-        imp.fill_generation.set(generation);
-        // Enough rows at once to reach the old place (rows are about 50 px).
-        let first = keep_at.map_or(0, |(value, page)| ((value + page) / 40.0) as usize + 20);
-        self.fill_rows(playlist, entries, 0, generation, first);
+        if same_playlist && !sort_changed && !rebuild {
+            // The same playlist changed (a song added, removed or moved):
+            // only those rows are made, the others stay (and so does the
+            // scroll position).
+            self.show_songs(entries, false);
+        } else {
+            // Another playlist, order or kind of row: all rows anew. The
+            // same playlist stays where it was scrolled to.
+            let adjustment = imp.scroller.vadjustment();
+            let keep_at = Some(adjustment.value()).filter(|v| same_playlist && *v > 0.0);
+            imp.spotify_covers.borrow_mut().clear();
+            self.show_songs(entries, true);
+            imp.shown.set(Some(id));
+            match keep_at {
+                Some(value) => {
+                    glib::idle_add_local_once(move || {
+                        adjustment
+                            .set_value(value.min(adjustment.upper() - adjustment.page_size()));
+                    });
+                }
+                None => adjustment.set_value(0.0),
+            }
+        }
         self.update_search_status();
         // Also for entries a sync brought in after the playlist opened.
         if linked {
             self.fetch_spotify_covers();
         }
-        if let (Some((value, _)), Some(scroller)) = (keep_at, scroller) {
-            glib::idle_add_local_once(move || {
-                let adjustment = scroller.vadjustment();
-                adjustment.set_value(value.min(adjustment.upper() - adjustment.page_size()));
-            });
-        }
     }
 
-    /// Rows for `entries`, keeping the rows of entries that didn't change
-    /// (wherever they are now).
-    fn update_rows(&self, playlist: &PlaylistObject, entries: Vec<PlaylistItem>) {
-        let imp = self.imp();
-        let old = self.set_entries(entries.clone());
-        let mut kept: std::collections::HashMap<i64, (PlaylistItem, gtk::ListBoxRow)> =
-            std::collections::HashMap::new();
-        for (index, entry) in old.into_iter().enumerate() {
-            if let Some(row) = imp.items.row_at_index(index as i32) {
-                kept.insert(entry.id, (entry, row));
-            }
-        }
-        // Stop a fill still running (it can't be, see refresh; to be sure).
-        imp.fill_generation.set(imp.fill_generation.get() + 1);
-        imp.items.remove_all();
-        let mut made = 0;
-        for entry in &entries {
-            let row = match kept.remove(&entry.id) {
-                Some((old, row)) if same_but_place(&old, entry) => row,
-                _ => {
-                    made += 1;
-                    self.row(playlist, entry)
-                }
-            };
-            imp.items.append(&row);
-        }
-        tracing::debug!("Playlist rows: {made} made, {} kept", entries.len() - made);
-    }
-
-    /// Appends rows from `from`, a batch now and the rest in later idle
-    /// moments, so a big playlist doesn't freeze the window.
-    /// `at_least`: rows to add in the first batch (to reach a place).
-    fn fill_rows(
+    /// A song's row (the content of its list item); also whether a click
+    /// plays it.
+    fn row(
         &self,
-        playlist: PlaylistObject,
-        entries: Vec<PlaylistItem>,
-        from: usize,
-        generation: u64,
-        at_least: usize,
-    ) {
-        const BATCH: usize = 60;
-        let imp = self.imp();
-        if imp.fill_generation.get() != generation {
-            return;
-        }
-        let end = (from + BATCH.max(at_least)).min(entries.len());
-        for entry in &entries[from..end] {
-            imp.items.append(&self.row(&playlist, entry));
-        }
-        if end < entries.len() {
-            glib::idle_add_local_once(glib::clone!(
-                #[weak(rename_to = panel)]
-                self,
-                move || panel.fill_rows(playlist, entries, end, generation, 0)
-            ));
-        }
-    }
-
-    fn row(&self, playlist: &PlaylistObject, entry: &PlaylistItem) -> gtk::ListBoxRow {
+        playlist: &PlaylistObject,
+        entry: &PlaylistItem,
+        item: &gtk::ListItem,
+    ) -> (gtk::Widget, bool) {
         let info = playlist.playlist();
         let playlist_id = info.id;
         let editable = info.editable;
@@ -1097,12 +1313,11 @@ impl PlaylistPanel {
         if track.is_none()
             && let Some(url) = &entry.image_url
         {
-            self.imp()
-                .spotify_covers
-                .borrow_mut()
-                .entry(url.clone())
-                .or_default()
-                .push(cover.downgrade());
+            let mut covers = self.imp().spotify_covers.borrow_mut();
+            let covers = covers.entry(url.clone()).or_default();
+            // Rows are made again as they scroll by.
+            covers.retain(|cover| cover.upgrade().is_some());
+            covers.push(cover.downgrade());
         }
         cover.set_cover(
             track
@@ -1156,14 +1371,7 @@ impl PlaylistPanel {
             .margin_top(6)
             .margin_bottom(6)
             .build();
-        // Spotify playlists only after choosing "Change Order on Spotify".
-        // Sorted, the order can't be changed by dragging.
-        // Not while only the library's songs show: a row's place isn't the
-        // song's place in the playlist then.
-        let reorderable = editable
-            && (!linked || self.imp().arranging.get())
-            && self.in_own_order()
-            && !self.imp().library_only.get();
+        let reorderable = self.reorderable();
         if reorderable {
             line.append(
                 &gtk::Image::builder()
@@ -1251,17 +1459,15 @@ impl PlaylistPanel {
             line.append(&remove);
         }
 
-        let content = gtk::Box::builder()
+        let row = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
+            .css_classes(["track-row", "reorder-item"])
             .build();
-        content.append(&line);
+        row.append(&line);
         if let Some(question) = suggestion(playlist_id, entry, editable) {
-            content.append(&question);
+            row.append(&question);
         }
-        let row = gtk::ListBoxRow::builder()
-            .child(&content)
-            .css_classes(["track-row"])
-            .build();
+        let mut activatable = true;
         let remote = JewelcaseApplication::get().player().is_remote() && linked;
         let streamable = streamable(entry);
         if track.is_none() && !((remote || streamable) && entry.spotify_uri.is_some()) {
@@ -1269,22 +1475,40 @@ impl PlaylistPanel {
             // say how to play them when clicked.
             line.add_css_class("unavailable");
             if entry.spotify_uri.is_none() {
-                row.set_activatable(false);
+                activatable = false;
                 row.set_tooltip_text(Some(&gettext("This song isn't in your library")));
             }
         }
 
         // Drag and drop to reorder, animated.
         if reorderable {
-            let place = row.downgrade();
-            let index = move || place.upgrade().map_or(0, |row| row.index().max(0) as u32);
-            super::reorder::attach(&row, index, move |from, to| {
+            let place = item.downgrade();
+            let panel = self.downgrade();
+            let index = move || {
+                place
+                    .upgrade()
+                    .zip(panel.upgrade())
+                    .and_then(|(item, panel)| panel.entry_index_at(item.position()))
+                    .map_or(0, |index| index as u32)
+            };
+            let place = item.downgrade();
+            let panel = self.downgrade();
+            let is_last = move || {
+                place
+                    .upgrade()
+                    .zip(panel.upgrade())
+                    .is_some_and(|(item, panel)| {
+                        let count = panel.imp().items.model().map_or(0, |m| m.n_items());
+                        item.position() + 1 == count
+                    })
+            };
+            super::reorder::attach_item(row.upcast_ref(), index, is_last, move |from, to| {
                 JewelcaseApplication::get()
                     .library()
                     .move_playlist_item(playlist_id, from, to);
             });
         }
-        row
+        (row.upcast(), activatable)
     }
 
     /// A row was clicked: plays from it, or says how a Spotify-only song
@@ -1926,6 +2150,12 @@ fn sort_entries(entries: &mut [PlaylistItem], by: &str, reversed: bool) {
     }
 }
 
+/// A song's row in the list: its entry, and what the search looks in.
+struct Song {
+    entry: PlaylistItem,
+    text: String,
+}
+
 /// What the search looks in: the entry's title, artists and album,
 /// lowercase.
 fn search_text(entry: &PlaylistItem) -> String {
@@ -2039,10 +2269,35 @@ fn only_on_spotify_hint() -> String {
 
 /// The same entry, maybe at another place.
 fn same_but_place(old: &PlaylistItem, new: &PlaylistItem) -> bool {
-    PlaylistItem {
-        position: new.position,
-        ..old.clone()
-    } == *new
+    // Every field but the place (a new field won't compile until it's
+    // compared here); without a copy, it runs for every song.
+    let PlaylistItem {
+        id,
+        position: _,
+        track,
+        title,
+        artist,
+        album,
+        duration_ms,
+        match_state,
+        spotify_uri,
+        suggested_track,
+        suggested_spotify,
+        image_url,
+        added,
+    } = old;
+    *id == new.id
+        && *track == new.track
+        && *title == new.title
+        && *artist == new.artist
+        && *album == new.album
+        && *duration_ms == new.duration_ms
+        && *match_state == new.match_state
+        && *spotify_uri == new.spotify_uri
+        && *suggested_track == new.suggested_track
+        && *suggested_spotify == new.suggested_spotify
+        && *image_url == new.image_url
+        && *added == new.added
 }
 
 /// "Spotify playlist by Max · 2 changes waiting".
@@ -2182,15 +2437,28 @@ fn has_song(entry: &PlaylistItem) -> bool {
 /// The menu of an entry: the queue and playlists as for an album's songs,
 /// which version plays (Spotify entries), and where to find it.
 fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuButton {
-    let item = entry.id;
-    let actions = gio::SimpleActionGroup::new();
-    let menu = gio::Menu::new();
     let button = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
         .valign(gtk::Align::Center)
         .css_classes(["flat", "circular"])
         .build();
     super::set_accessible_label(&button, &gettext("More"));
+    // Made when it first opens: rows are made as they scroll by, and a
+    // menu costs more than the rest of its row.
+    let entry = entry.clone();
+    let track = track.cloned();
+    button.set_create_popup_func(move |button| {
+        if button.menu_model().is_none() {
+            fill_entry_menu(button, &entry, track.as_ref());
+        }
+    });
+    button
+}
+
+fn fill_entry_menu(button: &gtk::MenuButton, entry: &PlaylistItem, track: Option<&TrackObject>) {
+    let item = entry.id;
+    let actions = gio::SimpleActionGroup::new();
+    let menu = gio::Menu::new();
 
     if has_song(entry) {
         let queue = gio::Menu::new();
@@ -2323,7 +2591,6 @@ fn entry_menu(entry: &PlaylistItem, track: Option<&TrackObject>) -> gtk::MenuBut
     menu.append_section(None, &pages);
     button.set_menu_model(Some(&menu));
     button.insert_action_group("entry", Some(&actions));
-    button
 }
 
 /// Lets the user pick a library song (for a Spotify entry).

@@ -2,10 +2,10 @@
 //! the window's frame clock. Frames painted less than 100 ms apart count
 //! as one animation (one that goes on, like the visualizer, is logged
 //! every two seconds); when it ends, the log says how many frames it had,
-//! its frame rate, its longest frame, and how long painting took (layout,
-//! snapshot and handing the frame to the renderer). Logged as warnings, so release
-//! builds show them too (`journalctl --user -t jewelcase`, or the
-//! terminal).
+//! its frame rate, its longest frame, and how long painting took (animation
+//! ticks, style updates, layout, snapshot and handing the frame to the
+//! renderer). Logged as warnings, so release builds show them too
+//! (`journalctl --user -t jewelcase`, or the terminal).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -43,7 +43,10 @@ pub fn watch(window: &gtk::Window) {
         };
         let run: Rc<RefCell<Run>> = Rc::default();
         let started: Rc<RefCell<Option<Instant>>> = Rc::default();
-        clock.connect_layout({
+        // From before the update phase: GTK's own layout handler runs
+        // before any connected here, so starting at "layout" would leave
+        // out style updates and size allocation.
+        clock.connect_before_paint({
             let started = started.clone();
             move |_| {
                 started.borrow_mut().get_or_insert_with(Instant::now);

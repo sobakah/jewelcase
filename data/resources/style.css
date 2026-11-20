@@ -70,6 +70,10 @@
   margin-bottom: 100px;
 }
 
+.floating-player listview.playlist-songs {
+  padding-bottom: 124px;
+}
+
 .mini-player .mini-seek {
   padding-top: 4px;
   padding-bottom: 4px;
@@ -213,22 +217,80 @@
 
 /* Reordering (reorder.rs): rows make room where the dragged row would
    land, and the dragged row fades while it's carried. The room is padding,
-   inside the row, so the pointer stays over the same row while it opens. */
-.reorderable > row {
+   inside the row, so the pointer stays over the same row while it opens.
+   In a list view, the row's content carries the drag (.reorder-item). */
+.reorderable > row,
+.reorderable > row > .reorder-item {
   transition: padding 160ms cubic-bezier(0.25, 0.9, 0.3, 1),
               opacity 140ms ease-out;
 }
 
-.reorderable > row.drop-before {
+.reorderable > row.drop-before,
+.reorderable > row > .reorder-item.drop-before {
   padding-top: 44px;
 }
 
-.reorderable > row.drop-after {
+.reorderable > row.drop-after,
+.reorderable > row > .reorder-item.drop-after {
   padding-bottom: 44px;
 }
 
-.reorderable > row.dragging {
+.reorderable > row.dragging,
+.reorderable > row > .reorder-item.dragging {
   opacity: 0.35;
+}
+
+/* A playlist's songs (playlist_panel.rs): a list view that looks like a
+   boxed list. The top of the panel is its first row; the card behind the
+   songs is drawn by list_card.rs. The rows' content (.track-row) has the
+   lines between them, the rounded corners of the first and last, and the
+   tint while pointed at (the list view's own row widgets are shared by
+   all songs). */
+listview.playlist-songs {
+  background: none;
+  color: inherit;
+  padding-bottom: 24px;
+}
+
+listview.playlist-songs > row {
+  padding: 0;
+}
+
+listview.playlist-songs > row.activatable:hover,
+listview.playlist-songs > row.activatable:active {
+  background: none;
+}
+
+listview.playlist-songs > row > .track-row {
+  padding: 2px;
+  background-clip: padding-box;
+  color: var(--card-fg-color);
+  border-bottom: 1px solid var(--card-shade-color);
+}
+
+listview.playlist-songs > row.activatable:hover > .track-row {
+  background-color: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+listview.playlist-songs > row.activatable:active > .track-row {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+listview.playlist-songs > row > .track-row.first {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+listview.playlist-songs > row > .track-row.last {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  border-bottom-width: 0;
+}
+
+@media (prefers-contrast: more) {
+  listview.playlist-songs > row > .track-row {
+    border-bottom-color: color-mix(in srgb, currentColor var(--border-opacity), transparent);
+  }
 }
 
 /* Companion tool status (CONCEPT.md §10.0), styled like a banner. */
@@ -269,7 +331,8 @@
 }
 
 /* Playlist entries that can't play here (not in the library, §9.5). */
-.boxed-list > row .unavailable {
+.boxed-list > row .unavailable,
+.playlist-songs > row .unavailable {
   opacity: 0.6;
 }
 

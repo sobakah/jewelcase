@@ -345,6 +345,13 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   accounts (librespot issue #1649). `Cargo.lock` pins vergen 9.0.6 for librespot-core's build
   script.
 - Jewelcase only asks LRCLIB for lyrics of Spotify songs while the lyrics are on screen.
+- **A playlist's songs are a `GtkListView`, not a boxed `GtkListBox`**: a list box restyles all
+  its rows whenever the hovered row changes (3000 songs scrolled at 20–40 fps; split into
+  smaller list boxes too), and builds every row up front. The panel's top is the list's first
+  row, the boxed list's card is drawn behind the rows by `widgets/list_card.rs`, and the rows'
+  content carries the separators, corners and hover tint. In `bind`, never take the list
+  view's own row widget (`item.child().parent()`): it may not be in the list yet, and holding
+  it then ends it (GTK criticals, a double borrow).
 
 ## Open items
 
