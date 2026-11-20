@@ -176,9 +176,13 @@ fn attach_panel(
         grab,
         #[strong]
         wanted,
+        #[weak]
+        split,
         move |_, x, _| {
             grab.set(x);
             wanted.set(None);
+            // The content holds still until the drag ends (sectioned_grid.rs).
+            split.set_resizing(true);
         }
     ));
     // The pointer is measured in the panel view, which stays put. The
@@ -221,10 +225,13 @@ fn attach_panel(
     drag.connect_drag_end(glib::clone!(
         #[strong]
         settings,
+        #[weak]
+        split,
         move |_, _, _| {
             if let Some(width) = wanted.take() {
                 let _ = settings.set_int(setting, width);
             }
+            split.set_resizing(false);
         }
     ));
     handle.add_controller(drag);

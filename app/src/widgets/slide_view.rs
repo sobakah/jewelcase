@@ -43,6 +43,10 @@ mod imp {
         /// (else it's hidden, as libadwaita's are).
         #[property(get, set)]
         pub keep_open: Cell<bool>,
+        /// The panel's edge is being dragged: a grid in the content keeps
+        /// its layout until the drag ends (sectioned_grid.rs).
+        #[property(get, set)]
+        pub resizing: Cell<bool>,
         #[property(get, set = Self::set_min_sidebar_width, default = 320.0)]
         pub min_sidebar_width: Cell<f64>,
         #[property(get, set = Self::set_max_sidebar_width, default = 440.0)]
@@ -71,6 +75,7 @@ mod imp {
                 show_sidebar: Cell::new(false),
                 collapsed: Cell::new(false),
                 keep_open: Cell::new(false),
+                resizing: Cell::new(false),
                 min_sidebar_width: Cell::new(320.0),
                 max_sidebar_width: Cell::new(440.0),
                 sidebar_width_fraction: Cell::new(0.38),

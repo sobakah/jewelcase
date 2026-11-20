@@ -107,6 +107,15 @@ mod imp {
         /// Off screen since the last layout (another page was shown): the
         /// tiles weren't seen where they were, so they don't glide.
         pub hidden: Cell<bool>,
+        /// While a panel beside the grid is resized by hand, the width the
+        /// grid is laid out at: the one from before the drag. The tiles
+        /// hold still (the panel covers the grid's end, or an empty strip
+        /// shows there), and glide to their new places once, at the end:
+        /// a column change on the way reshuffled nearly every tile, again
+        /// and again as the hand moved.
+        pub held_width: Cell<Option<i32>>,
+        /// Following the panel view the grid is in.
+        pub watching_resize: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -208,6 +217,7 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            let width = self.held_width.get().unwrap_or(width);
             let available = width - 2 * PADDING;
             let tile_size = super::super::tile_size();
             let column = tile_size + self.tile_padding.get();
@@ -242,6 +252,11 @@ mod imp {
                     move || grid.keep_in_place(key, y)
                 ));
             }
+        }
+
+        fn map(&self) {
+            self.parent_map();
+            self.obj().watch_resizing();
         }
 
         fn unmap(&self) {
@@ -336,6 +351,32 @@ impl SectionedGrid {
     pub fn scroll_to_end(&self) {
         let adjustment = self.imp().scroller.vadjustment();
         adjustment.set_value(adjustment.upper());
+    }
+
+    /// Holds the layout while the panel view the grid is in is resized by
+    /// hand (`held_width`).
+    fn watch_resizing(&self) {
+        let imp = self.imp();
+        if imp.watching_resize.get() {
+            return;
+        }
+        let Some(view) = self
+            .ancestor(super::SlideView::static_type())
+            .and_downcast::<super::SlideView>()
+        else {
+            return;
+        };
+        imp.watching_resize.set(true);
+        view.connect_resizing_notify(glib::clone!(
+            #[weak(rename_to = grid)]
+            self,
+            move |view| {
+                let imp = grid.imp();
+                let held = (view.resizing() && grid.is_mapped()).then(|| imp.laid_width.get());
+                imp.held_width.set(held.filter(|w| *w > 0));
+                grid.queue_resize();
+            }
+        ));
     }
 
     /// The tiles built now, with where they're laid out.
