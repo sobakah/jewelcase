@@ -362,6 +362,15 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   two columns: with the current count as minimum, the page's minimum width followed its columns
   and an album stayed over the page. `ArtistPage::size_allocate` allocates its child itself
   (`adw::Bin`'s parent allocate doesn't: the page drew empty).
+- **Nothing may ask for more width than the window has**: `AdwApplicationWindow` with breakpoints
+  doesn't stop at its content's minimum, it clips the right side (header buttons, player, panels).
+  Widths that depend on the content (the header's view switcher: `FitBin`; the mini player's full
+  bar) adapt in their own layout, not by a breakpoint in sp. To check: measure the window's
+  content (`window.content().measure(Horizontal)`) against `window.width()` at several widths.
+- **`adw::Bin` subclasses with their own `measure`/`size_allocate`** must
+  `set_layout_manager(None)` in `constructed` and allocate the child themselves: with the bin's
+  layout manager, GTK calls neither (the mini player's measure was ignored; `parent_size_allocate`
+  left the artist page empty).
 - **A playlist's songs are a `GtkListView`, not a boxed `GtkListBox`**: a list box restyles all
   its rows whenever the hovered row changes (3000 songs scrolled at 20–40 fps; split into
   smaller list boxes too), and builds every row up front. The panel's top is the list's first

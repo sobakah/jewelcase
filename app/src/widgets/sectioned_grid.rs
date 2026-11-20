@@ -23,14 +23,24 @@ use crate::config::APP_ID;
 
 /// The grid's padding on each side (style.css: .album-grid, .artist-grid).
 const PADDING: i32 = 12;
-const MIN_COLUMNS: i32 = 2;
+/// One column on a window too narrow for two: the tiles keep their size,
+/// and none is cut off by the window's edge.
+const MIN_COLUMNS: i32 = 1;
+/// A panel beside the grid leaves it this many columns.
+const KEPT_COLUMNS: i32 = 2;
 const MAX_COLUMNS: i32 = 40;
 
-/// The narrowest a grid shows its least columns at, with covers
-/// `tile_size` wide and `tile_padding` around each (panel_resizer.rs:
-/// a panel beside the grid gets no wider than leaves this).
+/// The columns a grid `width` wide has room for.
+fn columns(width: i32, tile_size: i32, tile_padding: i32) -> u32 {
+    let column = (tile_size + tile_padding).max(1);
+    ((width - 2 * PADDING) / column).clamp(MIN_COLUMNS, MAX_COLUMNS) as u32
+}
+
+/// The width two columns of covers `tile_size` wide with `tile_padding`
+/// around each take (panel_resizer.rs: a panel beside the grid gets no
+/// wider than leaves this).
 pub fn min_width(tile_size: i32, tile_padding: i32) -> i32 {
-    MIN_COLUMNS * (tile_size + tile_padding) + 2 * PADDING
+    KEPT_COLUMNS * (tile_size + tile_padding) + 2 * PADDING
 }
 
 /// One line of the list.
@@ -224,10 +234,8 @@ mod imp {
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             let width = self.held_width.get().unwrap_or(width);
-            let available = width - 2 * PADDING;
             let tile_size = super::super::tile_size();
-            let column = tile_size + self.tile_padding.get();
-            let columns = (available / column.max(1)).clamp(MIN_COLUMNS, MAX_COLUMNS) as u32;
+            let columns = super::columns(width, tile_size, self.tile_padding.get());
             let old = self.columns.get();
             if columns != old {
                 // Before the rows are laid out anew: the tiles are still
@@ -1239,5 +1247,20 @@ impl GridRow {
         imp.header_content.replace(Some(content));
         imp.header_permission.replace(Some(permission));
         self.queue_resize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A grid too narrow for two columns of covers has one, so no tile is
+    /// cut off by the window's edge (360 px window, 160 px covers: 202 px
+    /// a column).
+    #[test]
+    fn a_narrow_grid_has_one_column() {
+        assert_eq!(columns(360, 160, 18), 1);
+        assert_eq!(columns(2 * 178 + 2 * PADDING, 160, 18), 2);
+        assert_eq!(columns(0, 160, 18), 1);
     }
 }

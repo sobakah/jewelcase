@@ -99,7 +99,9 @@ template $JewelcaseMiniPlayer: Adw.Bin {
       Gtk.Box {
         hexpand: true;
 
+        // Not in a compact bar: the controls need the room on a phone.
         $JewelcaseVisualizer {
+          visible: bind template.narrow inverted;
           slot: 7;
           fill: 0.6;
           min-bars: 4;
@@ -114,7 +116,7 @@ template $JewelcaseMiniPlayer: Adw.Bin {
         valign: center;
 
         Gtk.ToggleButton shuffle_button {
-          visible: bind template.compact inverted;
+          visible: bind template.narrow inverted;
           icon-name: "media-playlist-shuffle-symbolic";
           accessibility {
             label: _("Shuffle");
@@ -176,7 +178,7 @@ template $JewelcaseMiniPlayer: Adw.Bin {
         }
 
         Gtk.Button repeat_button {
-          visible: bind template.compact inverted;
+          visible: bind template.narrow inverted;
           icon-name: "media-playlist-consecutive-symbolic";
           accessibility {
             label: _("Repeat: Off");
@@ -198,7 +200,7 @@ template $JewelcaseMiniPlayer: Adw.Bin {
         margin-start: 6;
         // The queue as a card above the bar, to view and change it.
         Gtk.MenuButton queue_button {
-          visible: bind template.compact inverted;
+          visible: bind template.narrow inverted;
           icon-name: "view-list-ordered-symbolic";
           tooltip-text: _("Queue");
           direction: up;

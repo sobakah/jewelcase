@@ -300,7 +300,7 @@ mod imp {
                 return;
             }
             let column = super::super::tile_size() + TILE_SPACING;
-            let columns = ((available + TILE_SPACING) / column).clamp(2, 40) as u32;
+            let columns = ((available + TILE_SPACING) / column).clamp(1, 40) as u32;
             if self.columns.replace(columns) != columns {
                 let obj = self.obj().downgrade();
                 glib::idle_add_local_once(move || {
@@ -871,13 +871,14 @@ impl ArtistPage {
                 .css_classes(["title-4"])
                 .build(),
         );
-        let columns = self.imp().columns.get().max(2);
+        let columns = self.imp().columns.get().max(1);
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            // At least two: the page's narrowest (a fixed minimum, or an
-            // album beside the page would wait for the columns to drop).
-            .min_children_per_line(2)
+            // At least one (a fixed minimum: with the current count, an
+            // album beside the page waited for the columns to drop; with
+            // two, a page as narrow as the window was cut off).
+            .min_children_per_line(1)
             .max_children_per_line(columns)
             .column_spacing(TILE_SPACING as u32)
             .row_spacing(TILE_SPACING as u32)
@@ -948,13 +949,14 @@ impl ArtistPage {
         // A fixed column count (see size_allocate), so a section with few
         // releases doesn't stretch its tiles: albums, EPs and singles all
         // look the same size.
-        let columns = self.imp().columns.get().max(2);
+        let columns = self.imp().columns.get().max(1);
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            // At least two: the page's narrowest (a fixed minimum, or an
-            // album beside the page would wait for the columns to drop).
-            .min_children_per_line(2)
+            // At least one (a fixed minimum: with the current count, an
+            // album beside the page waited for the columns to drop; with
+            // two, a page as narrow as the window was cut off).
+            .min_children_per_line(1)
             .max_children_per_line(columns)
             .column_spacing(TILE_SPACING as u32)
             .row_spacing(TILE_SPACING as u32)
@@ -983,7 +985,7 @@ impl ArtistPage {
     }
 
     fn apply_columns(&self) {
-        let columns = self.imp().columns.get().max(2);
+        let columns = self.imp().columns.get().max(1);
         for flow in self.imp().flows.borrow().iter() {
             flow.set_max_children_per_line(columns);
         }

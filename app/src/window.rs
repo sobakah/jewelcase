@@ -129,6 +129,12 @@ mod imp {
         #[template_child]
         pub library_toolbar: TemplateChild<adw::ToolbarView>,
         #[template_child]
+        pub header_bar: TemplateChild<adw::HeaderBar>,
+        #[template_child]
+        pub title_fit: TemplateChild<crate::widgets::FitBin>,
+        #[template_child]
+        pub switcher_bar: TemplateChild<adw::ViewSwitcherBar>,
+        #[template_child]
         pub analysis_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub analysis_label: TemplateChild<gtk::Label>,
@@ -184,6 +190,7 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             MiniPlayer::ensure_type();
+            crate::widgets::FitBin::ensure_type();
             PlayerView::ensure_type();
             AlbumPanel::ensure_type();
             PlaylistPanel::ensure_type();
@@ -1492,33 +1499,52 @@ impl JewelcaseWindow {
     /// bar spans the bottom, and the content (with the view switcher)
     /// ends above it.
     fn setup_floating_player(&self) {
-        let update = glib::clone!(
+        let imp = self.imp();
+        imp.bottom_sheet.connect_full_width_notify(glib::clone!(
             #[weak(rename_to = window)]
             self,
-            move || {
-                let imp = window.imp();
-                let floating = !imp.bottom_sheet.is_full_width();
-                imp.library_toolbar.set_margin_bottom(if floating {
-                    0
-                } else {
-                    imp.bottom_sheet.bottom_bar_height()
-                });
-                if floating {
-                    window.add_css_class("floating-player");
-                } else {
-                    window.remove_css_class("floating-player");
-                }
-            }
-        );
-        let on_width = update.clone();
-        self.imp()
-            .bottom_sheet
-            .connect_full_width_notify(move |_| on_width());
-        let on_height = update.clone();
-        self.imp()
-            .bottom_sheet
-            .connect_bottom_bar_height_notify(move |_| on_height());
-        update();
+            move |_| window.update_player_room()
+        ));
+        imp.bottom_sheet
+            .connect_bottom_bar_height_notify(glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |_| window.update_player_room()
+            ));
+        // The view switcher at the bottom when the header bar has no room
+        // for it (narrow windows, or many buttons beside it).
+        imp.header_bar.connect_show_title_notify(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |_| window.update_player_room()
+        ));
+        imp.title_fit.connect_fits_notify(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |_| window.update_player_room()
+        ));
+        self.update_player_room();
+    }
+
+    /// The switcher bar, and the room the content leaves for the mini
+    /// player: none while it floats over the content, which keeps scroll
+    /// room for it; its height when it spans the bottom, or floats above
+    /// the switcher bar.
+    fn update_player_room(&self) {
+        let imp = self.imp();
+        let switcher = !imp.header_bar.shows_title() || !imp.title_fit.fits();
+        imp.switcher_bar.set_reveal(switcher);
+        let floating = !imp.bottom_sheet.is_full_width() && !switcher;
+        imp.library_toolbar.set_margin_bottom(if floating {
+            0
+        } else {
+            imp.bottom_sheet.bottom_bar_height()
+        });
+        if floating {
+            self.add_css_class("floating-player");
+        } else {
+            self.remove_css_class("floating-player");
+        }
     }
 
     /// Asks once whether to analyze songs for smart shuffle, and again when

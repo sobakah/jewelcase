@@ -64,7 +64,8 @@ template $JewelcaseArtistPage: Adw.Bin {
                     valign: start;
 
                     child: $JewelcaseCoverImage portrait {
-                      min-size: 160;
+                      // Smaller on a page as narrow as a phone.
+                      min-size: 96;
                       natural-size: 180;
                       kind: "panel";
                     };

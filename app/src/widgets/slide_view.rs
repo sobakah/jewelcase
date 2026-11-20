@@ -253,7 +253,9 @@ mod imp {
             } = self.layout(width, content_min);
             self.fits.set(place != Place::Away);
             let place = match place {
-                Place::Away if self.opened_cramped.get() => Place::Over,
+                // Over the content, unless it can't be that narrow either
+                // (then it would be cut off by the window's edge).
+                Place::Away if self.opened_cramped.get() && panel <= width => Place::Over,
                 Place::Beside => {
                     self.opened_cramped.set(false);
                     Place::Beside

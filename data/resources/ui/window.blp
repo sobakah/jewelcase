@@ -27,7 +27,6 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
 
     setters {
       header_bar.show-title: false;
-      switcher_bar.reveal: true;
       bottom_sheet.full-width: true;
       mini_player.compact: true;
       split_view.collapsed: true;
@@ -48,9 +47,13 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
       content: Adw.ToolbarView library_toolbar {
         [top]
         Adw.HeaderBar header_bar {
-          title-widget: Adw.ViewSwitcher {
-            stack: stack;
-            policy: wide;
+          // Only where it fits (the buttons beside it vary: the bell,
+          // the window's buttons); else the switcher bar at the bottom.
+          title-widget: $JewelcaseFitBin title_fit {
+            child: Adw.ViewSwitcher {
+              stack: stack;
+              policy: wide;
+            };
           };
 
           [start]
@@ -229,8 +232,11 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
               valign: center;
             }
 
-            Gtk.Box {
-              spacing: 6;
+            // Wraps on narrow windows, so its width doesn't hold the
+            // window wider (also while it's hidden).
+            Adw.WrapBox {
+              child-spacing: 6;
+              line-spacing: 6;
               halign: end;
 
               Gtk.Button {

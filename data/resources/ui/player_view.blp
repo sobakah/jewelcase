@@ -36,7 +36,7 @@ template $JewelcasePlayerView: Adw.Bin {
       [overlay]
       Adw.ToolbarView toolbar {
         [top]
-        Adw.HeaderBar {
+        Adw.HeaderBar player_header {
           // No × (the sheet's close button): the grip, dragging down,
           // Escape and a click beside the player close it. Both sides: a
           // button layout can put the × on the left.
@@ -202,13 +202,14 @@ template $JewelcasePlayerView: Adw.Bin {
 
           [lyrics]
           $JewelcaseLyricsView lyrics_view {
-            width-request: 320;
+            // Within a phone's width, with the margins.
+            width-request: 300;
             hexpand: true;
           }
 
           [queue]
           $JewelcaseQueueView queue_view {
-            width-request: 340;
+            width-request: 300;
           }
 
           [info]
@@ -355,7 +356,9 @@ template $JewelcasePlayerView: Adw.Bin {
               };
             }
 
-            Gtk.CenterBox {
+            // On very narrow windows the lyrics and queue buttons move to
+            // the header bar (player_view.rs: place_pane_buttons).
+            Gtk.CenterBox pane_row {
               start-widget: Gtk.ToggleButton lyrics_button {
                 tooltip-text: _("Lyrics (Ctrl+L)");
                 valign: center;
@@ -482,7 +485,7 @@ template $JewelcasePlayerView: Adw.Bin {
                 }
               };
 
-              end-widget: Gtk.Box {
+              end-widget: Gtk.Box pane_end {
                 spacing: 6;
                 valign: center;
 

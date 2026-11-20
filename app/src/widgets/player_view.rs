@@ -26,6 +26,10 @@ use crate::{covers, format, theme};
 
 /// Below this window width: one pane at a time, replacing the cover.
 const NARROW_BELOW: i32 = 640;
+/// Below this window width (its surface's, with the shadow): the lyrics
+/// and queue buttons go to the header bar, so the transport row fits a
+/// phone's width (it needs 396 px with them).
+const TINY_BELOW: i32 = 480;
 /// From this window width, lyrics and queue fit next to each other.
 const WIDE_FROM: i32 = 1400;
 const MAIN_MIN: i32 = 620;
@@ -114,6 +118,12 @@ mod imp {
         pub remote_banner: TemplateChild<adw::Banner>,
         #[template_child]
         pub transport: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub player_header: TemplateChild<adw::HeaderBar>,
+        #[template_child]
+        pub pane_row: TemplateChild<gtk::CenterBox>,
+        #[template_child]
+        pub pane_end: TemplateChild<gtk::Box>,
         #[template_child]
         pub lyrics_content: TemplateChild<adw::ButtonContent>,
         #[template_child]
@@ -458,6 +468,7 @@ impl PlayerView {
         if imp.available.replace(available) == available {
             return;
         }
+        self.place_pane_buttons(available > 0 && available < TINY_BELOW);
         let width = if available < NARROW_BELOW {
             Width::Narrow
         } else if available < WIDE_FROM {
@@ -504,6 +515,32 @@ impl PlayerView {
         });
         imp.transport.set_spacing(if narrow { 6 } else { 18 });
         self.update_panes();
+    }
+
+    /// The lyrics and queue buttons beside the transport, or (`in_header`)
+    /// in the header bar on very narrow windows.
+    fn place_pane_buttons(&self, in_header: bool) {
+        let imp = self.imp();
+        let lyrics = imp.lyrics_button.get();
+        let queue = imp.queue_button.get();
+        let header = imp.player_header.get();
+        let in_header_now = lyrics
+            .parent()
+            .is_some_and(|p| p != *imp.pane_row.upcast_ref::<gtk::Widget>());
+        if in_header == in_header_now {
+            return;
+        }
+        if in_header {
+            imp.pane_row.set_start_widget(None::<&gtk::Widget>);
+            imp.pane_end.remove(&queue);
+            header.pack_start(&lyrics);
+            header.pack_end(&queue);
+        } else {
+            header.remove(&lyrics);
+            header.remove(&queue);
+            imp.pane_row.set_start_widget(Some(&lyrics));
+            imp.pane_end.append(&queue);
+        }
     }
 
     /// Shows or hides the lyrics pane (Ctrl+L).

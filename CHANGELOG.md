@@ -15,6 +15,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - Narrowing or widening the window with an artist page and an album open no longer shows the album over part of the page, nor the page through the album.
 - An artist page no longer covers part of the artist grid on windows just wide enough for both.
+- **Nothing is cut off at the window's edge any more**: on some window widths, the window cut off its right side (the header bar's buttons, the player bar, an open album). Now the tabs move to the bottom when the header bar has no room for them, the player bar turns compact when the full one doesn't fit, the grids go down to one column, and an album on an artist page goes out of sight before it would be cut off. In the full player on a very narrow window, the Lyrics and Queue buttons move up to its header bar.
 
 ## [0.9.0] — 2026-11-20
 

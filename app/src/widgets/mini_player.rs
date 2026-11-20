@@ -22,6 +22,15 @@ mod imp {
         /// queue card; the full player has them).
         #[property(get, set)]
         pub compact: std::cell::Cell<bool>,
+        /// Compact, or too narrow for the full bar (its width is less than
+        /// the full bar's minimum, e.g. with a small text size, where the
+        /// window's breakpoint in sp comes late): what the bar shows.
+        #[property(get)]
+        pub narrow: std::cell::Cell<bool>,
+        /// Not compact, but too narrow for the full bar.
+        pub squeezed: std::cell::Cell<bool>,
+        /// The full bar's minimum width, measured while it was shown.
+        pub full_min: std::cell::Cell<i32>,
         #[template_child]
         pub seek: TemplateChild<gtk::Scale>,
         #[template_child]
@@ -72,6 +81,9 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            // Its own measure and size_allocate (below): with adw::Bin's
+            // layout manager, GTK wouldn't call them.
+            obj.set_layout_manager(None::<gtk::LayoutManager>);
             let player = JewelcaseApplication::get().player();
             player.connect_current_track_notify(glib::clone!(
                 #[weak]
@@ -134,15 +146,7 @@ mod imp {
             );
             // Compact (narrow windows): a smaller cover, a title that may
             // shrink.
-            obj.connect_compact_notify(|obj| {
-                let imp = obj.imp();
-                let compact = obj.compact();
-                let size = if compact { 52 } else { 68 };
-                imp.cover.set_min_size(size);
-                imp.cover.set_natural_size(size);
-                imp.text_box
-                    .set_width_request(if compact { 60 } else { 180 });
-            });
+            obj.connect_compact_notify(|obj| obj.update_narrow());
             obj.update_track(&player);
             update_repeat_button(&self.repeat_button, &player);
             show_shuffle(&self.shuffle_button);
@@ -150,9 +154,48 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for MiniPlayer {}
+    impl WidgetImpl for MiniPlayer {
+        /// No wider than the compact bar needs: a full bar that doesn't
+        /// fit turns compact (size_allocate), instead of holding the
+        /// window wider than it is (which cut off its end).
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let Some(child) = adw::prelude::BinExt::child(&*self.obj()) else {
+                return (0, 0, -1, -1);
+            };
+            let (min, natural, _, _) = child.measure(orientation, for_size);
+            if orientation == gtk::Orientation::Horizontal && !self.narrow.get() {
+                (min.min(COMPACT_MIN), natural, -1, -1)
+            } else {
+                (min, natural, -1, -1)
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            let Some(child) = adw::prelude::BinExt::child(&*self.obj()) else {
+                return;
+            };
+            let (min, _, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
+            if !self.narrow.get() {
+                self.full_min.set(min);
+            }
+            child.allocate(width.max(min), height, baseline, None);
+            let squeezed = width < self.full_min.get();
+            if self.squeezed.replace(squeezed) != squeezed {
+                // Not during the layout.
+                let obj = self.obj().downgrade();
+                glib::idle_add_local_once(move || {
+                    if let Some(obj) = obj.upgrade() {
+                        obj.update_narrow();
+                    }
+                });
+            }
+        }
+    }
     impl BinImpl for MiniPlayer {}
 }
+
+/// The compact bar's minimum width (it fits a phone's 360 px window).
+const COMPACT_MIN: i32 = 350;
 
 glib::wrapper! {
     pub struct MiniPlayer(ObjectSubclass<imp::MiniPlayer>)
@@ -334,6 +377,24 @@ pub(super) fn update_play_button(button: &gtk::Button, playing: bool) {
     } else {
         button.set_icon_name("media-playback-start-symbolic");
         super::set_accessible_label(button, &gettext("Play"));
+    }
+}
+
+impl MiniPlayer {
+    /// Compact, or squeezed: a smaller cover and a title that may shrink,
+    /// without shuffle, repeat, the queue card and the visualizer.
+    fn update_narrow(&self) {
+        let imp = self.imp();
+        let narrow = self.compact() || imp.squeezed.get();
+        if imp.narrow.replace(narrow) == narrow {
+            return;
+        }
+        let size = if narrow { 52 } else { 68 };
+        imp.cover.set_min_size(size);
+        imp.cover.set_natural_size(size);
+        imp.text_box
+            .set_width_request(if narrow { 40 } else { 180 });
+        self.notify_narrow();
     }
 }
 
