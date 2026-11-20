@@ -353,11 +353,14 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   the columns change: new list items would make the list view build every row and tile anew
   (11 ms of a panel's first frame). Their tiles glide to the new places (`widgets/grid_reflow.rs`)
   while the rows are already laid out for the new columns; only the drawing moves.
-- **Panel widths** are worked out in each layout of `SlideView` (`set_width_rule`, from
-  `panel_resizer.rs`), and the album on an artist page goes over the page by itself
-  (`min-content-width`): no breakpoints or idles for them, which lag a frame behind the window.
-  The artist page's sections keep a minimum of two columns: with the current count as minimum,
-  the page's minimum width followed its columns and an album stayed over the page.
+- **Panel widths** are worked out in each layout of `SlideView` (`set_width_rule`, rules in
+  `panel_resizer.rs`), and the album on an artist page goes over the page by its rule: no
+  breakpoints or idles for them, which lag a frame behind the window. The owner's order as the
+  window narrows: the grid down to two columns, then the page and its album at the same rate,
+  then the album over the page (CONCEPT.md §4.1). The artist page's sections keep a minimum of
+  two columns: with the current count as minimum, the page's minimum width followed its columns
+  and an album stayed over the page. `ArtistPage::size_allocate` allocates its child itself
+  (`adw::Bin`'s parent allocate doesn't: the page drew empty).
 - **A playlist's songs are a `GtkListView`, not a boxed `GtkListBox`**: a list box restyles all
   its rows whenever the hovered row changes (3000 songs scrolled at 20–40 fps; split into
   smaller list boxes too), and builds every row up front. The panel's top is the list's first

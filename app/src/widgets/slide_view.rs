@@ -10,12 +10,11 @@
 //! Escape closes the panel. Collapsing hides the panel (unless
 //! `keep-open`), and uncollapsing brings back one that was open.
 //!
-//! With `min-content-width`, the panel goes over the content by itself
-//! whenever the content wouldn't keep that much room beside it (an
-//! album on an artist page): decided in each layout, so a panel never
-//! squeezes or covers the content while the window is resized.
-//! `set_width_rule` lets the panel's width follow the window's in the
-//! same layout (panel_resizer.rs).
+//! `set_width_rule` decides the panel's width, and whether it goes over
+//! the content (an album on an artist page without room beside it), in
+//! each layout from the room there is (panel_resizer.rs): never a frame
+//! behind the window, so a panel doesn't cover content that should be
+//! beside it while the window is resized.
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -40,13 +39,21 @@ fn close_spring() -> adw::SpringParams {
 pub struct Room {
     /// The panel view's width.
     pub width: i32,
-    /// The window's.
-    pub window: i32,
-    /// The panel goes over the content.
+    /// The content's own minimum width.
+    pub content_min: i32,
+    /// Set to have the panel over the content (narrow windows).
+    pub collapsed: bool,
+}
+
+/// Where the panel goes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Panel {
+    pub width: i32,
+    /// Over the content, which is dimmed, instead of beside it.
     pub over: bool,
 }
 
-pub type WidthRule = Box<dyn Fn(Room) -> i32>;
+pub type WidthRule = Box<dyn Fn(Room) -> Panel>;
 
 mod imp {
     use super::*;
@@ -67,10 +74,6 @@ mod imp {
         /// its layout until the drag ends (sectioned_grid.rs).
         #[property(get, set)]
         pub resizing: Cell<bool>,
-        /// Beside the panel, the content keeps at least this much room,
-        /// else the panel goes over it (0: only when `collapsed`).
-        #[property(get, set = Self::set_min_content_width)]
-        pub min_content_width: Cell<i32>,
         #[property(get, set = Self::set_min_sidebar_width, default = 320.0)]
         pub min_sidebar_width: Cell<f64>,
         #[property(get, set = Self::set_max_sidebar_width, default = 440.0)]
@@ -88,6 +91,8 @@ mod imp {
         pub pane: adw::Bin,
         /// The panel's width from the room (else the properties above).
         pub width_rule: RefCell<Option<WidthRule>>,
+        /// The rule may put the panel over the content without `collapsed`.
+        pub can_go_over: Cell<bool>,
         /// Over the content in the last layout (collapsed, or no room).
         pub over: Cell<bool>,
         /// 0 hidden, 1 in place; above 1 while it bounces.
@@ -104,7 +109,6 @@ mod imp {
                 collapsed: Cell::new(false),
                 keep_open: Cell::new(false),
                 resizing: Cell::new(false),
-                min_content_width: Cell::new(0),
                 min_sidebar_width: Cell::new(320.0),
                 max_sidebar_width: Cell::new(440.0),
                 sidebar_width_fraction: Cell::new(0.38),
@@ -114,6 +118,7 @@ mod imp {
                 dimming: OnceCell::new(),
                 pane: adw::Bin::new(),
                 width_rule: RefCell::new(None),
+                can_go_over: Cell::new(false),
                 over: Cell::new(false),
                 progress: Cell::new(0.0),
                 animation: OnceCell::new(),
@@ -210,7 +215,7 @@ mod imp {
             let _ = for_size; // Children are measured without a size.
             let horizontal = orientation == gtk::Orientation::Horizontal;
             // A panel that can go over the content needs no room beside it.
-            let can_go_over = self.collapsed.get() || self.min_content_width.get() > 0;
+            let can_go_over = self.collapsed.get() || self.can_go_over.get();
             let beside = horizontal && !can_go_over && self.show_sidebar.get();
             if beside {
                 (content_min + pane_min, content_nat + pane_nat, -1, -1)
@@ -224,7 +229,7 @@ mod imp {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             let progress = self.progress.get();
             let (content_min, _, _, _) = self.content_bin.measure(gtk::Orientation::Horizontal, -1);
-            let over = self.goes_over(width, content_min);
+            let Panel { width: panel, over } = self.layout(width, content_min);
             if self.over.replace(over) != over {
                 // Not during the layout: new style classes would undo it
                 // (drawn "without a current allocation").
@@ -235,7 +240,6 @@ mod imp {
                     }
                 });
             }
-            let panel = self.sidebar_width_for(width);
             // The content takes its final width once, when the panel
             // starts to move (a grid behind it would reflow its columns on
             // every frame): narrow as it starts opening, full as it starts
@@ -305,53 +309,40 @@ mod imp {
             self.obj().queue_resize();
         }
 
-        fn set_min_content_width(&self, width: i32) {
-            self.min_content_width.set(width);
-            self.obj().queue_resize();
-        }
-
-        /// The window's width (the panel view's own outside one).
-        fn window_width(&self, width: i32) -> i32 {
-            self.obj()
-                .root()
-                .map(|root| root.width())
-                .filter(|w| *w > 0)
-                .unwrap_or(width)
-        }
-
-        /// The panel's width out of `width`, beside the content or over it.
-        fn width_for(&self, width: i32, over: bool) -> i32 {
+        /// The panel's width out of `width`, and whether it goes over the
+        /// content.
+        fn layout(&self, width: i32, content_min: i32) -> Panel {
             let (pane_min, _, _, _) = self.pane.measure(gtk::Orientation::Horizontal, -1);
-            let wanted = if let Some(rule) = &*self.width_rule.borrow() {
+            let collapsed = self.collapsed.get();
+            let panel = if let Some(rule) = &*self.width_rule.borrow() {
                 rule(Room {
                     width,
-                    window: self.window_width(width),
-                    over,
+                    content_min,
+                    collapsed,
                 })
             } else {
                 let min = self.min_sidebar_width.get();
                 let max = self.max_sidebar_width.get().max(min);
-                let wanted = if over {
+                let wanted = if collapsed {
                     max
                 } else {
                     (f64::from(width) * self.sidebar_width_fraction.get()).clamp(min, max)
                 };
-                wanted.round() as i32
+                Panel {
+                    width: wanted.round() as i32,
+                    over: collapsed,
+                }
             };
-            wanted.max(pane_min).min(width.max(pane_min))
-        }
-
-        /// Over the content: collapsed, or the content wouldn't keep
-        /// `min-content-width` (nor its own minimum) beside the panel.
-        fn goes_over(&self, width: i32, content_min: i32) -> bool {
-            let keep = self.min_content_width.get();
-            self.collapsed.get()
-                || (keep > 0 && width - self.width_for(width, false) < keep.max(content_min))
+            Panel {
+                width: panel.width.max(pane_min).min(width.max(pane_min)),
+                over: panel.over || collapsed,
+            }
         }
 
         /// The panel's width in place, out of `width`.
         pub fn sidebar_width_for(&self, width: i32) -> i32 {
-            self.width_for(width, self.over.get())
+            let (content_min, _, _, _) = self.content_bin.measure(gtk::Orientation::Horizontal, -1);
+            self.layout(width, content_min).width
         }
 
         fn set_show_sidebar(&self, show: bool) {
@@ -389,7 +380,7 @@ mod imp {
                 self.jump_to(1.0);
                 obj.notify_show_sidebar();
             }
-            if collapsed || self.min_content_width.get() == 0 {
+            if collapsed || !self.can_go_over.get() {
                 self.over.set(collapsed);
             }
             self.update_styles();
@@ -475,8 +466,12 @@ impl SlideView {
 
     /// The panel's width from the room, in each layout (instead of
     /// `min-sidebar-width`, `max-sidebar-width` and the fraction).
-    pub fn set_width_rule(&self, rule: impl Fn(Room) -> i32 + 'static) {
-        self.imp().width_rule.replace(Some(Box::new(rule)));
+    /// `can_go_over`: the rule may put the panel over the content when
+    /// the view isn't collapsed.
+    pub fn set_width_rule(&self, can_go_over: bool, rule: impl Fn(Room) -> Panel + 'static) {
+        let imp = self.imp();
+        imp.width_rule.replace(Some(Box::new(rule)));
+        imp.can_go_over.set(can_go_over);
         self.queue_resize();
     }
 
@@ -519,12 +514,11 @@ mod tests {
         });
     }
 
-    /// With `min-content-width` (an album on an artist page), the panel
-    /// goes over the content when the content wouldn't keep that much
-    /// beside it, in the same layout, instead of covering part of it
-    /// while it's laid out beside (the window widening).
+    /// A rule that puts the panel over the content (an album on an
+    /// artist page without room beside it) gives the content the whole
+    /// width, in the same layout; beside, the content gets the rest.
     #[test]
-    fn a_panel_goes_over_content_without_room_beside_it() {
+    fn a_panel_goes_over_content_when_its_rule_says_so() {
         crate::gtk_test::run(|| {
             let view = SlideView::default();
             let content = gtk::Label::new(Some("page"));
@@ -532,17 +526,18 @@ mod tests {
             view.set_sidebar(Some(
                 gtk::Label::new(Some("album")).upcast_ref::<gtk::Widget>(),
             ));
-            view.set_min_content_width(480);
+            view.set_width_rule(true, |room| Panel {
+                width: 320,
+                over: room.width - 320 < 480,
+            });
             view.set_show_sidebar(true);
             let _ = view.measure(gtk::Orientation::Horizontal, -1);
-            // 0.38 of 700 is under the panel's 320; 380 left.
             view.allocate(700, 600, -1, None);
             assert!(view.is_over());
             assert_eq!(content.width(), 700);
-            // 0.38 of 900: 342; 558 left.
             view.allocate(900, 600, -1, None);
             assert!(!view.is_over());
-            assert_eq!(content.width(), 900 - 342);
+            assert_eq!(content.width(), 900 - 320);
         });
     }
 }

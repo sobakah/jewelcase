@@ -1,12 +1,16 @@
 //! A drag handle on the inner edge of a sliding panel (the album
-//! and playlist panels, and the artist page beside or over the artist
-//! grid), so the panel can be made wider or narrower. The width is
-//! remembered: one for the album and playlist panels, one for artist pages.
+//! and playlist panels, the artist page beside or over the artist grid,
+//! and the album on an artist page), so the panel can be made wider or
+//! narrower. The width is remembered: one for the album and playlist
+//! panels, one for artist pages.
 //!
-//! A width is kept on windows at least as wide as the one it was set on,
-//! and scaled down with narrower ones, so the layout stays alike (never
-//! below the panel's minimum). Worked out in each layout of the panel
-//! view, from the window's width then (`SlideView::set_width_rule`).
+//! As the window narrows, the content beside a panel gives up its room
+//! first, down to two columns of covers; then the panel gets narrower.
+//! An artist page and the album on it get narrower at the same rate,
+//! until the page's content or the album can't; then the other alone,
+//! and when neither can, the album goes over the page. Worked out in each
+//! layout of the panel view (`SlideView::set_width_rule`), never a frame
+//! behind the window. A panel is never wider than it was set.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,12 +18,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::widgets::slide_view::Room;
+use crate::widgets::slide_view::{Panel, Room};
 
-/// The album and playlist panels' width (shared), and the window's width
-/// when it was set (0: set before 0.9.1, taken as on a full screen).
+/// The album and playlist panels' width (shared; also the album on an
+/// artist page).
 const KEY: &str = "panel-width";
-const KEY_WINDOW: &str = "panel-width-window";
 const MIN_WIDTH: i32 = 280;
 /// Automatic album and playlist panels: this part of the room, within
 /// the two below (as in the templates).
@@ -28,145 +31,217 @@ const AUTO_MIN: i32 = 320;
 const AUTO_MAX: i32 = 440;
 /// Artist pages.
 const ARTIST_KEY: &str = "artist-panel-width";
-const ARTIST_KEY_WINDOW: &str = "artist-panel-width-window";
 /// Over the grid (narrow windows).
 const ARTIST_MIN_WIDTH: i32 = 360;
 /// Below this window width an artist page takes all of it (no handle).
 const ARTIST_FULL_BELOW: i32 = 600;
 /// Beside the grid, the page is never narrower (its portrait and text,
-/// two columns of albums), and the grid keeps room for two columns of
-/// artists. Narrower windows have the page over the grid (window.blp).
+/// two columns of albums). The grid keeps room for two columns of
+/// artists; narrower windows than both have the page over the grid
+/// (window.blp).
 const ARTIST_BESIDE_MIN: i32 = 560;
-const ARTIST_GRID_MIN: i32 = 400;
-/// Room the content keeps next to the panel.
+/// Room content other than a grid keeps next to the panel (the
+/// playlists), and next to a panel over it.
 const MIN_CONTENT: i32 = 300;
+/// On an artist page, the page keeps this beside an album (its portrait
+/// and name, two columns of albums); with less, the album goes over it.
+const PAGE_CONTENT_MIN: i32 = 480;
 /// One key press (Left, Right).
 const KEY_STEP: i32 = 20;
 
-/// On an artist page, an album's panel goes over the page when the page
-/// would keep less than this beside it (its portrait and name, two
-/// columns of albums).
-pub const ARTIST_PAGE_CONTENT_MIN: i32 = 480;
+/// Which panel: what it keeps room for, and how it gets narrower.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    /// Beside a grid of covers with this padding, or (None) other content.
+    Panel { grid_padding: Option<i32> },
+    /// An artist page, beside the artist grid (covers with this padding).
+    Artist { grid_padding: i32 },
+    /// An album on an artist page.
+    AlbumOnPage,
+}
 
-/// Wraps the sidebar of `split` (whose sidebar is at the end) with a handle.
+/// The playlist panel.
 pub fn attach(split: &crate::widgets::SlideView, settings: &gio::Settings) {
-    attach_panel(split, settings, KEY, MIN_WIDTH, false);
+    attach_panel(split, settings, Kind::Panel { grid_padding: None });
+}
+
+/// The album panel beside the album grid, whose covers have
+/// `grid_padding` around them.
+pub fn attach_beside_grid(
+    split: &crate::widgets::SlideView,
+    settings: &gio::Settings,
+    grid_padding: i32,
+) {
+    let grid_padding = Some(grid_padding);
+    attach_panel(split, settings, Kind::Panel { grid_padding });
 }
 
 /// The artist page beside the artist grid: half the window until its edge
 /// is dragged, at least `ARTIST_BESIDE_MIN`. Over the grid (narrow
 /// windows): three quarters of the window, all of it below
 /// `ARTIST_FULL_BELOW`.
-pub fn attach_artist(split: &crate::widgets::SlideView, settings: &gio::Settings) {
-    attach_panel(split, settings, ARTIST_KEY, ARTIST_MIN_WIDTH, true);
+pub fn attach_artist(
+    split: &crate::widgets::SlideView,
+    settings: &gio::Settings,
+    grid_padding: i32,
+) {
+    attach_panel(split, settings, Kind::Artist { grid_padding });
 }
 
-/// A width set on a window `set_on` wide, on a window `window` wide:
-/// scaled down on a narrower one, as set on a wider one.
-fn scaled(width: i32, set_on: i32, window: i32) -> i32 {
-    if set_on > 0 && window > 0 && window < set_on {
-        (i64::from(width) * i64::from(window) / i64::from(set_on)) as i32
-    } else {
-        width
+/// The album panel on an artist page.
+pub fn attach_album_on_page(split: &crate::widgets::SlideView, settings: &gio::Settings) {
+    attach_panel(split, settings, Kind::AlbumOnPage);
+}
+
+/// The widths set (0: automatic): the panel's and, for an album on an
+/// artist page, the page's.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Set {
+    width: i32,
+    page: i32,
+}
+
+impl Set {
+    /// An album on a page narrower than set is narrower by as much.
+    fn page_scale(self, kind: Kind, space: i32) -> f64 {
+        if kind == Kind::AlbumOnPage && self.page > 0 && space < self.page {
+            f64::from(space) / f64::from(self.page)
+        } else {
+            1.0
+        }
     }
 }
 
-/// The panel's width in `room`, from the width set (0: automatic) on a
-/// window `set_on` wide.
-fn panel_width(artist: bool, width: i32, set_on: i32, room: Room) -> i32 {
-    let set = (width > 0).then(|| scaled(width, set_on, room.window));
+fn automatic(space: i32) -> i32 {
+    ((f64::from(space) * AUTO_FRACTION).round() as i32).clamp(AUTO_MIN, AUTO_MAX)
+}
+
+/// Where the panel goes in `room`, the content keeping `keep` beside it.
+fn layout(kind: Kind, set: Set, room: Room, keep: i32) -> Panel {
     let space = room.width;
-    if artist {
-        if room.over && space < ARTIST_FULL_BELOW {
-            space
-        } else if room.over {
-            set.unwrap_or(space * 3 / 4).clamp(
+    let keep = keep.max(room.content_min);
+    let over = |width| Panel { width, over: true };
+    let beside = |width| Panel { width, over: false };
+    match kind {
+        Kind::Artist { .. } if room.collapsed && space < ARTIST_FULL_BELOW => over(space),
+        Kind::Artist { .. } if room.collapsed => over(
+            (if set.width > 0 {
+                set.width
+            } else {
+                space * 3 / 4
+            })
+            .clamp(
                 ARTIST_MIN_WIDTH,
                 (space - MIN_CONTENT).max(ARTIST_MIN_WIDTH),
-            )
+            ),
+        ),
+        Kind::Artist { .. } => beside(
+            (if set.width > 0 { set.width } else { space / 2 })
+                .min(space - keep)
+                .max(ARTIST_BESIDE_MIN),
+        ),
+        Kind::Panel { .. } if room.collapsed => over(if set.width > 0 {
+            set.width
+                .clamp(MIN_WIDTH, (space - MIN_CONTENT).max(MIN_WIDTH))
         } else {
-            set.unwrap_or(space / 2).clamp(
-                ARTIST_BESIDE_MIN,
-                (space - ARTIST_GRID_MIN).max(ARTIST_BESIDE_MIN),
-            )
-        }
-    } else {
-        let widest = (space - MIN_CONTENT).max(MIN_WIDTH);
-        match set {
-            Some(set) => set.clamp(MIN_WIDTH, widest),
-            None if room.over => AUTO_MAX.min(space),
-            None => ((f64::from(space) * AUTO_FRACTION).round() as i32).clamp(AUTO_MIN, AUTO_MAX),
+            AUTO_MAX.min(space)
+        }),
+        Kind::Panel { .. } => beside(
+            (if set.width > 0 {
+                set.width
+            } else {
+                automatic(space)
+            })
+            .min(space - keep)
+            .max(MIN_WIDTH),
+        ),
+        Kind::AlbumOnPage => {
+            let wanted = if set.width > 0 {
+                (f64::from(set.width) * set.page_scale(kind, space)).round() as i32
+            } else {
+                automatic(space)
+            };
+            let width = wanted.min(space - keep);
+            if room.collapsed || width < MIN_WIDTH {
+                // As wide as it was beside the page, not wider.
+                over(wanted.max(MIN_WIDTH).min(space))
+            } else {
+                beside(width)
+            }
         }
     }
 }
 
-/// The width set, the window's width then, and the width being dragged.
+/// The room the content keeps beside the panel: two columns of a grid's
+/// covers, or a fixed minimum.
+fn keep(kind: Kind) -> i32 {
+    let grid = |padding| super::sectioned_grid::min_width(super::tile_size(), padding);
+    match kind {
+        Kind::Panel {
+            grid_padding: Some(padding),
+        }
+        | Kind::Artist {
+            grid_padding: padding,
+        } => grid(padding),
+        Kind::Panel { grid_padding: None } => MIN_CONTENT,
+        Kind::AlbumOnPage => PAGE_CONTENT_MIN,
+    }
+}
+
+/// The widths set, and the width being dragged.
 #[derive(Default)]
 struct Width {
-    set: Cell<i32>,
-    set_on: Cell<i32>,
-    /// For widths set before the window's was kept: the screen's.
-    screen: Cell<i32>,
+    set: Cell<Set>,
     dragged: Cell<Option<i32>>,
 }
 
 impl Width {
-    fn for_room(&self, artist: bool, room: Room) -> i32 {
-        if let Some(width) = self.dragged.get() {
-            return width;
+    fn for_room(&self, kind: Kind, room: Room) -> Panel {
+        let keep = keep(kind);
+        match self.dragged.get() {
+            Some(width) => Panel {
+                width,
+                over: room.collapsed
+                    || (kind == Kind::AlbumOnPage
+                        && room.width - width < keep.max(room.content_min)),
+            },
+            None => layout(kind, self.set.get(), room, keep),
         }
-        let set_on = match self.set_on.get() {
-            0 => self.screen.get(),
-            set_on => set_on,
-        };
-        panel_width(artist, self.set.get(), set_on, room)
+    }
+
+    /// The width to keep for one the panel was given in `space`: for an
+    /// album on a narrower page than set, as on the page as set.
+    fn to_keep(&self, kind: Kind, width: i32, space: i32) -> i32 {
+        (f64::from(width) / self.set.get().page_scale(kind, space)).round() as i32
     }
 }
 
-/// The width of the screen the window is on.
-fn screen_width(widget: &impl IsA<gtk::Widget>) -> Option<i32> {
-    let surface = widget.native()?.surface()?;
-    let monitor = widget.display().monitor_at_surface(&surface)?;
-    Some(monitor.geometry().width())
+fn content_min(split: &crate::widgets::SlideView) -> i32 {
+    split
+        .content()
+        .map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).0)
 }
 
-/// Keeps a width the panel was given: with the window's width now.
-fn save(settings: &gio::Settings, keys: (&str, &str), width: i32, window: i32) {
-    let _ = settings.set_int(keys.1, window);
-    let _ = settings.set_int(keys.0, width);
-}
-
-fn window_width(widget: &impl IsA<gtk::Widget>) -> i32 {
-    widget.root().map_or(0, |root| root.width())
-}
-
-/// The narrowest and widest the panel may be now.
-fn limits(split: &crate::widgets::SlideView, min_width: i32, artist: bool) -> (i32, i32) {
+/// The narrowest and widest the panel may be dragged now.
+fn limits(split: &crate::widgets::SlideView, kind: Kind) -> (i32, i32) {
     let room = split.width();
-    if artist && !split.collapsed() {
-        let max = (room - ARTIST_GRID_MIN).max(ARTIST_BESIDE_MIN);
-        (ARTIST_BESIDE_MIN, max)
-    } else {
-        (min_width, (room - MIN_CONTENT).max(min_width))
-    }
+    let keep = keep(kind).max(content_min(split));
+    let narrowest = match kind {
+        Kind::Artist { .. } if split.collapsed() => ARTIST_MIN_WIDTH,
+        Kind::Artist { .. } => ARTIST_BESIDE_MIN,
+        _ => MIN_WIDTH,
+    };
+    let keep = if split.collapsed() { MIN_CONTENT } else { keep };
+    (narrowest, (room - keep).max(narrowest))
 }
 
-fn attach_panel(
-    split: &crate::widgets::SlideView,
-    settings: &gio::Settings,
-    setting: &'static str,
-    min_width: i32,
-    artist: bool,
-) {
+fn attach_panel(split: &crate::widgets::SlideView, settings: &gio::Settings, kind: Kind) {
     let Some(sidebar) = split.sidebar() else {
         return;
     };
-    let window_key = if artist {
-        ARTIST_KEY_WINDOW
-    } else {
-        KEY_WINDOW
-    };
-    let saved_as = (setting, window_key);
+    let artist = matches!(kind, Kind::Artist { .. });
+    let setting = if artist { ARTIST_KEY } else { KEY };
+    let min_width = if artist { ARTIST_MIN_WIDTH } else { MIN_WIDTH };
     split.set_sidebar(None::<&gtk::Widget>);
     let handle = gtk::Box::builder()
         .width_request(8)
@@ -185,7 +260,7 @@ fn attach_panel(
     split.set_sidebar(Some(overlay.upcast_ref::<gtk::Widget>()));
     // Overlaid (collapsed) panels take the whole width; nothing to resize.
     // An artist page over the grid is narrower than the window (below).
-    if !artist {
+    if matches!(kind, Kind::Panel { .. }) {
         split
             .bind_property("collapsed", &handle, "visible")
             .invert_boolean()
@@ -200,31 +275,32 @@ fn attach_panel(
         #[weak]
         split,
         move |settings: &gio::Settings| {
-            width.set.set(settings.int(setting));
-            width.set_on.set(settings.int(window_key));
+            width.set.set(Set {
+                width: settings.int(setting),
+                page: if kind == Kind::AlbumOnPage {
+                    settings.int(ARTIST_KEY)
+                } else {
+                    0
+                },
+            });
             split.queue_resize();
         }
     );
     read(settings);
     let id = settings.connect_changed(None, move |settings, key| {
-        if key == setting || key == window_key {
+        if key == setting || key == ARTIST_KEY {
             read(settings);
         }
     });
     crate::widgets::disconnect_with(split, settings, id);
-    split.set_width_rule(glib::clone!(
-        #[strong]
-        width,
-        move |room| width.for_room(artist, room)
-    ));
-    // The screen's width, for a width set before the window's was kept.
-    let on_map = width.clone();
-    split.connect_map(move |split| {
-        if let Some(screen) = screen_width(split) {
-            on_map.screen.set(screen);
-            split.queue_resize();
-        }
-    });
+    split.set_width_rule(
+        kind == Kind::AlbumOnPage,
+        glib::clone!(
+            #[strong]
+            width,
+            move |room| width.for_room(kind, room)
+        ),
+    );
     // An artist page over a very narrow window takes all of it: no handle.
     if artist {
         let update = glib::clone!(
@@ -294,7 +370,7 @@ fn attach_panel(
             // The handle is on the panel's left edge: left widens it.
             let edge = f64::from(point.x()) - grab.get();
             let width = f64::from(split.width()) - edge;
-            let (narrowest, widest) = limits(&split, min_width, artist);
+            let (narrowest, widest) = limits(&split, kind);
             Some((width as i32).clamp(narrowest, widest))
         }
     );
@@ -318,11 +394,13 @@ fn attach_panel(
     drag.connect_drag_end(glib::clone!(
         #[strong]
         settings,
+        #[strong]
+        width,
         #[weak]
         split,
         move |_, _, _| {
             if let Some(dragged) = wanted.take() {
-                save(&settings, saved_as, dragged, window_width(&split));
+                let _ = settings.set_int(setting, width.to_keep(kind, dragged, split.width()));
             }
             width.dragged.set(None);
             split.queue_resize();
@@ -337,6 +415,8 @@ fn attach_panel(
     keys.connect_key_pressed(glib::clone!(
         #[weak]
         split,
+        #[strong]
+        width,
         #[strong]
         settings,
         #[upgrade_or]
@@ -353,9 +433,9 @@ fn attach_panel(
                 _ => return glib::Propagation::Proceed,
             };
             let now = split.sidebar_width();
-            let (narrowest, widest) = limits(&split, min_width, artist);
-            let width = (now + change).clamp(narrowest, widest);
-            save(&settings, saved_as, width, window_width(&split));
+            let (narrowest, widest) = limits(&split, kind);
+            let now = (now + change).clamp(narrowest, widest);
+            let _ = settings.set_int(setting, width.to_keep(kind, now, split.width()));
             glib::Propagation::Stop
         }
     ));
@@ -381,53 +461,130 @@ fn attach_panel(
 mod tests {
     use super::*;
 
-    fn room(width: i32, window: i32, over: bool) -> Room {
+    fn room(width: i32) -> Room {
         Room {
             width,
-            window,
-            over,
+            content_min: 0,
+            collapsed: false,
         }
     }
 
-    /// A width set on a full screen is narrower in proportion on a
-    /// narrower window (the layout stays alike), never wider on a wider
-    /// one, and never below the panel's minimum.
-    #[test]
-    fn a_panel_is_scaled_down_with_the_window_only() {
-        // Album panel, 700 set on a 2400 window.
-        assert_eq!(panel_width(false, 700, 2400, room(2400, 2400, false)), 700);
-        assert_eq!(panel_width(false, 700, 2400, room(1200, 1200, false)), 350);
-        assert_eq!(panel_width(false, 700, 2400, room(3000, 3000, false)), 700);
-        assert_eq!(
-            panel_width(false, 700, 2400, room(600, 600, false)),
-            MIN_WIDTH
-        );
-        // Set on a half-wide window: as set on a full one.
-        assert_eq!(panel_width(false, 500, 1200, room(2400, 2400, false)), 500);
-        // On an artist page, by the window's width, not the page's.
-        assert_eq!(panel_width(false, 700, 2400, room(1000, 1600, false)), 466);
-        // Automatic: a part of the room, as before.
-        assert_eq!(panel_width(false, 0, 0, room(1000, 1000, false)), 380);
-
-        // Artist page, 1200 set on a 2400 window: half of a narrower one,
-        // never under its minimum beside the grid.
-        assert_eq!(panel_width(true, 1200, 2400, room(2400, 2400, false)), 1200);
-        assert_eq!(panel_width(true, 1200, 2400, room(1600, 1600, false)), 800);
-        assert_eq!(
-            panel_width(true, 1200, 2400, room(1000, 1000, false)),
-            ARTIST_BESIDE_MIN
-        );
-        // Over the grid of a very narrow window: all of it.
-        assert_eq!(panel_width(true, 1200, 2400, room(500, 500, true)), 500);
+    fn set(width: i32, page: i32) -> Set {
+        Set { width, page }
     }
+
+    const GRID: Kind = Kind::Artist { grid_padding: 24 };
 
     /// The window's breakpoint that puts an artist page over the grid is
     /// where the page and the grid no longer fit side by side; in sp it
     /// moved with the text size (the grid got 240 px at 0.8).
     #[test]
     fn the_artist_breakpoint_is_where_both_fit() {
+        // Two columns of artists at the default cover size.
+        const ARTIST_GRID_MIN: i32 = 400;
         let window = include_str!("../../../data/resources/ui/window.blp");
         let wanted = format!("max-width: {}px", ARTIST_BESIDE_MIN + ARTIST_GRID_MIN);
         assert!(window.contains(&wanted), "window.blp has no \"{wanted}\"");
+        // Two columns of artists at the default cover size (160) fit.
+        assert!(super::super::sectioned_grid::min_width(160, 24) <= ARTIST_GRID_MIN);
+    }
+
+    /// As the window narrows, the artist grid gives up its room first,
+    /// down to two columns (392 px at 160 px covers), then the page gets
+    /// narrower; never wider than set. The page covered part of the grid
+    /// below two columns, and the grid's minimum wasn't kept at all.
+    #[test]
+    fn the_grid_gives_up_its_room_before_the_page() {
+        let keep = 392;
+        // 1556 set: the whole of it on a full screen.
+        assert_eq!(layout(GRID, set(1556, 0), room(2560), keep).width, 1556);
+        // On half the screen, the grid keeps two columns.
+        assert_eq!(
+            layout(GRID, set(1556, 0), room(1280), keep).width,
+            1280 - keep
+        );
+        // Never below its own minimum beside the grid.
+        assert_eq!(
+            layout(GRID, set(1556, 0), room(900), keep).width,
+            ARTIST_BESIDE_MIN
+        );
+        // Never wider than set.
+        assert_eq!(layout(GRID, set(700, 0), room(2560), keep).width, 700);
+    }
+
+    /// An album on an artist page narrower than set is narrower at the
+    /// same rate as the page; once the page's content is at its minimum,
+    /// the album alone, and when the album can't, it goes over the page.
+    /// It went over the page (or vanished) while it still fitted, and
+    /// stayed as wide as set while the page got narrower.
+    #[test]
+    fn an_album_shrinks_with_its_page_then_goes_over_it() {
+        let album = Kind::AlbumOnPage;
+        let keep = PAGE_CONTENT_MIN;
+        // Page set to 1556, album to 647: on the whole page, as set.
+        let full = layout(album, set(647, 1556), room(1556), keep);
+        assert_eq!(
+            full,
+            Panel {
+                width: 647,
+                over: false
+            }
+        );
+        // Page at 1100: both at 1100/1556 of their width (457 + 643).
+        let narrower = layout(album, set(647, 1556), room(1100), keep);
+        assert_eq!(
+            narrower,
+            Panel {
+                width: 457,
+                over: false
+            }
+        );
+        // Page at 820: 341 by the rate, and the page keeps its 480.
+        let at_min = layout(album, set(647, 1556), room(820), keep);
+        assert_eq!(
+            at_min,
+            Panel {
+                width: 340,
+                over: false
+            }
+        );
+        // Page at 760: the album alone gets narrower, to its minimum.
+        let alone = layout(album, set(647, 1556), room(760), keep);
+        assert_eq!(
+            alone,
+            Panel {
+                width: MIN_WIDTH,
+                over: false
+            }
+        );
+        // Narrower: over the page, as wide as by the rate.
+        let over = layout(album, set(647, 1556), room(700), keep);
+        assert_eq!(
+            over,
+            Panel {
+                width: 291,
+                over: true
+            }
+        );
+        // A page wider than its content's own minimum keeps that instead.
+        let wide_content = Room {
+            content_min: 600,
+            ..room(900)
+        };
+        assert_eq!(layout(album, set(647, 1556), wide_content, keep).width, 300);
+    }
+
+    /// The album and playlist panels: the grid keeps two columns, then
+    /// the panel gets narrower down to its minimum; automatic panels are
+    /// a part of the room.
+    #[test]
+    fn a_panel_beside_a_grid_leaves_it_two_columns() {
+        let panel = Kind::Panel {
+            grid_padding: Some(18),
+        };
+        assert_eq!(layout(panel, set(700, 0), room(2400), 380).width, 700);
+        assert_eq!(layout(panel, set(700, 0), room(1000), 380).width, 620);
+        assert_eq!(layout(panel, set(700, 0), room(600), 380).width, MIN_WIDTH);
+        assert_eq!(layout(panel, set(0, 0), room(1000), 380).width, 380);
     }
 }

@@ -21,6 +21,9 @@ const FOLLOWED_SECTION: usize = 0;
 
 /// How long a Spotify request runs before the header bar's spinner shows,
 /// and how long it stays after the last one.
+/// The padding around each cover in the album and artist grids.
+const ALBUM_TILE_PADDING: i32 = 18;
+const ARTIST_TILE_PADDING: i32 = 24;
 const LOADING_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 const LOADING_LINGER: std::time::Duration = std::time::Duration::from_millis(300);
 
@@ -500,7 +503,7 @@ impl JewelcaseWindow {
         imp.album_grid.setup(
             &filtered,
             // A tile's padding (style.css: .grid-tile).
-            18,
+            ALBUM_TILE_PADDING,
             "album-grid",
             || AlbumTile::new().upcast(),
             |tile, item| {
@@ -640,7 +643,7 @@ impl JewelcaseWindow {
         imp.artist_grid.setup(
             &sorted,
             // A tile's padding (style.css: .artist-grid .grid-tile).
-            24,
+            ARTIST_TILE_PADDING,
             "artist-grid",
             || ArtistTile::new().upcast(),
             |tile, item| {
@@ -1457,10 +1460,7 @@ impl JewelcaseWindow {
                 }
             ),
         );
-        panel_resizer::attach(&page.split_view(), self.settings());
-        // An album goes over the page when the page has no room beside it.
-        page.split_view()
-            .set_min_content_width(panel_resizer::ARTIST_PAGE_CONTENT_MIN);
+        panel_resizer::attach_album_on_page(&page.split_view(), self.settings());
         imp.artist_holder.set_child(Some(&page));
         reveal_sidebar(&imp.artist_split);
     }
@@ -1585,9 +1585,9 @@ impl JewelcaseWindow {
 
     fn setup_panel_resizers(&self) {
         let imp = self.imp();
-        panel_resizer::attach(&imp.split_view, self.settings());
+        panel_resizer::attach_beside_grid(&imp.split_view, self.settings(), ALBUM_TILE_PADDING);
         panel_resizer::attach(&imp.playlist_split, self.settings());
-        panel_resizer::attach_artist(&imp.artist_split, self.settings());
+        panel_resizer::attach_artist(&imp.artist_split, self.settings(), ARTIST_TILE_PADDING);
     }
 
     fn artist_page(&self) -> Option<ArtistPage> {

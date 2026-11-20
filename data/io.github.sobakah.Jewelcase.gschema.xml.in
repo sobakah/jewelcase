@@ -308,20 +308,10 @@
       <summary>Width of artist pages</summary>
       <description>Set by dragging the page’s edge; 0: three quarters of the window.</description>
     </key>
-    <key name="artist-panel-width-window" type="i">
-      <default>0</default>
-      <summary>Window width when the artist pages’ width was set</summary>
-      <description>On narrower windows the pages are narrower in proportion; 0: the screen’s width.</description>
-    </key>
     <key name="panel-width" type="i">
       <default>0</default>
       <summary>Width of the album and playlist panels</summary>
       <description>Set by dragging the panel’s edge; 0 sizes them automatically.</description>
-    </key>
-    <key name="panel-width-window" type="i">
-      <default>0</default>
-      <summary>Window width when the panels’ width was set</summary>
-      <description>On narrower windows the panels are narrower in proportion; 0: the screen’s width.</description>
     </key>
     <key name="spotify-links-in-app" type="b">
       <default>false</default>

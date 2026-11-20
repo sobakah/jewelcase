@@ -26,6 +26,13 @@ const PADDING: i32 = 12;
 const MIN_COLUMNS: i32 = 2;
 const MAX_COLUMNS: i32 = 40;
 
+/// The narrowest a grid shows its least columns at, with covers
+/// `tile_size` wide and `tile_padding` around each (panel_resizer.rs:
+/// a panel beside the grid gets no wider than leaves this).
+pub fn min_width(tile_size: i32, tile_padding: i32) -> i32 {
+    MIN_COLUMNS * (tile_size + tile_padding) + 2 * PADDING
+}
+
 /// One line of the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {

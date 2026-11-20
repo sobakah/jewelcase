@@ -438,6 +438,12 @@ button.smart-shuffle {
 /* Panels slide in like a record sleeve (slide_view.rs): a soft shadow
    on their leading edge, deeper over the content than beside it. The
    selectors outrank libadwaita's .sidebar-pane border, which stays. */
+slide-view > .slide-pane {
+  /* Opaque: an album over an artist page let the page show through the
+     top of its cover backdrop, which is partly transparent. */
+  background-color: var(--window-bg-color);
+}
+
 slide-view > .slide-pane.end:dir(ltr) {
   box-shadow: inset 1px 0 var(--sidebar-border-color),
     -2px 0 6px alpha(black, 0.08),
