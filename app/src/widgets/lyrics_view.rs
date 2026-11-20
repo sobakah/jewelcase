@@ -344,6 +344,7 @@ impl LyricsView {
         imp.track_id.set(id);
         imp.lines.replace(Vec::new());
         imp.state.replace(None);
+        self.scroll_to_top();
         imp.album_dir.replace(track.as_ref().map(|t| {
             jewelcase_core::library::grouping::album_folder(&t.track().record.path).to_path_buf()
         }));
@@ -643,6 +644,10 @@ impl LyricsView {
         {
             button.add_css_class("active");
             self.scroll_to(button);
+        } else if active.is_none() {
+            // Back before the first line (a seek to the start, a position
+            // put right): the top, not where the line before was.
+            self.glide_to(0.0);
         }
     }
 
@@ -677,6 +682,21 @@ impl LyricsView {
         }
     }
 
+    /// Another song's lyrics start at their first line: the list kept
+    /// where the last song's ended (while a status shows in front of it,
+    /// e.g. as LRCLIB is asked, it isn't laid out), and stayed there until
+    /// the singing began.
+    fn scroll_to_top(&self) {
+        let imp = self.imp();
+        if let Some(animation) = imp.animation.take() {
+            animation.pause();
+        }
+        imp.paused_until.set(None);
+        imp.auto_scrolling.set(true);
+        imp.scroller.vadjustment().set_value(0.0);
+        imp.auto_scrolling.set(false);
+    }
+
     /// Scrolls the line into the middle, unless the user scrolled recently.
     fn scroll_to(&self, line: &gtk::Button) {
         let imp = self.imp();
@@ -685,6 +705,34 @@ impl LyricsView {
             .get()
             .is_some_and(|until| Instant::now() < until)
         {
+            return;
+        }
+        // Lyrics that just arrived aren't laid out yet: once they are (a
+        // few frames at most; hidden, they're placed by the next line).
+        if line.height() == 0 {
+            let line = line.downgrade();
+            let frames = std::cell::Cell::new(0);
+            self.add_tick_callback(move |view, _| {
+                frames.set(frames.get() + 1);
+                if let Some(line) = line.upgrade()
+                    && line.height() == 0
+                    && line.parent().is_some()
+                {
+                    return if frames.get() < 10 {
+                        glib::ControlFlow::Continue
+                    } else {
+                        glib::ControlFlow::Break
+                    };
+                }
+                let active = view.imp().active.get();
+                let rows = view.imp().rows.borrow().clone();
+                if let Some((_, button)) = active.and_then(|i| rows.get(i))
+                    && Some(button) == line.upgrade().as_ref()
+                {
+                    view.scroll_to(button);
+                }
+                glib::ControlFlow::Break
+            });
             return;
         }
         let Some(point) = line.compute_point(
@@ -700,7 +748,23 @@ impl LyricsView {
                 adjustment.lower(),
                 (adjustment.upper() - adjustment.page_size()).max(0.0),
             );
+        self.glide_to(target);
+    }
 
+    /// Scrolls to `target`, unless the user scrolled recently.
+    fn glide_to(&self, target: f64) {
+        let imp = self.imp();
+        if imp
+            .paused_until
+            .get()
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return;
+        }
+        let adjustment = imp.scroller.vadjustment();
+        if (adjustment.value() - target).abs() < 0.5 {
+            return;
+        }
         if let Some(animation) = imp.animation.take() {
             animation.pause();
         }

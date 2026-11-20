@@ -17,6 +17,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - The Spotify icon before a song with an artist line under it (another artist, a guest) is in the middle of the row again, beside both lines, instead of higher than the number and the buttons (album songs, the queue).
 - A Spotify album shows its cover also when nothing showed it before, such as a new release opened from the bell; it stayed a placeholder until the album had been seen on its artist's page.
+- Lyrics of a Spotify song start at their first line; they could open in the middle or near the end and jump to the top when the singing began.
 
 ## [0.8.0] — 2026-11-14
 

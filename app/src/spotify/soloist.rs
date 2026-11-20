@@ -221,6 +221,19 @@ impl SoloistState {
         }
         self.options = options;
     }
+
+    /// Jewelcase's song started, as Soloist reported. Without a position
+    /// in that report, the clock starts at the song's start: what it held
+    /// may be the song before's (Soloist can report on that one after the
+    /// new one was asked for), and the lyrics jumped to a line minutes in,
+    /// then waited for the singing to come back to the top.
+    fn our_song_started(&mut self, position_reported: bool) {
+        self.started = true;
+        self.started_at = Some(std::time::Instant::now());
+        if !position_reported {
+            self.position = Some(Position::at_start());
+        }
+    }
 }
 
 /// How long a chosen repeat mode wins over Soloist's reports.
@@ -516,7 +529,7 @@ impl Spotify {
                     state.status = status;
                 }
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri, progress);
+                    self.soloist_item(&item.uri, progress, position.is_some());
                 }
                 if let Some(status) = status {
                     self.soloist_status(status);
@@ -530,7 +543,7 @@ impl Spotify {
                 let progress = self.ours_progress();
                 self.imp().stream.borrow_mut().soloist.current = item.clone();
                 if let Some(item) = item {
-                    self.soloist_item(&item.uri, progress);
+                    self.soloist_item(&item.uri, progress, false);
                 }
                 self.receiver_check();
             }
@@ -725,7 +738,9 @@ impl Spotify {
 
     /// Soloist plays `uri`; `progress`: where Jewelcase's song was just
     /// before, and how much of it was left.
-    fn soloist_item(&self, uri: &str, progress: Option<(u64, u64)>) {
+    /// Soloist plays `uri`; `position_reported`: the report said where in
+    /// it (else the position held may be from before).
+    fn soloist_item(&self, uri: &str, progress: Option<(u64, u64)>, position_reported: bool) {
         let left = progress.map(|(_, left)| left);
         let (wanted, started) = {
             let state = &self.imp().stream.borrow().soloist;
@@ -737,8 +752,7 @@ impl Spotify {
                 self.restore_volume();
                 let seek = {
                     let mut stream = self.imp().stream.borrow_mut();
-                    stream.soloist.started = true;
-                    stream.soloist.started_at = Some(std::time::Instant::now());
+                    stream.soloist.our_song_started(position_reported);
                     stream.soloist.seek_after_start.take()
                 };
                 if let (Some(ms), Some(soloist)) = (seek, self.soloist()) {
@@ -1693,6 +1707,31 @@ mod tests {
         // Nothing handed over, or nothing known about what was left.
         assert!(!hand_over_slip(None, Some(153_000), now));
         assert!(!hand_over_slip(Some(now - ms(112)), None, now));
+    }
+
+    /// A report about the song before came after the new one was asked
+    /// for; the new one's start came without a position: the lyrics showed
+    /// a line minutes in until the singing began.
+    #[test]
+    fn a_song_starts_at_its_start_not_where_the_last_one_was() {
+        let mut state = SoloistState {
+            position: Some(Position {
+                position_ms: 190_000,
+                ..Position::at_start()
+            }),
+            ..SoloistState::default()
+        };
+        state.our_song_started(false);
+        assert!(state.started);
+        assert!(state.position.is_some_and(|p| p.now() < 1_000));
+        // A position that came with the start is the song's own.
+        state.started = false;
+        state.position = Some(Position {
+            position_ms: 5_000,
+            ..Position::at_start()
+        });
+        state.our_song_started(true);
+        assert!(state.position.is_some_and(|p| p.now() >= 5_000));
     }
 
     #[test]
