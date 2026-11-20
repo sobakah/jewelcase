@@ -366,20 +366,18 @@ mod tests {
     #[test]
     fn a_widget_is_focused_once_it_is_in_a_window() {
         use gtk::prelude::*;
-        if adw::init().is_err() {
-            eprintln!("no display: skipped");
-            return;
-        }
-        let window = gtk::Window::new();
-        let entry = gtk::Entry::new();
-        super::focus_when_shown(&entry);
-        let context = gtk::glib::MainContext::default();
-        while context.iteration(false) {}
-        assert!(gtk::prelude::RootExt::focus(&window).is_none());
-        window.set_child(Some(&entry));
-        while context.iteration(false) {}
-        // An entry's focus is in its text.
-        assert!(gtk::prelude::RootExt::focus(&window).is_some_and(|f| f.is_ancestor(&entry)));
+        crate::gtk_test::run(|| {
+            let window = gtk::Window::new();
+            let entry = gtk::Entry::new();
+            super::focus_when_shown(&entry);
+            let context = gtk::glib::MainContext::default();
+            while context.iteration(false) {}
+            assert!(gtk::prelude::RootExt::focus(&window).is_none());
+            window.set_child(Some(&entry));
+            while context.iteration(false) {}
+            // An entry's focus is in its text.
+            assert!(gtk::prelude::RootExt::focus(&window).is_some_and(|f| f.is_ancestor(&entry)));
+        });
     }
 
     /// A Spotify song with an artist line: the icon is in the middle of
@@ -388,18 +386,16 @@ mod tests {
     #[test]
     fn the_spotify_icon_is_beside_both_lines() {
         use gtk::prelude::*;
-        if adw::init().is_err() {
-            eprintln!("no display: skipped");
-            return;
-        }
-        let two = super::song_lines("Song", true, Some("Artist, Guest"))
-            .downcast::<gtk::Grid>()
-            .expect("a grid");
-        assert!(two.child_at(0, 1).is_some_and(|c| c.is::<gtk::Image>()));
-        let one = super::song_lines("Song", true, None)
-            .downcast::<gtk::Grid>()
-            .expect("a grid");
-        assert!(one.child_at(0, 0).is_some_and(|c| c.is::<gtk::Image>()));
-        assert!(one.child_at(0, 1).is_none());
+        crate::gtk_test::run(|| {
+            let two = super::song_lines("Song", true, Some("Artist, Guest"))
+                .downcast::<gtk::Grid>()
+                .expect("a grid");
+            assert!(two.child_at(0, 1).is_some_and(|c| c.is::<gtk::Image>()));
+            let one = super::song_lines("Song", true, None)
+                .downcast::<gtk::Grid>()
+                .expect("a grid");
+            assert!(one.child_at(0, 0).is_some_and(|c| c.is::<gtk::Image>()));
+            assert!(one.child_at(0, 1).is_none());
+        });
     }
 }

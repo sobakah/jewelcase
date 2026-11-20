@@ -336,57 +336,60 @@ mod tests {
     /// a fading one keeps fading.
     #[test]
     fn leaving_tiles_go_on_from_where_they_are() {
-        let image = || Some(gdk::Paintable::new_empty(100, 140));
-        let mut reflow = Reflow::default();
-        // Four columns; then two, with only items 0 and 1 built (in the
-        // first row of two), item 3 leaving, a header fading out.
-        let mut tiles: Vec<_> = (0..4)
-            .map(|i| {
-                let mut tile = built(TileKey::Local(i), i as f32 * 100.0, 0.0);
-                tile.1 = image();
-                tile
-            })
-            .collect();
-        let mut header = built(TileKey::Header(0), 0.0, 300.0);
-        header.1 = image();
-        tiles.push(header);
-        reflow.start(&tiles, OLD);
-        reflow.set_progress(0.5);
-        let now = [
-            Built {
-                key: TileKey::Local(0),
-                at: point(0.0, 0.0),
-            },
-            Built {
-                key: TileKey::Local(1),
-                at: point(100.0, 0.0),
-            },
-        ];
-        let rect_of = |reflow: &Reflow, key: TileKey| {
-            let leaving = reflow.leaving_tiles(&now, NEW);
-            let index = reflow
-                .before
-                .iter()
-                .filter(|(k, _)| !now.iter().any(|b| b.key == **k))
-                .position(|(k, _)| *k == key)?;
-            leaving
-                .get(index)
-                .map(|(_, rect, opacity)| (rect.top_left(), *opacity))
-        };
-        // Item 3: from (300, 0) half way to (100, 140) in two columns.
-        assert_eq!(
-            rect_of(&reflow, TileKey::Local(3)),
-            Some((point(200.0, 70.0), 1.0))
-        );
-        assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
-        // The columns change again: they go on from there.
-        let again: Vec<_> = now.iter().map(|b| (*b, image(), (100.0, 140.0))).collect();
-        reflow.start(&again, NEW);
-        assert_eq!(
-            rect_of(&reflow, TileKey::Local(3)),
-            Some((point(200.0, 70.0), 1.0))
-        );
-        assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
+        // Images are GDK's.
+        crate::gtk_test::run(|| {
+            let image = || Some(gdk::Paintable::new_empty(100, 140));
+            let mut reflow = Reflow::default();
+            // Four columns; then two, with only items 0 and 1 built (in the
+            // first row of two), item 3 leaving, a header fading out.
+            let mut tiles: Vec<_> = (0..4)
+                .map(|i| {
+                    let mut tile = built(TileKey::Local(i), i as f32 * 100.0, 0.0);
+                    tile.1 = image();
+                    tile
+                })
+                .collect();
+            let mut header = built(TileKey::Header(0), 0.0, 300.0);
+            header.1 = image();
+            tiles.push(header);
+            reflow.start(&tiles, OLD);
+            reflow.set_progress(0.5);
+            let now = [
+                Built {
+                    key: TileKey::Local(0),
+                    at: point(0.0, 0.0),
+                },
+                Built {
+                    key: TileKey::Local(1),
+                    at: point(100.0, 0.0),
+                },
+            ];
+            let rect_of = |reflow: &Reflow, key: TileKey| {
+                let leaving = reflow.leaving_tiles(&now, NEW);
+                let index = reflow
+                    .before
+                    .iter()
+                    .filter(|(k, _)| !now.iter().any(|b| b.key == **k))
+                    .position(|(k, _)| *k == key)?;
+                leaving
+                    .get(index)
+                    .map(|(_, rect, opacity)| (rect.top_left(), *opacity))
+            };
+            // Item 3: from (300, 0) half way to (100, 140) in two columns.
+            assert_eq!(
+                rect_of(&reflow, TileKey::Local(3)),
+                Some((point(200.0, 70.0), 1.0))
+            );
+            assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
+            // The columns change again: they go on from there.
+            let again: Vec<_> = now.iter().map(|b| (*b, image(), (100.0, 140.0))).collect();
+            reflow.start(&again, NEW);
+            assert_eq!(
+                rect_of(&reflow, TileKey::Local(3)),
+                Some((point(200.0, 70.0), 1.0))
+            );
+            assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
+        });
     }
 
     /// A reflow that ends before its anchor was used (the items changed

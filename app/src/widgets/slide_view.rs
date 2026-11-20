@@ -403,29 +403,27 @@ mod tests {
     /// stays open, over the grid.
     #[test]
     fn collapsing_hides_the_panel_unless_it_keeps_open() {
-        if adw::init().is_err() {
-            eprintln!("no display: skipped");
-            return;
-        }
-        let view = SlideView::default();
-        view.set_sidebar(Some(
-            gtk::Label::new(Some("panel")).upcast_ref::<gtk::Widget>(),
-        ));
-        view.set_show_sidebar(true);
-        view.set_collapsed(true);
-        assert!(!view.show_sidebar());
-        view.set_collapsed(false);
-        assert!(view.show_sidebar());
+        crate::gtk_test::run(|| {
+            let view = SlideView::default();
+            view.set_sidebar(Some(
+                gtk::Label::new(Some("panel")).upcast_ref::<gtk::Widget>(),
+            ));
+            view.set_show_sidebar(true);
+            view.set_collapsed(true);
+            assert!(!view.show_sidebar());
+            view.set_collapsed(false);
+            assert!(view.show_sidebar());
 
-        let artist = SlideView::default();
-        artist.set_keep_open(true);
-        artist.set_sidebar(Some(
-            gtk::Label::new(Some("page")).upcast_ref::<gtk::Widget>(),
-        ));
-        artist.set_show_sidebar(true);
-        artist.set_collapsed(true);
-        assert!(artist.show_sidebar());
-        artist.set_collapsed(false);
-        assert!(artist.show_sidebar());
+            let artist = SlideView::default();
+            artist.set_keep_open(true);
+            artist.set_sidebar(Some(
+                gtk::Label::new(Some("page")).upcast_ref::<gtk::Widget>(),
+            ));
+            artist.set_show_sidebar(true);
+            artist.set_collapsed(true);
+            assert!(artist.show_sidebar());
+            artist.set_collapsed(false);
+            assert!(artist.show_sidebar());
+        });
     }
 }

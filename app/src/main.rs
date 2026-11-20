@@ -6,6 +6,8 @@ mod covers;
 mod diff;
 mod format;
 mod frame_stats;
+#[cfg(test)]
+mod gtk_test;
 mod icons;
 mod library;
 mod library_folders;

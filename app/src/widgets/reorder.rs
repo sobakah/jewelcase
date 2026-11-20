@@ -328,27 +328,25 @@ mod tests {
     /// let go (it couldn't close on a click beside it until a restart).
     #[test]
     fn a_sheet_held_by_a_row_that_left_is_let_go() {
-        if adw::init().is_err() {
-            eprintln!("no display: skipped");
-            return;
-        }
-        let sheet = adw::BottomSheet::new();
-        let list = gtk::ListBox::new();
-        let row = gtk::ListBoxRow::new();
-        list.append(&row);
-        sheet.set_sheet(Some(&list));
+        crate::gtk_test::run(|| {
+            let sheet = adw::BottomSheet::new();
+            let list = gtk::ListBox::new();
+            let row = gtk::ListBoxRow::new();
+            list.append(&row);
+            sheet.set_sheet(Some(&list));
 
-        hold_sheet(&row, true);
-        assert!(!sheet.can_close());
-        list.remove(&row);
-        hold_sheet(&row, false);
-        assert!(sheet.can_close());
+            hold_sheet(&row, true);
+            assert!(!sheet.can_close());
+            list.remove(&row);
+            hold_sheet(&row, false);
+            assert!(sheet.can_close());
 
-        // A release that never came: the next press lets go.
-        let other = gtk::ListBoxRow::new();
-        list.append(&other);
-        hold_sheet(&other, true);
-        release_sheet();
-        assert!(sheet.can_close());
+            // A release that never came: the next press lets go.
+            let other = gtk::ListBoxRow::new();
+            list.append(&other);
+            hold_sheet(&other, true);
+            release_sheet();
+            assert!(sheet.can_close());
+        });
     }
 }
