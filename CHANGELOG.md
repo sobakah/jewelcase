@@ -10,6 +10,8 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **Large playlists stay smooth**: scrolling through a playlist of thousands of songs no longer stutters, it opens at once instead of filling in over a few seconds, and adding, removing, moving or searching songs in it no longer makes the window hang.
 - Changing one playlist, or syncing with Spotify, no longer rebuilds the tiles of all the others.
+- **Albums glide to their new places** when an album opens or closes beside the grid, or the window gets wider or narrower, instead of jumping there; the albums at the top stay in view.
+- The songs of a Spotify album fade in once they have arrived instead of appearing all at once.
 
 ## [0.8.0] — 2026-11-14
 

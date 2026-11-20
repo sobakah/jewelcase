@@ -5,6 +5,7 @@ mod artist_tile;
 mod cover_backdrop;
 mod cover_image;
 mod device_popover;
+mod grid_reflow;
 mod identify_dialog;
 mod list_card;
 mod lyrics_view;

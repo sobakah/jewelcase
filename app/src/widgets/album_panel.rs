@@ -361,6 +361,18 @@ impl AlbumPanel {
                         panel.fill_tracks(&tracks, &artist);
                         panel.imp().track_objects.replace(tracks);
                         panel.update_playing();
+                        // In place of the spinner: faded in, not all at
+                        // once (the panel may still be sliding in).
+                        let songs = panel.imp().tracks.get();
+                        adw::TimedAnimation::builder()
+                            .widget(&songs)
+                            .value_from(0.0)
+                            .value_to(1.0)
+                            .duration(200)
+                            .easing(adw::Easing::EaseOutCubic)
+                            .target(&adw::PropertyAnimationTarget::new(&songs, "opacity"))
+                            .build()
+                            .play();
                     }
                     None => {
                         panel.fill_tracks(&[], "");

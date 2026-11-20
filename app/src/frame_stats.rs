@@ -34,6 +34,8 @@ struct Run {
 }
 
 pub fn watch(window: &gtk::Window) {
+    #[cfg(debug_assertions)]
+    dump(window);
     if std::env::var_os("JEWELCASE_FRAME_STATS").is_none() {
         return;
     }
@@ -52,7 +54,32 @@ pub fn watch(window: &gtk::Window) {
                 started.borrow_mut().get_or_insert_with(Instant::now);
             }
         });
+        // A frame that takes longer than 10 ms is logged with its phases
+        // (each mark comes after GTK's own handler of the phase).
+        let marks: Rc<RefCell<Vec<Instant>>> = Rc::default();
+        for phase in 0..3 {
+            let marks = marks.clone();
+            let mark = move |_: &gtk::gdk::FrameClock| marks.borrow_mut().push(Instant::now());
+            match phase {
+                0 => clock.connect_update(mark),
+                1 => clock.connect_layout(mark),
+                _ => clock.connect_paint(mark),
+            };
+        }
         clock.connect_after_paint(move |clock| {
+            let at = *started.borrow();
+            let marks = marks.take();
+            if let (Some(at), [update, layout, paint]) = (at, marks.as_slice())
+                && at.elapsed().as_millis() > 10
+            {
+                tracing::warn!(
+                    "Slow frame, {:?}: animations {:?}, layout {:?}, painting {:?}",
+                    at.elapsed(),
+                    *update - at,
+                    *layout - *update,
+                    *paint - *layout
+                );
+            }
             let paint_us = started
                 .take()
                 .map_or(0, |at| at.elapsed().as_micros() as u64);
@@ -111,4 +138,59 @@ fn log(run: &Run) {
         run.paint_us as f64 / 1000.0 / f64::from(run.frames),
         run.longest_paint_us as f64 / 1000.0,
     );
+}
+
+/// `JEWELCASE_FRAME_DUMP=FOLDER:FROM:TO` (debug builds): every frame painted
+/// from FROM to TO seconds after the window appears, saved at half size
+/// as `FOLDER/NNNN-<ms>.png`, to see what an animation draws frame by frame.
+/// The frames are kept in memory and saved after TO.
+#[cfg(debug_assertions)]
+fn dump(window: &gtk::Window) {
+    let Some((folder, from, to)) = std::env::var("JEWELCASE_FRAME_DUMP").ok().and_then(|v| {
+        let mut parts = v.rsplitn(3, ':');
+        let to: f64 = parts.next()?.parse().ok()?;
+        let from: f64 = parts.next()?.parse().ok()?;
+        Some((std::path::PathBuf::from(parts.next()?), from, to))
+    }) else {
+        return;
+    };
+    window.connect_realize(move |window| {
+        let Some(clock) = window.frame_clock() else {
+            return;
+        };
+        let start = Instant::now();
+        let frames: Rc<RefCell<Vec<(u128, gtk::gdk::Texture)>>> = Rc::default();
+        let weak = window.downgrade();
+        let folder = folder.clone();
+        let saved = frames.clone();
+        glib::timeout_add_local_once(Duration::from_secs_f64(to), move || {
+            let frames = saved.take();
+            tracing::warn!("Frame dump: {} frames", frames.len());
+            for (index, (ms, texture)) in frames.into_iter().enumerate() {
+                if let Err(err) = texture.save_to_png(folder.join(format!("{index:04}-{ms}.png"))) {
+                    tracing::warn!("Frame dump: {err}");
+                }
+            }
+        });
+        clock.connect_after_paint(move |_| {
+            let at = start.elapsed().as_secs_f64();
+            if at < from || at > to {
+                return;
+            }
+            let Some(window) = weak.upgrade() else { return };
+            // At half size (a large window's frames fill the memory fast).
+            let paintable = gtk::WidgetPaintable::new(Some(&window));
+            let snapshot = gtk::Snapshot::new();
+            let (width, height) = (window.width() as f32, window.height() as f32);
+            snapshot.scale(0.5, 0.5);
+            paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
+            if let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) {
+                let viewport = gtk::graphene::Rect::new(0.0, 0.0, width / 2.0, height / 2.0);
+                let texture = renderer.render_texture(&node, Some(&viewport));
+                frames
+                    .borrow_mut()
+                    .push((start.elapsed().as_millis(), texture));
+            }
+        });
+    });
 }

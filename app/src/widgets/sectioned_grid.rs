@@ -14,8 +14,9 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gettextrs::gettext;
 use gtk::subclass::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gio, glib, graphene};
 
+use super::grid_reflow::{Built, Lattice, Reflow, TileKey};
 use super::{ShelfItem, tile_content};
 use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
@@ -88,6 +89,24 @@ mod imp {
         pub shown: RefCell<Vec<Row>>,
         /// The library's items changed: their rows show other items now.
         pub local_dirty: Cell<bool>,
+        /// The tiles gliding to their places after the columns changed
+        /// (shared with the rows, which draw them there).
+        pub reflow: Rc<RefCell<Reflow>>,
+        pub reflow_animation: OnceCell<adw::SpringAnimation>,
+        /// Every row widget made, to find the tiles built now.
+        pub row_widgets: RefCell<Vec<glib::WeakRef<GridRow>>>,
+        /// The width and cover size of the last layout.
+        pub laid_width: Cell<i32>,
+        pub laid_tile_size: Cell<i32>,
+        /// The column count the rows were made for.
+        pub built_columns: Cell<u32>,
+        /// The tile at the top of the view when the columns changed, and
+        /// where it was: the view keeps it there (else the list keeps its
+        /// offset, and shows other tiles).
+        pub anchor: Cell<Option<(TileKey, f32)>>,
+        /// Off screen since the last layout (another page was shown): the
+        /// tiles weren't seen where they were, so they don't glide.
+        pub hidden: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -105,15 +124,32 @@ mod imp {
             let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
             let factory = gtk::SignalListItemFactory::new();
             let columns = self.columns.clone();
-            factory.connect_setup(move |_, item| {
+            let reflow = self.reflow.clone();
+            factory.connect_setup(glib::clone!(
+                #[weak]
+                obj,
+                move |_, item| {
+                    let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+                    // Tiles take the focus and clicks, not the rows.
+                    item.set_activatable(false);
+                    item.set_selectable(false);
+                    item.set_focusable(false);
+                    let row = GridRow::default();
+                    row.imp().columns.replace(Some(columns.clone()));
+                    row.imp().list_item.set(Some(item));
+                    row.imp().reflow.replace(Some(reflow.clone()));
+                    row.imp().grid.set(Some(obj.upcast_ref()));
+                    let mut rows = obj.imp().row_widgets.borrow_mut();
+                    rows.retain(|r| r.upgrade().is_some());
+                    rows.push(row.downgrade());
+                    item.set_child(Some(&row));
+                }
+            ));
+            factory.connect_unbind(|_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-                // Tiles take the focus and clicks, not the rows.
-                item.set_activatable(false);
-                item.set_selectable(false);
-                item.set_focusable(false);
-                let row = GridRow::default();
-                row.imp().columns.replace(Some(columns.clone()));
-                item.set_child(Some(&row));
+                if let Some(row) = item.child().and_downcast::<GridRow>() {
+                    row.imp().bound.set(None);
+                }
             });
             factory.connect_bind(glib::clone!(
                 #[weak]
@@ -139,6 +175,26 @@ mod imp {
             self.scroller.set_child(Some(&self.list));
             self.scroller.set_parent(&*obj);
             super::super::connect_tile_size(&*obj, |grid| grid.queue_resize());
+            // Critically damped, about as long as a panel takes to open.
+            let target = adw::CallbackAnimationTarget::new(glib::clone!(
+                #[weak]
+                obj,
+                move |value| obj.reflow_moved(value)
+            ));
+            let animation = adw::SpringAnimation::new(
+                &*obj,
+                0.0,
+                1.0,
+                adw::SpringParams::new(1.0, 1.0, 280.0),
+                target,
+            );
+            animation.set_clamp(true);
+            animation.connect_done(glib::clone!(
+                #[weak]
+                obj,
+                move |_| obj.end_reflow()
+            ));
+            let _ = self.reflow_animation.set(animation);
         }
 
         fn dispose(&self) {
@@ -152,16 +208,88 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            self.scroller.allocate(width, height, baseline, None);
             let available = width - 2 * PADDING;
-            let column = super::super::tile_size() + self.tile_padding.get();
+            let tile_size = super::super::tile_size();
+            let column = tile_size + self.tile_padding.get();
             let columns = (available / column.max(1)).clamp(MIN_COLUMNS, MAX_COLUMNS) as u32;
-            if columns != self.columns.get() {
+            let old = self.columns.get();
+            if columns != old {
+                // Before the rows are laid out anew: the tiles are still
+                // where they were.
+                if old != 0 && !self.hidden.get() && self.laid_tile_size.get() == tile_size {
+                    self.obj()
+                        .start_reflow(lattice(self.laid_width.get(), old), lattice(width, columns));
+                } else {
+                    self.obj().end_reflow();
+                }
                 self.columns.set(columns);
                 // Not while allocating: the rows change the list.
                 self.obj().rebuild_soon();
             }
+            self.laid_width.set(width);
+            self.laid_tile_size.set(tile_size);
+            self.hidden.set(false);
+            self.scroller.allocate(width, height, baseline, None);
+            // Once the rows for the new columns are laid out (not while
+            // laying out: scrolling lays them out again).
+            if !self.rebuild_pending.get()
+                && self.built_columns.get() == columns
+                && let Some((key, y)) = self.anchor.take()
+            {
+                glib::idle_add_local_once(glib::clone!(
+                    #[weak(rename_to = grid)]
+                    self.obj(),
+                    move || grid.keep_in_place(key, y)
+                ));
+            }
         }
+
+        fn unmap(&self) {
+            self.parent_unmap();
+            self.hidden.set(true);
+            self.obj().end_reflow();
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let obj = self.obj();
+            if !self.reflow.borrow().running() {
+                obj.snapshot_child(&self.scroller, snapshot);
+                return;
+            }
+            // While tiles move, the list doesn't cut them off at its sides
+            // (they come from beyond them; the panel covers that side):
+            // only above and below the grid.
+            let (width, height) = (obj.width() as f32, obj.height() as f32);
+            snapshot.push_clip(&graphene::Rect::new(-width, 0.0, 3.0 * width, height));
+            obj.snapshot_child(&self.scroller, snapshot);
+            let built: Vec<Built> = obj.built_tiles().into_iter().map(|(b, _)| b).collect();
+            let now = lattice(obj.width(), self.columns.get());
+            let leaving = self.reflow.borrow().leaving_tiles(&built, now);
+            for (image, rect, opacity) in leaving {
+                snapshot.save();
+                snapshot.translate(&rect.top_left());
+                if opacity < 1.0 {
+                    snapshot.push_opacity(f64::from(opacity));
+                }
+                image.snapshot(snapshot, f64::from(rect.width()), f64::from(rect.height()));
+                if opacity < 1.0 {
+                    snapshot.pop();
+                }
+                snapshot.restore();
+            }
+            snapshot.pop();
+        }
+    }
+}
+
+/// The columns of a grid `width` wide in `columns`, as the rows lay out
+/// their tiles (the rows' height is measured: `row_pitch`).
+fn lattice(width: i32, columns: u32) -> Lattice {
+    let column = (width - 2 * PADDING) / columns.max(1) as i32;
+    Lattice {
+        columns,
+        column: column as f32,
+        pitch: 0.0,
     }
 }
 
@@ -208,6 +336,146 @@ impl SectionedGrid {
     pub fn scroll_to_end(&self) {
         let adjustment = self.imp().scroller.vadjustment();
         adjustment.set_value(adjustment.upper());
+    }
+
+    /// The tiles built now, with where they're laid out.
+    fn built_tiles(&self) -> Vec<(Built, gtk::Widget)> {
+        let rows: Vec<GridRow> = self
+            .imp()
+            .row_widgets
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .filter(|r| r.is_drawable())
+            .collect();
+        rows.iter()
+            .flat_map(GridRow::tiles)
+            .filter_map(|(key, widget)| {
+                let at = widget.compute_bounds(self)?.top_left();
+                Some((Built { key, at }, widget))
+            })
+            .collect()
+    }
+
+    /// The height of a row of tiles now.
+    fn row_pitch(&self) -> f32 {
+        self.imp()
+            .row_widgets
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .find(|r| r.is_drawable() && r.imp().header.borrow().is_none())
+            .map_or(0.0, |r| r.height() as f32)
+    }
+
+    /// The columns change from `old` to `new`: the tiles glide from
+    /// where they're drawn now to their new places.
+    fn start_reflow(&self, mut old: Lattice, mut new: Lattice) {
+        let imp = self.imp();
+        let pitch = self.row_pitch();
+        old.pitch = pitch;
+        new.pitch = pitch;
+        let height = self.height() as f32;
+        let tiles: Vec<_> = self
+            .built_tiles()
+            .into_iter()
+            .filter_map(|(tile, widget)| {
+                let bounds = widget.compute_bounds(self)?;
+                // Only what's on screen (or may move onto it).
+                if bounds.y() + bounds.height() < -pitch || bounds.y() > height + pitch {
+                    return None;
+                }
+                let image = gtk::WidgetPaintable::new(Some(&widget)).current_image();
+                Some((tile, Some(image), (bounds.width(), bounds.height())))
+            })
+            .collect();
+        if tiles.is_empty() {
+            self.end_reflow();
+            return;
+        }
+        // The first tile mostly in view stays where it is.
+        let anchor = tiles
+            .iter()
+            .filter(|(tile, _, (_, h))| tile.key.place().is_some() && tile.at.y() + h / 2.0 >= 0.0)
+            .min_by(|(a, _, _), (b, _, _)| {
+                (a.at.y(), a.at.x())
+                    .partial_cmp(&(b.at.y(), b.at.x()))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(tile, _, _)| (tile.key, tile.at.y()));
+        imp.anchor.set(anchor);
+        imp.reflow.borrow_mut().start(&tiles, old, new);
+        imp.scroller.set_overflow(gtk::Overflow::Visible);
+        imp.list.set_overflow(gtk::Overflow::Visible);
+        if let Some(animation) = imp.reflow_animation.get() {
+            animation.pause();
+            animation.set_value_from(0.0);
+            animation.set_value_to(1.0);
+            animation.set_initial_velocity(0.0);
+            animation.play();
+        }
+        self.queue_draw();
+    }
+
+    /// Scrolls so that the tile `key` is at `y` again.
+    fn keep_in_place(&self, key: TileKey, y: f32) {
+        let imp = self.imp();
+        let built: Vec<Built> = self.built_tiles().into_iter().map(|(b, _)| b).collect();
+        let now = built
+            .iter()
+            .find(|b| b.key == key)
+            .map(|b| b.at.y())
+            .or_else(|| {
+                // Not built: from a tile of its run that is.
+                let (run, index) = key.place()?;
+                let other = built
+                    .iter()
+                    .find(|b| b.key.place().is_some_and(|(r, _)| r == run))?;
+                let (_, other_index) = other.key.place()?;
+                let mut lattice = lattice(self.width(), imp.columns.get());
+                lattice.pitch = self.row_pitch();
+                Some(lattice.place(other.at, other_index, index).y())
+            });
+        if let Some(now) = now {
+            let adjustment = imp.scroller.vadjustment();
+            adjustment.set_value(adjustment.value() + f64::from(now - y));
+        }
+    }
+
+    fn reflow_moved(&self, progress: f64) {
+        let imp = self.imp();
+        imp.reflow.borrow_mut().set_progress(progress);
+        for row in imp
+            .row_widgets
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+        {
+            row.queue_draw();
+        }
+        self.queue_draw();
+    }
+
+    fn end_reflow(&self) {
+        let imp = self.imp();
+        if !imp.reflow.borrow().running() {
+            return;
+        }
+        if let Some(animation) = imp.reflow_animation.get() {
+            animation.pause();
+        }
+        imp.reflow.borrow_mut().finish();
+        imp.scroller.set_overflow(gtk::Overflow::Hidden);
+        imp.list.set_overflow(gtk::Overflow::Hidden);
+        for row in imp
+            .row_widgets
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+        {
+            row.queue_draw();
+        }
+        self.queue_draw();
     }
 
     /// Clicks the first tile on screen (screenshot tests).
@@ -344,6 +612,7 @@ impl SectionedGrid {
                 }));
             }
         }
+        imp.built_columns.set(columns);
         // Only what changed: rows that stay keep their widgets (no new
         // textures, focus kept); changed items change every row after them.
         let old = imp.shown.replace(rows.clone());
@@ -354,6 +623,10 @@ impl SectionedGrid {
             .iter_mut()
             .map(|s| std::mem::take(&mut s.dirty))
             .collect();
+        // Other items in the tiles: they'd glide to the wrong places.
+        if local_dirty || dirty.contains(&true) {
+            self.end_reflow();
+        }
         let keep = old
             .iter()
             .zip(&rows)
@@ -366,13 +639,26 @@ impl SectionedGrid {
                     }
             })
             .count();
-        let objects: Vec<glib::BoxedAnyObject> = rows[keep..]
-            .iter()
-            .copied()
-            .map(glib::BoxedAnyObject::new)
-            .collect();
         if let Some(store) = imp.rows.get() {
-            store.splice(keep as u32, store.n_items() - keep as u32, &objects);
+            // The changed rows that were there before show their new
+            // lines (their widgets stay: new ones would build every tile
+            // anew); only the count changes in the list.
+            let shared = old.len().min(rows.len());
+            for (position, row) in rows.iter().enumerate().take(shared).skip(keep) {
+                if let Some(object) = store
+                    .item(position as u32)
+                    .and_downcast::<glib::BoxedAnyObject>()
+                {
+                    *object.borrow_mut::<Row>() = *row;
+                }
+            }
+            let added: Vec<glib::BoxedAnyObject> = rows[shared..]
+                .iter()
+                .copied()
+                .map(glib::BoxedAnyObject::new)
+                .collect();
+            store.splice(shared as u32, (old.len() - shared) as u32, &added);
+            self.rebind(keep as u32..shared as u32);
         }
         // A header that stayed shows the new count and state.
         let headers: Vec<Option<GridRow>> = imp
@@ -389,8 +675,32 @@ impl SectionedGrid {
         }
     }
 
+    /// Binds the rows built at `positions` again (their lines changed).
+    fn rebind(&self, positions: std::ops::Range<u32>) {
+        let rows: Vec<GridRow> = self
+            .imp()
+            .row_widgets
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .collect();
+        for widget in rows {
+            let Some(item) = widget.imp().list_item.upgrade() else {
+                continue;
+            };
+            if !positions.contains(&item.position()) {
+                continue;
+            }
+            if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
+                let row = *object.borrow::<Row>();
+                self.bind_row(&widget, row);
+            }
+        }
+    }
+
     fn bind_row(&self, widget: &GridRow, row: Row) {
         let imp = self.imp();
+        widget.imp().bound.set(Some(row));
         let columns = imp.columns.get() as usize;
         match row {
             Row::Header(section) => {
@@ -518,6 +828,12 @@ mod row_imp {
         /// The first section item of the row, and what opens one.
         pub spotify_start: Cell<usize>,
         pub spotify_activate: RefCell<Option<SpotifyActivate>>,
+        /// What the row shows now, and the list's item it shows.
+        pub bound: Cell<Option<Row>>,
+        pub list_item: glib::WeakRef<gtk::ListItem>,
+        /// The grid's reflow, and the grid (where tiles are drawn from).
+        pub reflow: RefCell<Option<Rc<RefCell<Reflow>>>>,
+        pub grid: glib::WeakRef<gtk::Widget>,
     }
 
     #[glib::object_subclass]
@@ -603,14 +919,63 @@ mod row_imp {
             let slots = self.slots.borrow();
             let count = self.column_count(slots.len());
             let column = width / count;
+            // More tiles than the grid has columns now: until the rows are
+            // rebuilt (a frame or two), the tiles keep their size (they're
+            // drawn where they were, see grid_reflow.rs).
+            let stale = count as usize == slots.len()
+                && self
+                    .columns
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|c| (c.get() as usize) < slots.len());
             for (index, slot) in slots.iter().enumerate() {
                 // Never below the tile's own minimum (it'd overflow into
                 // the next column only while the grid picks fewer columns).
-                let slot_width = Self::slot_width(slot, column);
+                let slot_width = if stale {
+                    slot.measure(gtk::Orientation::Horizontal, -1).1
+                } else {
+                    Self::slot_width(slot, column)
+                };
                 let x = column * index as i32 + ((column - slot_width) / 2).max(0);
                 let transform =
                     gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x as f32, 0.0));
                 slot.allocate(slot_width, height, -1, Some(transform));
+            }
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let obj = self.obj();
+            let reflow = self.reflow.borrow().clone();
+            let grid = self.grid.upgrade();
+            let (Some(reflow), Some(grid)) = (reflow, grid) else {
+                self.parent_snapshot(snapshot);
+                return;
+            };
+            let reflow = reflow.borrow();
+            if !reflow.running() || self.bound.get().is_none() {
+                self.parent_snapshot(snapshot);
+                return;
+            }
+            // Each tile where it is on its way (grid_reflow.rs).
+            for (key, tile) in obj.tiles() {
+                let Some(bounds) = tile.compute_bounds(&grid) else {
+                    obj.snapshot_child(&tile, snapshot);
+                    continue;
+                };
+                let (at, opacity) = reflow.drawn(key, bounds.top_left());
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(
+                    at.x() - bounds.x(),
+                    at.y() - bounds.y(),
+                ));
+                if opacity < 1.0 {
+                    snapshot.push_opacity(f64::from(opacity));
+                }
+                obj.snapshot_child(&tile, snapshot);
+                if opacity < 1.0 {
+                    snapshot.pop();
+                }
+                snapshot.restore();
             }
         }
     }
@@ -629,6 +994,36 @@ impl Default for GridRow {
 }
 
 impl GridRow {
+    /// The tiles shown (or the header), each with what it shows.
+    fn tiles(&self) -> Vec<(TileKey, gtk::Widget)> {
+        let imp = self.imp();
+        let slots = |key: &dyn Fn(u32) -> TileKey, len: u32| -> Vec<(TileKey, gtk::Widget)> {
+            imp.slots
+                .borrow()
+                .iter()
+                .take(len as usize)
+                .enumerate()
+                .filter(|(_, s)| s.is_visible())
+                .map(|(i, s)| (key(i as u32), s.clone().upcast()))
+                .collect()
+        };
+        match imp.bound.get() {
+            None => Vec::new(),
+            Some(Row::Header(section)) => imp
+                .header
+                .borrow()
+                .iter()
+                .map(|h| (TileKey::Header(section), h.clone()))
+                .collect(),
+            Some(Row::Local { start, len }) => slots(&|i| TileKey::Local(start + i), len),
+            Some(Row::Section {
+                section,
+                start,
+                len,
+            }) => slots(&|i| TileKey::Section(section, start + i), len),
+        }
+    }
+
     fn clear(&self) {
         let imp = self.imp();
         for slot in imp.slots.take() {
@@ -642,17 +1037,24 @@ impl GridRow {
         imp.header_permission.replace(None);
     }
 
-    /// `columns` tile buttons of `kind` (reused when they already are).
+    /// `columns` tile buttons of `kind`: the row's own when they are (as
+    /// many as are needed: the columns changed, and every row with them).
     fn prepare(&self, kind: RowKind, columns: usize, create: Option<&Create>, activate: Activate) {
         let imp = self.imp();
         imp.activate.replace(Some(activate));
-        if imp.kind.get() == kind && imp.slots.borrow().len() == columns {
+        if imp.kind.get() != kind {
+            self.clear();
+            imp.kind.set(kind);
+        }
+        let mut slots = imp.slots.take();
+        if slots.len() == columns {
+            imp.slots.replace(slots);
             return;
         }
-        self.clear();
-        imp.kind.set(kind);
-        self.queue_resize();
-        for index in 0..columns {
+        for extra in slots.drain(columns.min(slots.len())..) {
+            extra.unparent();
+        }
+        for index in slots.len()..columns {
             let button = gtk::Button::builder()
                 .css_classes(["flat", "grid-tile"])
                 .build();
@@ -668,8 +1070,10 @@ impl GridRow {
                 move |_| row.clicked(index)
             ));
             button.set_parent(self);
-            imp.slots.borrow_mut().push(button);
+            slots.push(button);
         }
+        imp.slots.replace(slots);
+        self.queue_resize();
     }
 
     fn clicked(&self, index: usize) {

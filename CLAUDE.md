@@ -169,8 +169,11 @@ name (`journalctl --user | grep jewelcase::`), not `-t jewelcase`; after the upd
 restart they go nowhere. For Soloist trouble read soloistd's log first
 (`journalctl --user -t soloistd`): every song start, pause (a seek shows as one) and volume change,
 to the millisecond.
-`JEWELCASE_FRAME_STATS=1` logs each animation's frame rate, longest frame and painting time (also
-in release builds): measure before changing anything for "it feels slow". Headless runs render on
+`JEWELCASE_FRAME_STATS=1` logs each animation's frame rate, longest frame and painting time, and
+each frame over 10 ms with its phases (also in release builds): measure before changing anything
+for "it feels slow". `JEWELCASE_FRAME_DUMP=FOLDER:FROM:TO` (debug builds) saves every frame painted
+from FROM to TO seconds after the window appears, at half size, to see an animation frame by frame
+(it slows the frames it saves: time them without it). Headless runs render on
 the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 (`CLAUDE.local.md`).
 
@@ -345,6 +348,10 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   accounts (librespot issue #1649). `Cargo.lock` pins vergen 9.0.6 for librespot-core's build
   script.
 - Jewelcase only asks LRCLIB for lyrics of Spotify songs while the lyrics are on screen.
+- **The album and artist grids** (`widgets/sectioned_grid.rs`) change their rows in place when
+  the columns change: new list items would make the list view build every row and tile anew
+  (11 ms of a panel's first frame). Their tiles glide to the new places (`widgets/grid_reflow.rs`)
+  while the rows are already laid out for the new columns; only the drawing moves.
 - **A playlist's songs are a `GtkListView`, not a boxed `GtkListBox`**: a list box restyles all
   its rows whenever the hovered row changes (3000 songs scrolled at 20–40 fps; split into
   smaller list boxes too), and builds every row up front. The panel's top is the list's first
