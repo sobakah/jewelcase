@@ -183,6 +183,9 @@ mod imp {
             self.scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
             self.scroller.set_child(Some(&self.list));
             self.scroller.set_parent(&*obj);
+            // The list's background also where the list isn't: beside it
+            // while a panel's edge is dragged (held_width).
+            obj.add_css_class("view");
             super::super::connect_tile_size(&*obj, |grid| grid.queue_resize());
             // Critically damped, about as long as a panel takes to open.
             let target = adw::CallbackAnimationTarget::new(glib::clone!(
