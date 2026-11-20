@@ -168,7 +168,8 @@ pub fn disconnect_with(
 /// A song's title and the line under it (the artist), with the Spotify
 /// icon before the title for songs that play from Spotify (§9.4): the
 /// line under starts under the title, not under the icon (like the mini
-/// player).
+/// player), and the icon is in the middle of both lines, like the rest of
+/// the row (the number, the buttons).
 pub fn song_lines(title: &str, from_spotify: bool, subtitle: Option<&str>) -> gtk::Widget {
     use gtk::prelude::*;
     let grid = gtk::Grid::builder()
@@ -177,7 +178,8 @@ pub fn song_lines(title: &str, from_spotify: bool, subtitle: Option<&str>) -> gt
         .hexpand(true)
         .build();
     if from_spotify {
-        grid.attach(&spotify_icon(), 0, 0, 1, 1);
+        let lines = if subtitle.is_some() { 2 } else { 1 };
+        grid.attach(&spotify_icon(), 0, 0, 1, lines);
     }
     let label = gtk::Label::builder()
         .label(title)
@@ -327,5 +329,26 @@ mod tests {
             title[..title.find('}').unwrap()].contains("hexpand: true;"),
             "the title no longer expands: is this test still needed?"
         );
+    }
+
+    /// A Spotify song with an artist line: the icon is in the middle of
+    /// both lines, like the number and the buttons (it sat on the title's
+    /// line, higher than the rest of the row).
+    #[test]
+    fn the_spotify_icon_is_beside_both_lines() {
+        use gtk::prelude::*;
+        if adw::init().is_err() {
+            eprintln!("no display: skipped");
+            return;
+        }
+        let two = super::song_lines("Song", true, Some("Artist, Guest"))
+            .downcast::<gtk::Grid>()
+            .expect("a grid");
+        assert!(two.child_at(0, 1).is_some_and(|c| c.is::<gtk::Image>()));
+        let one = super::song_lines("Song", true, None)
+            .downcast::<gtk::Grid>()
+            .expect("a grid");
+        assert!(one.child_at(0, 0).is_some_and(|c| c.is::<gtk::Image>()));
+        assert!(one.child_at(0, 1).is_none());
     }
 }

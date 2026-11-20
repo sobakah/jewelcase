@@ -13,6 +13,10 @@ All notable changes to Jewelcase are documented here. The format follows
 - **Albums glide to their new places** when an album opens or closes beside the grid, or the window gets wider or narrower, instead of jumping there; the albums at the top stay in view.
 - The songs of a Spotify album fade in once they have arrived instead of appearing all at once.
 
+### Fixed
+
+- The Spotify icon before a song with an artist line under it (another artist, a guest) is in the middle of the row again, beside both lines, instead of higher than the number and the buttons (album songs, the queue).
+
 ## [0.8.0] — 2026-11-14
 
 The library database doesn't change; 0.7.0 still opens it.
