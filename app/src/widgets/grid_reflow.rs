@@ -63,6 +63,8 @@ impl Lattice {
 #[derive(Debug, Clone)]
 struct Before {
     at: graphene::Point,
+    /// Less than 1 while it was fading in or out.
+    opacity: f32,
     image: Option<gdk::Paintable>,
     size: (f32, f32),
 }
@@ -83,6 +85,11 @@ pub struct Reflow {
     old: Lattice,
     /// 0 where the tiles were, 1 where they are; while a reflow runs.
     progress: Option<f64>,
+    /// The tile at the top of the view when the columns changed, and
+    /// where it was: the view keeps it there once the rows are laid out
+    /// anew (else the list keeps its offset, and shows other tiles). Gone
+    /// with the reflow: after the items changed, the index holds another.
+    anchor: Option<(TileKey, f32)>,
 }
 
 impl Reflow {
@@ -97,39 +104,37 @@ impl Reflow {
     /// Notes where the tiles are drawn now (`built`, with an image and a
     /// size each, and those still on their way out from a reflow before)
     /// and starts a new reflow from there; `old` is the layout they're in.
-    pub fn start(
-        &mut self,
-        built: &[(Built, Option<gdk::Paintable>, (f32, f32))],
-        old: Lattice,
-        new: Lattice,
-    ) {
+    pub fn start(&mut self, built: &[(Built, Option<gdk::Paintable>, (f32, f32))], old: Lattice) {
         let mut before = HashMap::new();
         let keys: HashSet<TileKey> = built.iter().map(|(b, _, _)| b.key).collect();
-        // Still leaving from the reflow before: from where they are now.
+        // Still leaving from the reflow before: from where they're drawn
+        // now, on their way to their places in the layout the built tiles
+        // are in (`old`, which was that reflow's new one).
         if self.running() {
             let anchors = anchors(built.iter().map(|(b, _, _)| *b));
             for (key, gone) in &self.before {
                 if keys.contains(key) {
                     continue;
                 }
-                if let (Some(at), _) = self.leaving(*key, gone, &anchors, new) {
-                    before.insert(
-                        *key,
-                        Before {
-                            at,
-                            image: gone.image.clone(),
-                            size: gone.size,
-                        },
-                    );
-                }
+                let (at, opacity) = self.leaving(*key, gone, &anchors, old);
+                before.insert(
+                    *key,
+                    Before {
+                        at,
+                        opacity,
+                        image: gone.image.clone(),
+                        size: gone.size,
+                    },
+                );
             }
         }
         for (tile, image, size) in built {
-            let (at, _) = self.drawn(tile.key, tile.at);
+            let (at, opacity) = self.drawn(tile.key, tile.at);
             before.insert(
                 tile.key,
                 Before {
                     at,
+                    opacity,
                     image: image.clone(),
                     size: *size,
                 },
@@ -160,6 +165,16 @@ impl Reflow {
         self.before.clear();
         self.anchors.clear();
         self.progress = None;
+        self.anchor = None;
+    }
+
+    pub fn set_anchor(&mut self, anchor: Option<(TileKey, f32)>) {
+        self.anchor = anchor;
+    }
+
+    /// The anchor, once (see `anchor`).
+    pub fn take_anchor(&mut self) -> Option<(TileKey, f32)> {
+        self.anchor.take()
     }
 
     /// Where the tile `key`, laid out at `at`, is drawn now, and how
@@ -168,12 +183,15 @@ impl Reflow {
         if !self.running() {
             return (at, 1.0);
         }
-        let from = self.before.get(&key).map(|b| b.at).or_else(|| {
-            let (run, index) = key.place()?;
+        let e = self.ease();
+        if let Some(before) = self.before.get(&key) {
+            let opacity = before.opacity + (1.0 - before.opacity) * e;
+            return (lerp(before.at, at, e), opacity);
+        }
+        let from = key.place().and_then(|(run, index)| {
             let (anchor_index, anchor) = *self.anchors.get(&run)?;
             Some(self.old.place(anchor, anchor_index, index))
         });
-        let e = self.ease();
         match from {
             Some(from) => (lerp(from, at, e), 1.0),
             None => (at, e),
@@ -204,7 +222,6 @@ impl Reflow {
             .filter_map(|(key, gone)| {
                 let image = gone.image.clone()?;
                 let (at, opacity) = self.leaving(*key, gone, &anchors, new);
-                let at = at?;
                 let rect = graphene::Rect::new(at.x(), at.y(), gone.size.0, gone.size.1);
                 Some((image, rect, opacity))
             })
@@ -219,15 +236,15 @@ impl Reflow {
         gone: &Before,
         anchors: &HashMap<usize, (u32, graphene::Point)>,
         new: Lattice,
-    ) -> (Option<graphene::Point>, f32) {
+    ) -> (graphene::Point, f32) {
         let e = self.ease();
         let to = key.place().and_then(|(run, index)| {
             let (anchor_index, anchor) = *anchors.get(&run)?;
             Some(new.place(anchor, anchor_index, index))
         });
         match to {
-            Some(to) => (Some(lerp(gone.at, to, e)), 1.0),
-            None => (Some(gone.at), 1.0 - e),
+            Some(to) => (lerp(gone.at, to, e), gone.opacity),
+            None => (gone.at, gone.opacity * (1.0 - e)),
         }
     }
 }
@@ -289,7 +306,7 @@ mod tests {
         let tiles: Vec<_> = (0..4)
             .map(|i| built(TileKey::Local(i), i as f32 * 100.0, 0.0))
             .collect();
-        reflow.start(&tiles, OLD, NEW);
+        reflow.start(&tiles, OLD);
         // Item 3 now at the start of the second row of two columns.
         let new = point(100.0, 140.0);
         assert_eq!(reflow.drawn(TileKey::Local(3), new).0, point(300.0, 0.0));
@@ -313,15 +330,86 @@ mod tests {
         );
     }
 
+    /// A reflow that starts while tiles are still leaving (a panel closed
+    /// right after it opened) takes them on from where they're drawn, on
+    /// their way to their places in the layout the built tiles are in;
+    /// a fading one keeps fading.
+    #[test]
+    fn leaving_tiles_go_on_from_where_they_are() {
+        let image = || Some(gdk::Paintable::new_empty(100, 140));
+        let mut reflow = Reflow::default();
+        // Four columns; then two, with only items 0 and 1 built (in the
+        // first row of two), item 3 leaving, a header fading out.
+        let mut tiles: Vec<_> = (0..4)
+            .map(|i| {
+                let mut tile = built(TileKey::Local(i), i as f32 * 100.0, 0.0);
+                tile.1 = image();
+                tile
+            })
+            .collect();
+        let mut header = built(TileKey::Header(0), 0.0, 300.0);
+        header.1 = image();
+        tiles.push(header);
+        reflow.start(&tiles, OLD);
+        reflow.set_progress(0.5);
+        let now = [
+            Built {
+                key: TileKey::Local(0),
+                at: point(0.0, 0.0),
+            },
+            Built {
+                key: TileKey::Local(1),
+                at: point(100.0, 0.0),
+            },
+        ];
+        let rect_of = |reflow: &Reflow, key: TileKey| {
+            let leaving = reflow.leaving_tiles(&now, NEW);
+            let index = reflow
+                .before
+                .iter()
+                .filter(|(k, _)| !now.iter().any(|b| b.key == **k))
+                .position(|(k, _)| *k == key)?;
+            leaving
+                .get(index)
+                .map(|(_, rect, opacity)| (rect.top_left(), *opacity))
+        };
+        // Item 3: from (300, 0) half way to (100, 140) in two columns.
+        assert_eq!(
+            rect_of(&reflow, TileKey::Local(3)),
+            Some((point(200.0, 70.0), 1.0))
+        );
+        assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
+        // The columns change again: they go on from there.
+        let again: Vec<_> = now.iter().map(|b| (*b, image(), (100.0, 140.0))).collect();
+        reflow.start(&again, NEW);
+        assert_eq!(
+            rect_of(&reflow, TileKey::Local(3)),
+            Some((point(200.0, 70.0), 1.0))
+        );
+        assert_eq!(rect_of(&reflow, TileKey::Header(0)).map(|r| r.1), Some(0.5));
+    }
+
+    /// A reflow that ends before its anchor was used (the items changed
+    /// meanwhile) drops it: kept, the view scrolled to whatever the index
+    /// held then.
+    #[test]
+    fn an_ended_reflow_forgets_its_anchor() {
+        let mut reflow = Reflow::default();
+        reflow.start(&[built(TileKey::Local(40), 0.0, 12.0)], OLD);
+        reflow.set_anchor(Some((TileKey::Local(40), 12.0)));
+        reflow.finish();
+        assert!(reflow.take_anchor().is_none());
+    }
+
     /// A reflow that starts while one runs starts where the tiles are
     /// drawn, not where they're laid out.
     #[test]
     fn a_new_reflow_starts_where_the_tiles_are() {
         let mut reflow = Reflow::default();
-        reflow.start(&[built(TileKey::Local(1), 100.0, 0.0)], OLD, NEW);
+        reflow.start(&[built(TileKey::Local(1), 100.0, 0.0)], OLD);
         reflow.set_progress(0.5);
         // Laid out at (300, 0) now, half way there from (100, 0).
-        reflow.start(&[built(TileKey::Local(1), 300.0, 0.0)], NEW, OLD);
+        reflow.start(&[built(TileKey::Local(1), 300.0, 0.0)], NEW);
         assert_eq!(
             reflow.drawn(TileKey::Local(1), point(0.0, 0.0)).0,
             point(200.0, 0.0)

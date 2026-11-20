@@ -150,6 +150,11 @@ fn dump(window: &gtk::Window) {
         let mut parts = v.rsplitn(3, ':');
         let to: f64 = parts.next()?.parse().ok()?;
         let from: f64 = parts.next()?.parse().ok()?;
+        // Seconds from now on (a Duration of anything else panics).
+        if !(from.is_finite() && to.is_finite() && 0.0 <= from && from <= to) {
+            tracing::warn!("JEWELCASE_FRAME_DUMP: FROM and TO are seconds, FROM not after TO");
+            return None;
+        }
         Some((std::path::PathBuf::from(parts.next()?), from, to))
     }) else {
         return;

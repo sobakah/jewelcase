@@ -54,6 +54,35 @@ thread_local! {
         gtk::gio::Settings::new(crate::config::APP_ID);
 }
 
+/// Focuses `widget` at the next idle once it's in a window: a list row
+/// that isn't built (scrolled away) gets its widgets back only when the
+/// list lays it out, after an idle would have run.
+pub fn focus_when_shown(widget: &impl gtk::glib::object::IsA<gtk::Widget>) {
+    use gtk::prelude::*;
+    let widget = widget.upcast_ref::<gtk::Widget>().clone();
+    let focus = |widget: gtk::Widget| {
+        gtk::glib::idle_add_local_once(move || {
+            widget.grab_focus();
+        });
+    };
+    if widget.root().is_some() {
+        focus(widget);
+        return;
+    }
+    let handler = std::rc::Rc::new(std::cell::Cell::new(None));
+    let once = handler.clone();
+    let id = widget.connect_notify_local(Some("root"), move |widget, _| {
+        if widget.root().is_none() {
+            return;
+        }
+        if let Some(id) = once.take() {
+            widget.disconnect(id);
+        }
+        focus(widget.clone());
+    });
+    handler.set(Some(id));
+}
+
 /// The settings the grids' cover size comes from.
 fn tile_settings() -> gtk::gio::Settings {
     TILE_SETTINGS.with(Clone::clone)
@@ -329,6 +358,28 @@ mod tests {
             title[..title.find('}').unwrap()].contains("hexpand: true;"),
             "the title no longer expands: is this test still needed?"
         );
+    }
+
+    /// A playlist's search field is in the list's first row, which isn't
+    /// built while it's scrolled away: focusing it in an idle did nothing
+    /// then (no window yet), and typed text went nowhere.
+    #[test]
+    fn a_widget_is_focused_once_it_is_in_a_window() {
+        use gtk::prelude::*;
+        if adw::init().is_err() {
+            eprintln!("no display: skipped");
+            return;
+        }
+        let window = gtk::Window::new();
+        let entry = gtk::Entry::new();
+        super::focus_when_shown(&entry);
+        let context = gtk::glib::MainContext::default();
+        while context.iteration(false) {}
+        assert!(gtk::prelude::RootExt::focus(&window).is_none());
+        window.set_child(Some(&entry));
+        while context.iteration(false) {}
+        // An entry's focus is in its text.
+        assert!(gtk::prelude::RootExt::focus(&window).is_some_and(|f| f.is_ancestor(&entry)));
     }
 
     /// A Spotify song with an artist line: the icon is in the middle of

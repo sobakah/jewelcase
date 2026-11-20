@@ -463,6 +463,7 @@ impl PlaylistPanel {
             }
         ));
         imp.list_card.follow(&*imp.items, &imp.scroller);
+        imp.list_card.set_header(&*imp.header);
         super::reorder::attach_list_keys(
             &imp.items,
             glib::clone!(
@@ -686,10 +687,7 @@ impl PlaylistPanel {
         if changed && imp.add_toggle.is_active() {
             // Once the list has its top row again (it may have been
             // scrolled away, and isn't built then).
-            let search = imp.search.get();
-            glib::idle_add_local_once(move || {
-                search.grab_focus();
-            });
+            super::focus_when_shown(&*imp.search);
         }
     }
 

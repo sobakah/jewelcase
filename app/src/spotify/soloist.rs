@@ -736,10 +736,10 @@ impl Spotify {
         Some((position, duration.saturating_sub(position)))
     }
 
-    /// Soloist plays `uri`; `progress`: where Jewelcase's song was just
-    /// before, and how much of it was left.
-    /// Soloist plays `uri`; `position_reported`: the report said where in
-    /// it (else the position held may be from before).
+    /// Soloist plays `uri`. `progress`: where Jewelcase's song was just
+    /// before, and how much of it was left; `position_reported`: the
+    /// report said where in `uri` it is (else the position held may be
+    /// from the song before).
     fn soloist_item(&self, uri: &str, progress: Option<(u64, u64)>, position_reported: bool) {
         let left = progress.map(|(_, left)| left);
         let (wanted, started) = {

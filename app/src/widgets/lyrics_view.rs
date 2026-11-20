@@ -639,15 +639,14 @@ impl LyricsView {
             button.remove_css_class("active");
         }
         imp.active.set(active);
-        if let Some(index) = active
-            && let Some((_, button)) = imp.rows.borrow().get(index)
-        {
-            button.add_css_class("active");
-            self.scroll_to(button);
-        } else if active.is_none() {
-            // Back before the first line (a seek to the start, a position
-            // put right): the top, not where the line before was.
-            self.glide_to(0.0);
+        match scroll_for(active) {
+            Scroll::Line(index) => {
+                if let Some((_, button)) = imp.rows.borrow().get(index) {
+                    button.add_css_class("active");
+                    self.scroll_to(button);
+                }
+            }
+            Scroll::Top => self.glide_to(0.0),
         }
     }
 
@@ -789,5 +788,34 @@ impl LyricsView {
             .build();
         animation.play();
         imp.animation.replace(Some(animation));
+    }
+}
+
+/// Where the lyrics go when the active line changes.
+#[derive(Debug, PartialEq, Eq)]
+enum Scroll {
+    /// That line, into the middle.
+    Line(usize),
+    /// The top: before the first line (a seek back to the start, a
+    /// position put right after a stale one).
+    Top,
+}
+
+/// `active`: the line now (none: the singing hasn't started).
+fn scroll_for(active: Option<usize>) -> Scroll {
+    active.map_or(Scroll::Top, Scroll::Line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Spotify song's position was first a stale one minutes in, then
+    /// put right before its first line: the lyrics stayed at the late
+    /// line until the singing began, then jumped to the top.
+    #[test]
+    fn before_the_first_line_the_lyrics_go_to_the_top() {
+        assert_eq!(scroll_for(None), Scroll::Top);
+        assert_eq!(scroll_for(Some(3)), Scroll::Line(3));
     }
 }

@@ -394,16 +394,14 @@ impl AlbumPanel {
     /// new release from the bell): downloaded, then shown if the album
     /// still is (one in the cache already isn't asked for again).
     fn fetch_spotify_cover(&self, album: &jewelcase_core::db::SpotifyAlbum) {
-        let (Some(url), Some(key)) = (album.image_url.clone(), album.cover_key()) else {
-            return;
-        };
         let id = album.spotify_id.clone();
-        crate::spotify::fetch_covers(
-            vec![url],
+        fetch_album_cover(
+            album,
+            crate::spotify::fetch_covers,
             glib::clone!(
                 #[weak(rename_to = panel)]
                 self,
-                move || {
+                move |key: &str| {
                     let imp = panel.imp();
                     let still = imp
                         .spotify
@@ -411,7 +409,7 @@ impl AlbumPanel {
                         .as_ref()
                         .is_some_and(|a| a.spotify_id == id);
                     if still {
-                        imp.cover.set_cover(Some(&key));
+                        imp.cover.set_cover(Some(key));
                     }
                 }
             ),
@@ -706,5 +704,68 @@ fn spotify_credits(album: &jewelcase_core::db::SpotifyAlbum) -> Vec<(String, Opt
             .into_iter()
             .map(|name| (name.to_owned(), None))
             .collect()
+    }
+}
+
+/// Asks `fetch` (`crate::spotify::fetch_covers`: downloads into the cover
+/// cache, skipping what's there, and calls back when one arrived) for a
+/// Spotify album's cover, and `show`s its cache key once it's there.
+fn fetch_album_cover<F, S>(album: &jewelcase_core::db::SpotifyAlbum, fetch: F, show: S)
+where
+    F: FnOnce(Vec<String>, Box<dyn FnOnce()>),
+    S: Fn(&str) + 'static,
+{
+    let (Some(url), Some(key)) = (album.image_url.clone(), album.cover_key()) else {
+        return;
+    };
+    fetch(vec![url], Box::new(move || show(&key)));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+
+    /// A new release from the bell that nothing showed before: the panel
+    /// only looked in the cache, and its cover stayed a placeholder.
+    #[test]
+    fn a_spotify_albums_cover_is_downloaded_and_shown() {
+        let album = jewelcase_core::db::SpotifyAlbum {
+            spotify_id: "new".into(),
+            image_url: Some("https://i.scdn.co/image/new".into()),
+            ..Default::default()
+        };
+        let asked = RefCell::new(Vec::new());
+        let shown = Rc::new(RefCell::new(None));
+        let done = RefCell::new(None);
+        let on_show = shown.clone();
+        fetch_album_cover(
+            &album,
+            |urls, arrived| {
+                asked.replace(urls);
+                done.replace(Some(arrived));
+            },
+            move |key: &str| {
+                on_show.replace(Some(key.to_owned()));
+            },
+        );
+        assert_eq!(
+            *asked.borrow(),
+            vec!["https://i.scdn.co/image/new".to_owned()]
+        );
+        assert!(shown.borrow().is_none(), "not before it's there");
+        (done.take().expect("asked to call back"))();
+        assert_eq!(*shown.borrow(), album.cover_key());
+
+        // No image: nothing to ask for.
+        let mut asked_again = false;
+        fetch_album_cover(
+            &jewelcase_core::db::SpotifyAlbum::default(),
+            |_, _| asked_again = true,
+            |_: &str| {},
+        );
+        assert!(!asked_again);
     }
 }

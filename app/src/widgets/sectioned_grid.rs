@@ -100,10 +100,6 @@ mod imp {
         pub laid_tile_size: Cell<i32>,
         /// The column count the rows were made for.
         pub built_columns: Cell<u32>,
-        /// The tile at the top of the view when the columns changed, and
-        /// where it was: the view keeps it there (else the list keeps its
-        /// offset, and shows other tiles).
-        pub anchor: Cell<Option<(TileKey, f32)>>,
         /// Off screen since the last layout (another page was shown): the
         /// tiles weren't seen where they were, so they don't glide.
         pub hidden: Cell<bool>,
@@ -230,8 +226,7 @@ mod imp {
                 // Before the rows are laid out anew: the tiles are still
                 // where they were.
                 if old != 0 && !self.hidden.get() && self.laid_tile_size.get() == tile_size {
-                    self.obj()
-                        .start_reflow(lattice(self.laid_width.get(), old), lattice(width, columns));
+                    self.obj().start_reflow(lattice(self.laid_width.get(), old));
                 } else {
                     self.obj().end_reflow();
                 }
@@ -247,7 +242,7 @@ mod imp {
             // laying out: scrolling lays them out again).
             if !self.rebuild_pending.get()
                 && self.built_columns.get() == columns
-                && let Some((key, y)) = self.anchor.take()
+                && let Some((key, y)) = self.reflow.borrow_mut().take_anchor()
             {
                 glib::idle_add_local_once(glib::clone!(
                     #[weak(rename_to = grid)]
@@ -412,13 +407,12 @@ impl SectionedGrid {
             .map_or(0.0, |r| r.height() as f32)
     }
 
-    /// The columns change from `old` to `new`: the tiles glide from
-    /// where they're drawn now to their new places.
-    fn start_reflow(&self, mut old: Lattice, mut new: Lattice) {
+    /// The columns change (from `old`): the tiles glide from where they're
+    /// drawn now to their new places.
+    fn start_reflow(&self, mut old: Lattice) {
         let imp = self.imp();
         let pitch = self.row_pitch();
         old.pitch = pitch;
-        new.pitch = pitch;
         let height = self.height() as f32;
         let tiles: Vec<_> = self
             .built_tiles()
@@ -447,8 +441,10 @@ impl SectionedGrid {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(tile, _, _)| (tile.key, tile.at.y()));
-        imp.anchor.set(anchor);
-        imp.reflow.borrow_mut().start(&tiles, old, new);
+        let mut reflow = imp.reflow.borrow_mut();
+        reflow.start(&tiles, old);
+        reflow.set_anchor(anchor);
+        drop(reflow);
         imp.scroller.set_overflow(gtk::Overflow::Visible);
         imp.list.set_overflow(gtk::Overflow::Visible);
         if let Some(animation) = imp.reflow_animation.get() {

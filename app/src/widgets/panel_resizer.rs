@@ -281,3 +281,18 @@ fn attach_panel(
     let id = settings.connect_changed(Some(setting), move |settings, _| describe(settings));
     crate::widgets::disconnect_with(split, settings, id);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window's breakpoint that puts an artist page over the grid is
+    /// where the page and the grid no longer fit side by side; in sp it
+    /// moved with the text size (the grid got 240 px at 0.8).
+    #[test]
+    fn the_artist_breakpoint_is_where_both_fit() {
+        let window = include_str!("../../../data/resources/ui/window.blp");
+        let wanted = format!("max-width: {}px", ARTIST_BESIDE_MIN + ARTIST_GRID_MIN);
+        assert!(window.contains(&wanted), "window.blp has no \"{wanted}\"");
+    }
+}

@@ -10,9 +10,10 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
   // Only the last matching breakpoint applies, so the narrower ones repeat
   // the setters of the wider ones.
   // An artist page beside the grid needs room for both (panel_resizer.rs:
-  // ARTIST_BESIDE_MIN and ARTIST_GRID_MIN).
+  // ARTIST_BESIDE_MIN and ARTIST_GRID_MIN, in pixels: not sp, which
+  // follows the text size).
   Adw.Breakpoint {
-    condition ("max-width: 960sp")
+    condition ("max-width: 960px")
 
     setters {
       artist_split.collapsed: true;

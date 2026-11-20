@@ -26,6 +26,9 @@ mod imp {
         /// The first and last rows, while they're built.
         pub first: glib::WeakRef<gtk::Widget>,
         pub last: glib::WeakRef<gtk::Widget>,
+        /// What comes before the first row in the list (the playlist's
+        /// cover and name), while it's built: the card starts below it.
+        pub header: glib::WeakRef<gtk::Widget>,
         /// There are rows (else no card).
         pub shown: Cell<bool>,
     }
@@ -100,16 +103,47 @@ mod imp {
             }
             let obj = self.obj();
             let list = self.list.upgrade()?.compute_bounds(&*obj)?;
-            let bounds = |row: &glib::WeakRef<gtk::Widget>| {
-                row.upgrade().and_then(|row| row.compute_bounds(&*obj))
+            let span = |row: &glib::WeakRef<gtk::Widget>| {
+                let row = row.upgrade()?;
+                // Not in the list any more (scrolled away).
+                row.parent()?;
+                let b = row.compute_bounds(&*obj)?;
+                Some((b.y(), b.y() + b.height()))
             };
-            let top = bounds(&self.first).map_or(-BEYOND, |b| b.y().max(-BEYOND));
-            let bottom = bounds(&self.last).map_or(height + BEYOND, |b| {
-                (b.y() + b.height()).min(height + BEYOND)
-            });
-            (bottom > top).then(|| graphene::Rect::new(list.x(), top, list.width(), bottom - top))
+            let (top, bottom) = card_span(
+                height,
+                span(&self.first),
+                span(&self.last),
+                span(&self.header),
+            )?;
+            Some(graphene::Rect::new(
+                list.x(),
+                top,
+                list.width(),
+                bottom - top,
+            ))
         }
     }
+}
+
+/// Where the card goes in a view `height` tall: from the first row's top
+/// to the last row's bottom (each `(top, bottom)`, when built). A first
+/// row that isn't built is above the view, unless the header is built:
+/// then it's below the header (the header fills the view, or more), and
+/// so is the card.
+fn card_span(
+    height: f32,
+    first: Option<(f32, f32)>,
+    last: Option<(f32, f32)>,
+    header: Option<(f32, f32)>,
+) -> Option<(f32, f32)> {
+    let top = match (first, header) {
+        (Some((top, _)), _) => top.max(-BEYOND),
+        (None, Some((_, below))) => below.max(-BEYOND),
+        (None, None) => -BEYOND,
+    };
+    let bottom = last.map_or(height + BEYOND, |(_, bottom)| bottom.min(height + BEYOND));
+    (bottom > top).then_some((top, bottom))
 }
 
 glib::wrapper! {
@@ -128,6 +162,12 @@ impl ListCard {
             self,
             move |_| card.queue_allocate()
         ));
+    }
+
+    /// What comes before the first row (built or not).
+    pub fn set_header(&self, header: &impl IsA<gtk::Widget>) {
+        self.imp().header.set(Some(header.upcast_ref()));
+        self.queue_allocate();
     }
 
     /// Whether there are rows at all (else no card).
@@ -156,5 +196,37 @@ impl ListCard {
         if changed {
             self.queue_allocate();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_card_spans_the_rows_built() {
+        // Both ends in view.
+        assert_eq!(
+            card_span(800.0, Some((400.0, 450.0)), Some((600.0, 650.0)), None),
+            Some((400.0, 650.0))
+        );
+        // Scrolled to the middle: past both edges.
+        assert_eq!(
+            card_span(800.0, None, None, None),
+            Some((-BEYOND, 800.0 + BEYOND))
+        );
+    }
+
+    /// A short window with the list at its top: the header fills the view
+    /// and the first row isn't built. The card was drawn behind the
+    /// header, as if that row were scrolled away above.
+    #[test]
+    fn no_card_behind_a_header_that_fills_the_view() {
+        assert_eq!(card_span(300.0, None, None, Some((0.0, 420.0))), None);
+        // The header ends in view, the rows after it aren't built yet.
+        assert_eq!(
+            card_span(300.0, None, None, Some((0.0, 250.0))),
+            Some((250.0, 300.0 + BEYOND))
+        );
     }
 }
