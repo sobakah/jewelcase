@@ -48,6 +48,17 @@
   </branding>
 
   <releases>
+    <release version="0.9.0" date="2026-11-20" type="development">
+      <description>
+        <ul>
+          <li>Large playlists scroll smoothly and open at once</li>
+          <li>Albums glide to their new places when a panel opens, closes or is resized</li>
+          <li>Artist pages open beside the artist grid</li>
+          <li>Lyrics of Spotify songs start at their first line</li>
+          <li>New releases from the bell show their cover</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-11-14" type="development">
       <description>
         <ul>

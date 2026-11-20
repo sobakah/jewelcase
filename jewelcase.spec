@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.8.0
+Version:        0.9.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,13 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Fri Nov 20 2026 sobakah - 0.9.0-1
+- Large playlists scroll smoothly and open at once
+- Albums glide to their places when a panel opens, closes or is resized
+- Artist pages open beside the artist grid
+- Lyrics of Spotify songs start at their first line
+- Covers of new releases from the bell show
+
 * Sat Nov 14 2026 sobakah - 0.8.0-1
 - Choose the app icon's disc in Preferences
 - A Flatpak bundle for image-based systems

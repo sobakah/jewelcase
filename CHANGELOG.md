@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-20
+
+The library database doesn't change; 0.8.0 still opens it.
+
 ### Changed
 
 - **Large playlists stay smooth**: scrolling through a playlist of thousands of songs no longer stutters, it opens at once instead of filling in over a few seconds, and adding, removing, moving or searching songs in it no longer makes the window hang.
@@ -167,7 +171,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/sobakah/jewelcase/releases/tag/0.9.0
 [0.8.0]: https://github.com/sobakah/jewelcase/releases/tag/0.8.0
 [0.7.0]: https://github.com/sobakah/jewelcase/releases/tag/0.7.0
 [0.6.1]: https://github.com/sobakah/jewelcase/releases/tag/0.6.1
