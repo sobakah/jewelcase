@@ -354,10 +354,11 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   (11 ms of a panel's first frame). Their tiles glide to the new places (`widgets/grid_reflow.rs`)
   while the rows are already laid out for the new columns; only the drawing moves.
 - **Panel widths** are worked out in each layout of `SlideView` (`set_width_rule`, rules in
-  `panel_resizer.rs`), and the album on an artist page goes over the page by its rule: no
-  breakpoints or idles for them, which lag a frame behind the window. The owner's order as the
-  window narrows: the grid down to two columns, then the page and its album at the same rate,
-  then the album over the page (CONCEPT.md §4.1). The artist page's sections keep a minimum of
+  `panel_resizer.rs`), also whether the artist page goes over the grid and whether the album on
+  it goes out of sight (`Place::Away`): no breakpoints or idles for them, which lag a frame
+  behind the window. The owner's order as the window narrows: the grid down to two columns, then
+  the page and its album at the same rate, then the page (album beside its content) over the
+  grid, then the album out of sight; only the grid is ever covered (CONCEPT.md §4.1). The artist page's sections keep a minimum of
   two columns: with the current count as minimum, the page's minimum width followed its columns
   and an album stayed over the page. `ArtistPage::size_allocate` allocates its child itself
   (`adw::Bin`'s parent allocate doesn't: the page drew empty).

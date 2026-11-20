@@ -8,7 +8,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ### Changed
 
-- **The album beside an artist page stays longer**: as the window gets narrower, the artist grid first gives up its room, down to two columns of artists; then the artist page and the album on it get narrower together, at the same rate. Only when neither can get any narrower does the album go over the page, and it stays open there. Before, the page got narrower while the album kept its width, and the album went over the page (or disappeared) early.
+- **The album beside an artist page stays longer**: as the window gets narrower, the artist grid first gives up its room, down to two columns of artists; then the artist page and the album on it get narrower together, at the same rate; then the page, with the album still beside it, goes over the artist grid. Only when the window is too narrow for the page and the album side by side does the album disappear, and it comes back when the window is wide enough again. The album no longer covers the page. Before, the page got narrower while the album kept its width, and the album went over the page early.
 - The album and playlist panels likewise leave the album grid two columns before they get narrower.
 
 ### Fixed

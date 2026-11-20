@@ -1587,7 +1587,18 @@ impl JewelcaseWindow {
         let imp = self.imp();
         panel_resizer::attach_beside_grid(&imp.split_view, self.settings(), ALBUM_TILE_PADDING);
         panel_resizer::attach(&imp.playlist_split, self.settings());
-        panel_resizer::attach_artist(&imp.artist_split, self.settings(), ARTIST_TILE_PADDING);
+        let window = self.downgrade();
+        panel_resizer::attach_artist(
+            &imp.artist_split,
+            self.settings(),
+            ARTIST_TILE_PADDING,
+            move || {
+                window
+                    .upgrade()
+                    .and_then(|window| window.artist_page())
+                    .is_some_and(|page| page.split_view().show_sidebar())
+            },
+        );
     }
 
     fn artist_page(&self) -> Option<ArtistPage> {
