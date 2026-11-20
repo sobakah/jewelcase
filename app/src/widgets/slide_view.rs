@@ -7,8 +7,8 @@
 //! Every panel uses it, so all of them move alike.
 //!
 //! Collapsed, the content is dimmed behind the panel; a click on it or
-//! Escape closes the panel. Collapsing hides the panel, and uncollapsing
-//! brings back one that was open.
+//! Escape closes the panel. Collapsing hides the panel (unless
+//! `keep-open`), and uncollapsing brings back one that was open.
 
 use std::cell::{Cell, OnceCell};
 
@@ -39,6 +39,10 @@ mod imp {
         /// The panel over the content instead of beside it.
         #[property(get, set = Self::set_collapsed)]
         pub collapsed: Cell<bool>,
+        /// An open panel stays open when it collapses, over the content
+        /// (else it's hidden, as libadwaita's are).
+        #[property(get, set)]
+        pub keep_open: Cell<bool>,
         #[property(get, set = Self::set_min_sidebar_width, default = 320.0)]
         pub min_sidebar_width: Cell<f64>,
         #[property(get, set = Self::set_max_sidebar_width, default = 440.0)]
@@ -66,6 +70,7 @@ mod imp {
             Self {
                 show_sidebar: Cell::new(false),
                 collapsed: Cell::new(false),
+                keep_open: Cell::new(false),
                 min_sidebar_width: Cell::new(320.0),
                 max_sidebar_width: Cell::new(440.0),
                 sidebar_width_fraction: Cell::new(0.38),
@@ -287,7 +292,9 @@ mod imp {
             let obj = self.obj();
             // Like libadwaita's: collapsing hides the panel (it would
             // cover the content); uncollapsing brings it back.
-            if collapsed {
+            if collapsed && self.keep_open.get() {
+                self.open_before_collapse.set(false);
+            } else if collapsed {
                 let open = self.show_sidebar.get();
                 self.open_before_collapse.set(open);
                 if open {
@@ -379,5 +386,41 @@ impl SlideView {
     /// The panel's width in place (not while it bounces).
     pub fn sidebar_width(&self) -> i32 {
         self.imp().sidebar_width_for(self.width())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A panel collapsing (the window narrows) hides, as libadwaita's do,
+    /// and comes back when it uncollapses; an artist page (`keep-open`)
+    /// stays open, over the grid.
+    #[test]
+    fn collapsing_hides_the_panel_unless_it_keeps_open() {
+        if adw::init().is_err() {
+            eprintln!("no display: skipped");
+            return;
+        }
+        let view = SlideView::default();
+        view.set_sidebar(Some(
+            gtk::Label::new(Some("panel")).upcast_ref::<gtk::Widget>(),
+        ));
+        view.set_show_sidebar(true);
+        view.set_collapsed(true);
+        assert!(!view.show_sidebar());
+        view.set_collapsed(false);
+        assert!(view.show_sidebar());
+
+        let artist = SlideView::default();
+        artist.set_keep_open(true);
+        artist.set_sidebar(Some(
+            gtk::Label::new(Some("page")).upcast_ref::<gtk::Widget>(),
+        ));
+        artist.set_show_sidebar(true);
+        artist.set_collapsed(true);
+        assert!(artist.show_sidebar());
+        artist.set_collapsed(false);
+        assert!(artist.show_sidebar());
     }
 }

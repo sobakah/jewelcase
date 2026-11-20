@@ -88,7 +88,7 @@ mod imp {
     impl ObjectSubclass for ArtistPage {
         const NAME: &'static str = "JewelcaseArtistPage";
         type Type = super::ArtistPage;
-        type ParentType = adw::Bin;
+        type ParentType = adw::BreakpointBin;
 
         fn class_init(klass: &mut Self::Class) {
             AlbumPanel::ensure_type();
@@ -289,9 +289,8 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            if let Some(child) = self.obj().child() {
-                child.allocate(width, height, baseline, None);
-            }
+            // The breakpoint bin's own: it applies the breakpoints.
+            self.parent_size_allocate(width, height, baseline);
             // The cover size set in Preferences in every section: as many
             // columns as fit (the flow boxes are only as wide as their
             // tiles, at the start).
@@ -311,12 +310,12 @@ mod imp {
             }
         }
     }
-    impl BinImpl for ArtistPage {}
+    impl BreakpointBinImpl for ArtistPage {}
 }
 
 glib::wrapper! {
     pub struct ArtistPage(ObjectSubclass<imp::ArtistPage>)
-        @extends gtk::Widget, adw::Bin,
+        @extends gtk::Widget, adw::BreakpointBin,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 

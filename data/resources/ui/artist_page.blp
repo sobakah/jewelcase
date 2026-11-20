@@ -1,12 +1,25 @@
 using Gtk 4.0;
 using Adw 1;
-// An artist's page (CONCEPT.md §4.2): a panel like the album panel, over
-// most of the artist grid, which stays visible (dimmed) behind it.
-template $JewelcaseArtistPage: Adw.Bin {
+// An artist's page (CONCEPT.md §4.2): a panel like the album panel,
+// beside the artist grid (over it on narrow windows).
+template $JewelcaseArtistPage: Adw.BreakpointBin {
+  // The narrowest the window lets it get (it's as wide as the window then).
+  width-request: 360;
+  height-request: 200;
+
   styles [
     "album-panel",
     "artist-panel",
   ]
+
+  // Too narrow for an album's panel beside the page: it opens over it.
+  Adw.Breakpoint {
+    condition ("max-width: 900px")
+
+    setters {
+      split_view.collapsed: true;
+    }
+  }
 
   // An album opens in a panel over the whole height of the page, from
   // its top edge (like the album panel in the library).

@@ -1441,10 +1441,8 @@ impl JewelcaseWindow {
 
     fn open_artist_page(&self, page: ArtistPage) {
         let imp = self.imp();
-        imp.split_view
-            .bind_property("collapsed", &page.split_view(), "collapsed")
-            .sync_create()
-            .build();
+        // An album's panel on the page goes beside or over it by the page's
+        // own width (artist_page.blp).
         page.connect_local(
             "close",
             false,
@@ -1465,8 +1463,7 @@ impl JewelcaseWindow {
     }
 
     /// Follows the window width: the player picks its layout and width
-    /// from it. (The artist page's width: panel_resizer, three quarters of
-    /// the window until its edge is dragged.)
+    /// from it. (The artist page's width: panel_resizer.)
     fn setup_artist_overlay(&self) {
         self.connect_realize(|window| {
             let Some(surface) = window.surface() else {
@@ -1587,7 +1584,7 @@ impl JewelcaseWindow {
         let imp = self.imp();
         panel_resizer::attach(&imp.split_view, self.settings());
         panel_resizer::attach(&imp.playlist_split, self.settings());
-        panel_resizer::attach_artist_overlay(&imp.artist_split, self.settings());
+        panel_resizer::attach_artist(&imp.artist_split, self.settings());
     }
 
     fn artist_page(&self) -> Option<ArtistPage> {

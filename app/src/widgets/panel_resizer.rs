@@ -1,7 +1,7 @@
 //! A drag handle on the inner edge of a sliding panel (the album
-//! and playlist panels, and the artist page over the artist grid), so the
-//! panel can be made wider or narrower. The width is remembered: one for
-//! the album and playlist panels, one for artist pages.
+//! and playlist panels, and the artist page beside or over the artist
+//! grid), so the panel can be made wider or narrower. The width is
+//! remembered: one for the album and playlist panels, one for artist pages.
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -9,11 +9,17 @@ use gtk::{gdk, gio, glib};
 /// The album and playlist panels' width (shared).
 const KEY: &str = "panel-width";
 const MIN_WIDTH: i32 = 280;
-/// Artist pages over the artist grid.
+/// Artist pages.
 const ARTIST_KEY: &str = "artist-panel-width";
+/// Over the grid (narrow windows).
 const ARTIST_MIN_WIDTH: i32 = 360;
 /// Below this window width an artist page takes all of it (no handle).
 const ARTIST_FULL_BELOW: i32 = 600;
+/// Beside the grid, the page is never narrower (its portrait and text,
+/// two columns of albums), and the grid keeps room for two columns of
+/// artists. Narrower windows have the page over the grid (window.blp).
+const ARTIST_BESIDE_MIN: i32 = 560;
+const ARTIST_GRID_MIN: i32 = 400;
 /// Room the content keeps next to the panel.
 const MIN_CONTENT: i32 = 300;
 /// One key press (Left, Right).
@@ -24,11 +30,23 @@ pub fn attach(split: &crate::widgets::SlideView, settings: &gio::Settings) {
     attach_panel(split, settings, KEY, MIN_WIDTH, false);
 }
 
-/// The artist page over the artist grid (a panel view that always
-/// overlays): three quarters of the window until its edge is dragged, all
-/// of it on narrow windows.
-pub fn attach_artist_overlay(split: &crate::widgets::SlideView, settings: &gio::Settings) {
+/// The artist page beside the artist grid: half the window until its edge
+/// is dragged, at least `ARTIST_BESIDE_MIN`. Over the grid (narrow
+/// windows): three quarters of the window, all of it below
+/// `ARTIST_FULL_BELOW`.
+pub fn attach_artist(split: &crate::widgets::SlideView, settings: &gio::Settings) {
     attach_panel(split, settings, ARTIST_KEY, ARTIST_MIN_WIDTH, true);
+}
+
+/// The narrowest and widest the panel may be now.
+fn limits(split: &crate::widgets::SlideView, min_width: i32, artist: bool) -> (i32, i32) {
+    let room = split.width();
+    if artist && !split.collapsed() {
+        let max = (room - ARTIST_GRID_MIN).max(ARTIST_BESIDE_MIN);
+        (ARTIST_BESIDE_MIN, max)
+    } else {
+        (min_width, (room - MIN_CONTENT).max(min_width))
+    }
 }
 
 fn attach_panel(
@@ -36,7 +54,7 @@ fn attach_panel(
     settings: &gio::Settings,
     setting: &'static str,
     min_width: i32,
-    overlays: bool,
+    artist: bool,
 ) {
     let Some(sidebar) = split.sidebar() else {
         return;
@@ -58,8 +76,8 @@ fn attach_panel(
     overlay.add_overlay(&handle);
     split.set_sidebar(Some(overlay.upcast_ref::<gtk::Widget>()));
     // Overlaid (collapsed) panels take the whole width; nothing to resize.
-    // The artist overlay always overlays: there it's the window width.
-    if !overlays {
+    // An artist page over the grid is narrower than the window (apply).
+    if !artist {
         split
             .bind_property("collapsed", &handle, "visible")
             .invert_boolean()
@@ -73,19 +91,22 @@ fn attach_panel(
         #[weak]
         handle,
         move |width: i32| {
-            if overlays {
+            if artist {
                 let room = split.width();
                 if room <= 0 {
                     return;
                 }
-                let full = room < ARTIST_FULL_BELOW;
+                let (narrowest, widest) = limits(&split, min_width, artist);
+                let full = split.collapsed() && room < ARTIST_FULL_BELOW;
                 handle.set_visible(!full);
                 let panel = if full {
                     room
                 } else if width > 0 {
-                    width.clamp(min_width, (room - MIN_CONTENT).max(min_width))
-                } else {
+                    width.clamp(narrowest, widest)
+                } else if split.collapsed() {
                     room * 3 / 4
+                } else {
+                    (room / 2).clamp(narrowest, widest)
                 };
                 split.set_min_sidebar_width(f64::from(panel.min(min_width)));
                 split.set_max_sidebar_width(f64::from(panel));
@@ -114,6 +135,14 @@ fn attach_panel(
         on_change(settings.int(setting))
     });
     crate::widgets::disconnect_with(split, settings, id);
+    // Beside the grid or over it: other limits.
+    let on_collapse = apply.clone();
+    let collapse_settings = settings.clone();
+    split.connect_collapsed_notify(move |_| {
+        let apply = on_collapse.clone();
+        let settings = collapse_settings.clone();
+        glib::idle_add_local_once(move || apply(settings.int(setting)));
+    });
     // Again once the room is known, and when the window's width changes.
     let on_map = apply.clone();
     let on_map_settings = settings.clone();
@@ -173,8 +202,8 @@ fn attach_panel(
             // The handle is on the panel's left edge: left widens it.
             let edge = f64::from(point.x()) - grab.get();
             let width = f64::from(split.width()) - edge;
-            let max = (split.width() - MIN_CONTENT).max(min_width);
-            Some((width as i32).clamp(min_width, max))
+            let (narrowest, widest) = limits(&split, min_width, artist);
+            Some((width as i32).clamp(narrowest, widest))
         }
     );
     drag.connect_drag_update(glib::clone!(
@@ -222,8 +251,8 @@ fn attach_panel(
                 _ => return glib::Propagation::Proceed,
             };
             let now = split.sidebar_width();
-            let max = (split.width() - MIN_CONTENT).max(min_width);
-            let width = (now + change).clamp(min_width, max);
+            let (narrowest, widest) = limits(&split, min_width, artist);
+            let width = (now + change).clamp(narrowest, widest);
             let _ = settings.set_int(setting, width);
             glib::Propagation::Stop
         }

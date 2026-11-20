@@ -12,6 +12,7 @@ All notable changes to Jewelcase are documented here. The format follows
 - Changing one playlist, or syncing with Spotify, no longer rebuilds the tiles of all the others.
 - **Albums glide to their new places** when an album opens or closes beside the grid, or the window gets wider or narrower, instead of jumping there; the albums at the top stay in view.
 - The songs of a Spotify album fade in once they have arrived instead of appearing all at once.
+- **Artist pages open beside the artist grid**, like an album beside the album grid, so you can open another artist without closing the page first. A page is at least 560 px wide; on windows narrower than 960 px it opens over the grid as before. On a narrow artist page an album opens over the page instead of squeezing it.
 
 ### Fixed
 
