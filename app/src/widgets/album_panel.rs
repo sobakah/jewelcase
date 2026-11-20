@@ -311,6 +311,7 @@ impl AlbumPanel {
         self.set_songs_actions(false);
         imp.versions_box.set_visible(false);
         imp.cover.set_cover(album.cover_key().as_deref());
+        self.fetch_spotify_cover(album);
         imp.cover
             .set_label(&gettext("Cover of {}").replace("{}", &album.name));
         imp.title.set_label(&album.name);
@@ -387,6 +388,34 @@ impl AlbumPanel {
                 }
             }
         ));
+    }
+
+    /// The cover of a Spotify album that no grid or page has shown yet (a
+    /// new release from the bell): downloaded, then shown if the album
+    /// still is (one in the cache already isn't asked for again).
+    fn fetch_spotify_cover(&self, album: &jewelcase_core::db::SpotifyAlbum) {
+        let (Some(url), Some(key)) = (album.image_url.clone(), album.cover_key()) else {
+            return;
+        };
+        let id = album.spotify_id.clone();
+        crate::spotify::fetch_covers(
+            vec![url],
+            glib::clone!(
+                #[weak(rename_to = panel)]
+                self,
+                move || {
+                    let imp = panel.imp();
+                    let still = imp
+                        .spotify
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|a| a.spotify_id == id);
+                    if still {
+                        imp.cover.set_cover(Some(&key));
+                    }
+                }
+            ),
+        );
     }
 
     /// The album's artists: links to library artists of that name.
