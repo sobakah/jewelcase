@@ -6,6 +6,15 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Panels get narrower with the window**: the album and playlist panels and artist pages keep the width you dragged them to on a window at least as wide as the one you dragged them on, and get narrower in proportion on a narrower one, so a window on half the screen keeps the same layout. They never get wider than you set them.
+- On an artist page, an album opens beside the page whenever the page keeps room for two columns of albums next to it, and stays open over the page when the window gets too narrow.
+
+### Fixed
+
+- Widening the window with an artist page and an album open no longer shows the album over part of the page before the page has reached its width.
+
 ## [0.9.0] — 2026-11-20
 
 The library database doesn't change; 0.8.0 still opens it.

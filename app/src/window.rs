@@ -1458,6 +1458,9 @@ impl JewelcaseWindow {
             ),
         );
         panel_resizer::attach(&page.split_view(), self.settings());
+        // An album goes over the page when the page has no room beside it.
+        page.split_view()
+            .set_min_content_width(panel_resizer::ARTIST_PAGE_CONTENT_MIN);
         imp.artist_holder.set_child(Some(&page));
         reveal_sidebar(&imp.artist_split);
     }
@@ -2342,6 +2345,31 @@ impl JewelcaseWindow {
                             tracing::warn!("Screenshot action {action}: {err}");
                         }
                     });
+                }
+            }
+            // `JEWELCASE_SCREENSHOT_RESIZE="6:900x1000 9:1600x1000"`: the
+            // window resized at those seconds (as if its edge was dragged).
+            if let Ok(list) = std::env::var("JEWELCASE_SCREENSHOT_RESIZE") {
+                for entry in list.split_whitespace() {
+                    let Some((at, size)) = entry.split_once(':') else {
+                        continue;
+                    };
+                    let (Ok(at), Some((w, h))) = (
+                        at.parse::<f64>(),
+                        size.split_once('x')
+                            .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))),
+                    ) else {
+                        continue;
+                    };
+                    let window = window.downgrade();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_secs_f64(at),
+                        move || {
+                            if let Some(window) = window.upgrade() {
+                                window.set_default_size(w, h);
+                            }
+                        },
+                    );
                 }
             }
             // `JEWELCASE_SCREENSHOT_CLICK_TILE=1`: the first tile of the grids

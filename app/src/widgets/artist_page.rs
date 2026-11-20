@@ -88,7 +88,7 @@ mod imp {
     impl ObjectSubclass for ArtistPage {
         const NAME: &'static str = "JewelcaseArtistPage";
         type Type = super::ArtistPage;
-        type ParentType = adw::BreakpointBin;
+        type ParentType = adw::Bin;
 
         fn class_init(klass: &mut Self::Class) {
             AlbumPanel::ensure_type();
@@ -289,8 +289,9 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            // The breakpoint bin's own: it applies the breakpoints.
-            self.parent_size_allocate(width, height, baseline);
+            if let Some(child) = self.obj().child() {
+                child.allocate(width, height, baseline, None);
+            }
             // The cover size set in Preferences in every section: as many
             // columns as fit (the flow boxes are only as wide as their
             // tiles, at the start).
@@ -310,12 +311,12 @@ mod imp {
             }
         }
     }
-    impl BreakpointBinImpl for ArtistPage {}
+    impl BinImpl for ArtistPage {}
 }
 
 glib::wrapper! {
     pub struct ArtistPage(ObjectSubclass<imp::ArtistPage>)
-        @extends gtk::Widget, adw::BreakpointBin,
+        @extends gtk::Widget, adw::Bin,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
@@ -874,7 +875,9 @@ impl ArtistPage {
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            .min_children_per_line(columns)
+            // At least two: the page's narrowest (a fixed minimum, or an
+            // album beside the page would wait for the columns to drop).
+            .min_children_per_line(2)
             .max_children_per_line(columns)
             .column_spacing(TILE_SPACING as u32)
             .row_spacing(TILE_SPACING as u32)
@@ -949,7 +952,9 @@ impl ArtistPage {
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            .min_children_per_line(columns)
+            // At least two: the page's narrowest (a fixed minimum, or an
+            // album beside the page would wait for the columns to drop).
+            .min_children_per_line(2)
             .max_children_per_line(columns)
             .column_spacing(TILE_SPACING as u32)
             .row_spacing(TILE_SPACING as u32)
@@ -980,7 +985,6 @@ impl ArtistPage {
     fn apply_columns(&self) {
         let columns = self.imp().columns.get().max(2);
         for flow in self.imp().flows.borrow().iter() {
-            flow.set_min_children_per_line(columns);
             flow.set_max_children_per_line(columns);
         }
     }

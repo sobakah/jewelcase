@@ -241,8 +241,9 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 - **Screenshot hooks** (debug builds; all in `setup_screenshot` in `app/src/window.rs`):
   `JEWELCASE_SCREENSHOT`, `_DELAY`, `_SIZE` (with `JEWELCASE_HEADLESS_MONITOR=WxH` for a taller
   screen: the mini player covers the bottom), `_SETTINGS="key=value …"`, `_PLAY=1`, `_ACTIONS`,
-  `_LATE_ACTIONS`, `_TIMED_ACTIONS="8:win.x …"`, `_PAGE_ACTIONS` (artist page/album panel actions
-  after 4 s), `_ALBUM`, `_ARTIST`, `_PLAYLIST=name`, `_ADD_SONGS=text`, `_ADD_SPOTIFY=1`,
+  `_LATE_ACTIONS`, `_TIMED_ACTIONS="8:win.x …"`, `_RESIZE="7:900x1000 9.5:1600x1000"` (the
+  window resized at those seconds; with `JEWELCASE_FRAME_DUMP` to see it frame by frame),
+  `_PAGE_ACTIONS` (artist page/album panel actions after 4 s), `_ALBUM`, `_ARTIST`, `_PLAYLIST=name`, `_ADD_SONGS=text`, `_ADD_SPOTIFY=1`,
   `_FILTER_SONGS=text` (both 2 s after the playlist opens), `_PREFS=<page>`, `_SEARCH`,
   `_SPOTIFY=1` (connect), `_STREAM=1`, `_EDITS`, `_PUBLISH`, `_DEVICE`, `_IMPORT`,
   `_NEW_RELEASES=1` (the bell's feed opened 12 s in, also saved as `<name>-popover.png`; use a
@@ -352,6 +353,11 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   the columns change: new list items would make the list view build every row and tile anew
   (11 ms of a panel's first frame). Their tiles glide to the new places (`widgets/grid_reflow.rs`)
   while the rows are already laid out for the new columns; only the drawing moves.
+- **Panel widths** are worked out in each layout of `SlideView` (`set_width_rule`, from
+  `panel_resizer.rs`), and the album on an artist page goes over the page by itself
+  (`min-content-width`): no breakpoints or idles for them, which lag a frame behind the window.
+  The artist page's sections keep a minimum of two columns: with the current count as minimum,
+  the page's minimum width followed its columns and an album stayed over the page.
 - **A playlist's songs are a `GtkListView`, not a boxed `GtkListBox`**: a list box restyles all
   its rows whenever the hovered row changes (3000 songs scrolled at 20–40 fps; split into
   smaller list boxes too), and builds every row up front. The panel's top is the list's first
