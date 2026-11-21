@@ -22,6 +22,8 @@ mod spotify;
 pub use spotify::{LinkedPlaylist, RemoteEntry, SpotifyPlaylistInfo, SpotifyVersion, StreamInfo};
 mod new_releases;
 pub use new_releases::{KnownAlbums, NewRelease};
+mod popular;
+pub use popular::PopularSong;
 mod spotify_library;
 mod stats;
 pub use spotify_library::{SpotifyAlbum, SpotifyArtist, StoredDiscography};
@@ -60,6 +62,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/030_release_artists.sql")),
     M::up(include_str!("db/031_playlist_library_only.sql")),
     M::up(include_str!("db/032_discography_total.sql")),
+    M::up(include_str!("db/033_popular_songs.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once

@@ -41,6 +41,8 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
 /// Songs in an artist page's Popular section from Deezer.
 const POPULAR_SONGS: u32 = 5;
+/// An artist's Deezer top list is read again after a day.
+const POPULAR_AGE_S: i64 = 24 * 3600;
 
 pub enum Job {
     /// Local portrait, plus the online lookup if `online`. `urgent`: an
@@ -649,12 +651,56 @@ impl Worker {
         name: &str,
         mut titles: Vec<String>,
     ) -> Result<Vec<jewelcase_metadata::DeezerTrack>, String> {
+        use jewelcase_core::db::PopularSong;
+        use jewelcase_metadata::DeezerTrack;
         let Some(id) = self.deezer_artist_for(key, name, &mut titles)? else {
             return Ok(Vec::new());
         };
-        self.client
-            .deezer_top(id, POPULAR_SONGS)
-            .map_err(|e| e.to_string())
+        let from_kept = |songs: Vec<PopularSong>| -> Vec<DeezerTrack> {
+            songs
+                .into_iter()
+                .map(|s| DeezerTrack {
+                    id: s.id as u64,
+                    title: s.title,
+                    artist: s.artist,
+                    album: s.album,
+                    duration_ms: s.duration_ms,
+                    cover_url: s.cover_url,
+                })
+                .collect()
+        };
+        // Read again once a day; until then, as kept.
+        let now = now();
+        let kept = self.db.popular_songs(id as i64).ok().flatten();
+        if let Some((songs, read)) = &kept
+            && now - read < POPULAR_AGE_S
+        {
+            return Ok(from_kept(songs.clone()));
+        }
+        match self.client.deezer_top(id, POPULAR_SONGS) {
+            Ok(top) => {
+                let songs: Vec<PopularSong> = top
+                    .iter()
+                    .map(|t| PopularSong {
+                        id: t.id as i64,
+                        title: t.title.clone(),
+                        artist: t.artist.clone(),
+                        album: t.album.clone(),
+                        duration_ms: t.duration_ms,
+                        cover_url: t.cover_url.clone(),
+                    })
+                    .collect();
+                if let Err(err) = self.db.store_popular_songs(id as i64, &songs, now) {
+                    tracing::warn!("Cannot keep {name}'s popular songs: {err}");
+                }
+                Ok(top)
+            }
+            // Deezer can't be asked now: the list from before, if any.
+            Err(err) => match kept {
+                Some((songs, _)) => Ok(from_kept(songs)),
+                None => Err(err.to_string()),
+            },
+        }
     }
 
     /// The Deezer artist kept under `key` (a Spotify ID, or "name:" and the

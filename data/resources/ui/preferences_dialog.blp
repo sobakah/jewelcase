@@ -2,6 +2,9 @@ using Gtk 4.0;
 using Adw 1;
 
 template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
+  // Wider than libadwaita's 640: rows with a choice at their end (Popular
+  // Songs) cut their title and subtitle short.
+  content-width: 820;
   Adw.PreferencesPage {
     name: "library";
     title: _("Library");
@@ -175,14 +178,14 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
 
       Adw.ComboRow popular_row {
         title: _("P_opular Songs");
-        subtitle: _("Deezer’s list needs Look Up Artists Online; songs not in your library play from Spotify");
+        subtitle: _("Deezer’s needs Look Up Artists Online");
         use-underline: true;
 
         model: Gtk.StringList {
           strings [
             _("Off"),
             _("Your Most Played"),
-            _("Your Most Played and Deezer’s"),
+            _("Yours and Deezer’s"),
           ]
         };
       }

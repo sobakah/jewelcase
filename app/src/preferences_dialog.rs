@@ -149,6 +149,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
+            // Once shown: the pages are in the dialog's tree only then.
+            obj.connect_map(|dialog| widen_pages(dialog.upcast_ref()));
 
             let settings = gio::Settings::new(APP_ID);
             settings.connect_changed(
@@ -815,6 +817,24 @@ fn folder_error_message(err: &FolderError) -> String {
 
 /// A string setting with choices shown as a combo row (`values` in the
 /// row's order).
+/// Each page's content as wide as the dialog allows (content-width in
+/// the template): libadwaita keeps a preferences page to about 600 px, and
+/// rows with a choice at their end cut their text short there.
+fn widen_pages(widget: &gtk::Widget) {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Some(clamp) = current.downcast_ref::<adw::Clamp>() {
+            clamp.set_maximum_size(760);
+            clamp.set_tightening_threshold(600);
+        } else if let Some(clamp) = current.downcast_ref::<adw::ClampScrollable>() {
+            clamp.set_maximum_size(760);
+            clamp.set_tightening_threshold(600);
+        }
+        widen_pages(&current);
+        child = current.next_sibling();
+    }
+}
+
 fn bind_choice(
     settings: &gio::Settings,
     key: &str,

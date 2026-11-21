@@ -129,14 +129,15 @@ fn column(title: &str, list: &gtk::ListBox) -> gtk::Widget {
     column.upcast()
 }
 
-/// A song's row: cover, title and a line under it, and at the end `end`.
+/// A song's row: cover, title and a line under it, and `end` (the ⋮ menu
+/// goes after it, in the returned line).
 fn song_row(
     cover_key: Option<&str>,
     title: &str,
     streamed: bool,
     subtitle: Option<&str>,
     end: &str,
-) -> (gtk::ListBoxRow, CoverImage) {
+) -> (gtk::ListBoxRow, gtk::Box, CoverImage) {
     let cover: CoverImage = glib::Object::builder()
         .property("min-size", 40)
         .property("natural-size", 40)
@@ -159,7 +160,7 @@ fn song_row(
     );
     let row = gtk::ListBoxRow::builder().child(&line).build();
     super::tooltip_when_cut(&row);
-    (row, cover)
+    (row, line, cover)
 }
 
 /// "Your Most Played": a click plays them from there.
@@ -168,13 +169,19 @@ fn played_column(name: &str, played: Vec<(TrackObject, u32)>) -> gtk::Widget {
     for (track, plays) in &played {
         // Translators: how often you played a song, on an artist page.
         let plays_text = ngettext("{} play", "{} plays", *plays).replace("{}", &plays.to_string());
-        let (row, _) = song_row(
+        let (row, line, _) = song_row(
             track.cover_key(),
             &track.title(),
             track.is_stand_in(),
             track.track().album_title.as_deref(),
             &plays_text,
         );
+        // The queue's song menu (as for Recently Played).
+        line.append(&super::queue_view::song_menu(
+            &row,
+            track,
+            super::queue_view::SongRow::Played,
+        ));
         list.append(&row);
     }
     let tracks: Vec<TrackObject> = played.into_iter().map(|(track, _)| track).collect();
@@ -195,6 +202,102 @@ fn played_column(name: &str, played: Vec<(TrackObject, u32)>) -> gtk::Widget {
 struct DeezerSong {
     song: DeezerTrack,
     track: RefCell<Option<TrackObject>>,
+    row: gtk::ListBoxRow,
+    line: gtk::Box,
+    /// Its ⋮ button: the queue's song menu once the song is known, else
+    /// one that finds it on Spotify first.
+    menu: RefCell<Option<gtk::MenuButton>>,
+}
+
+impl DeezerSong {
+    /// The library's copy, or the Spotify version (found once: its ISRC
+    /// from Deezer, then a search); `None` with a message if not found.
+    async fn track(self: &Rc<Self>) -> Option<TrackObject> {
+        if let Some(track) = self.track.borrow().clone() {
+            return Some(track);
+        }
+        let app = JewelcaseApplication::get();
+        let song = &self.song;
+        let isrc = app.library().deezer_isrc(song.id).await.ok().flatten();
+        let found = app
+            .spotify()
+            .find_song(
+                song.title.clone(),
+                song.artist.clone(),
+                song.album.clone(),
+                song.duration_ms,
+                isrc,
+            )
+            .await;
+        match &found {
+            Some(track) => {
+                self.track.replace(Some(track.clone()));
+                self.set_menu(Some(track));
+            }
+            None => app.spotify().message(
+                // Translators: {} is a song title.
+                &gettext("“{}” wasn’t found on Spotify").replace("{}", &song.title),
+            ),
+        }
+        found
+    }
+
+    /// Its ⋮ button for `track` (known), or one that finds it first.
+    fn set_menu(self: &Rc<Self>, track: Option<&TrackObject>) {
+        if let Some(old) = self.menu.take() {
+            self.line.remove(&old);
+        }
+        let button = match track {
+            Some(track) => {
+                super::queue_view::song_menu(&self.row, track, super::queue_view::SongRow::Played)
+            }
+            None => self.finding_menu(),
+        };
+        self.line.append(&button);
+        self.menu.replace(Some(button));
+    }
+
+    /// Play Next, Add to Queue and Add to Playlist… for a song not found
+    /// yet: each finds it on Spotify first.
+    fn finding_menu(self: &Rc<Self>) -> gtk::MenuButton {
+        let actions = gtk::gio::SimpleActionGroup::new();
+        let menu = gtk::gio::Menu::new();
+        for (name, label) in [
+            ("play-next", gettext("Play _Next")),
+            ("add-to-queue", gettext("Add to _Queue")),
+            ("add-to-playlist", gettext("Add to _Playlist…")),
+        ] {
+            let action = gtk::gio::SimpleAction::new(name, None);
+            let entry = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                let Some(entry) = entry.upgrade() else {
+                    return;
+                };
+                glib::spawn_future_local(async move {
+                    let Some(track) = entry.track().await else {
+                        return;
+                    };
+                    let player = JewelcaseApplication::get().player();
+                    match name {
+                        "play-next" => player.play_next(vec![track]),
+                        "add-to-queue" => player.add_to_queue(vec![track]),
+                        _ => super::playlist_picker::show(&entry.row, vec![track.id()]),
+                    }
+                });
+            });
+            actions.add_action(&action);
+            menu.append(Some(&label), Some(&format!("found.{name}")));
+        }
+        self.row.insert_action_group("found", Some(&actions));
+        let button = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .valign(gtk::Align::Center)
+            .menu_model(&menu)
+            .css_classes(["flat", "circular"])
+            .build();
+        super::set_accessible_label(&button, &gettext("More"));
+        button
+    }
 }
 
 /// "Popular on Deezer": library songs play from the library; the others
@@ -232,7 +335,7 @@ fn deezer_column(songs: Vec<DeezerTrack>) -> gtk::Widget {
         } else {
             Some(gettext("Not in your library; connect Spotify to play it"))
         };
-        let (row, cover) = song_row(
+        let (row, line, cover) = song_row(
             cover_key.as_deref(),
             &song.title,
             local.is_none() && streamable,
@@ -246,10 +349,17 @@ fn deezer_column(songs: Vec<DeezerTrack>) -> gtk::Widget {
             downloads.push((url, cover, cover_key));
         }
         list.append(&row);
-        entries.push(Rc::new(DeezerSong {
+        let entry = Rc::new(DeezerSong {
             song,
-            track: RefCell::new(local),
-        }));
+            track: RefCell::new(local.clone()),
+            row,
+            line,
+            menu: RefCell::new(None),
+        });
+        if streamable {
+            entry.set_menu(local.as_ref());
+        }
+        entries.push(entry);
     }
     for (url, cover, key) in downloads {
         crate::spotify::fetch_covers(vec![url], move || cover.set_cover(key.as_deref()));
@@ -258,33 +368,9 @@ fn deezer_column(songs: Vec<DeezerTrack>) -> gtk::Widget {
         let Some(entry) = entries.get(row.index() as usize).cloned() else {
             return;
         };
-        if let Some(track) = entry.track.borrow().clone() {
-            JewelcaseApplication::get().player().play_now(track);
-            return;
-        }
         glib::spawn_future_local(async move {
-            let app = JewelcaseApplication::get();
-            let song = &entry.song;
-            let isrc = app.library().deezer_isrc(song.id).await.ok().flatten();
-            let found = app
-                .spotify()
-                .find_song(
-                    song.title.clone(),
-                    song.artist.clone(),
-                    song.album.clone(),
-                    song.duration_ms,
-                    isrc,
-                )
-                .await;
-            match found {
-                Some(track) => {
-                    entry.track.replace(Some(track.clone()));
-                    app.player().play_now(track);
-                }
-                None => app.spotify().message(
-                    // Translators: {} is a song title.
-                    &gettext("“{}” wasn’t found on Spotify").replace("{}", &song.title),
-                ),
+            if let Some(track) = entry.track().await {
+                JewelcaseApplication::get().player().play_now(track);
             }
         });
     });

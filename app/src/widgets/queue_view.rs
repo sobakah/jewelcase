@@ -442,7 +442,7 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
 
 /// Which song a row shows, for its menu.
 #[derive(Clone, Copy, PartialEq)]
-enum SongRow {
+pub(super) enum SongRow {
     /// Recently Played.
     Played,
     /// Now Playing.
@@ -455,7 +455,11 @@ enum SongRow {
 /// for a played song, Add to Playlist… for all, Remove from Queue for a
 /// queued one, and its album's and artist's pages (the library's, else
 /// Spotify's). No right-click menu besides: it said the same again.
-fn song_menu(row: &gtk::ListBoxRow, track: &TrackObject, kind: SongRow) -> gtk::MenuButton {
+pub(super) fn song_menu(
+    row: &gtk::ListBoxRow,
+    track: &TrackObject,
+    kind: SongRow,
+) -> gtk::MenuButton {
     let menu = gtk::gio::Menu::new();
     let actions = gtk::gio::SimpleActionGroup::new();
     let add = |name: &str, activate: Box<dyn Fn()>| {
