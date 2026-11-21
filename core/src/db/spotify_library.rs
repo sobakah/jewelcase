@@ -313,12 +313,14 @@ impl Database {
         Ok(())
     }
 
-    /// An artist's releases as Spotify lists them, read at `now`.
+    /// An artist's releases as Spotify lists them, read at `now`; `total`:
+    /// Spotify's count of them all when `albums` are only the first.
     pub fn store_discography(
         &mut self,
         artist_id: &str,
         albums: &[SpotifyAlbum],
         now: i64,
+        total: Option<u32>,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
@@ -334,26 +336,27 @@ impl Database {
             )?;
         }
         tx.execute(
-            "INSERT INTO spotify_discography_read (artist_id, read) VALUES (?1, ?2)
-             ON CONFLICT(artist_id) DO UPDATE SET read = excluded.read",
-            params![artist_id, now],
+            "INSERT INTO spotify_discography_read (artist_id, read, total) VALUES (?1, ?2, ?3)
+             ON CONFLICT(artist_id) DO UPDATE SET read = excluded.read, total = excluded.total",
+            params![artist_id, now, total],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// An artist's releases on Spotify and when they were read; `None`
-    /// if never.
-    pub fn discography(&self, artist_id: &str) -> Result<Option<(Vec<SpotifyAlbum>, i64)>> {
-        let read: Option<i64> = self
+    /// An artist's releases on Spotify as stored; `None` if never read.
+    pub fn discography(&self, artist_id: &str) -> Result<Option<StoredDiscography>> {
+        let read: Option<(i64, Option<u32>)> = self
             .conn
             .query_row(
-                "SELECT read FROM spotify_discography_read WHERE artist_id = ?1",
+                "SELECT read, total FROM spotify_discography_read WHERE artist_id = ?1",
                 [artist_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        let Some(read) = read else { return Ok(None) };
+        let Some((read, total)) = read else {
+            return Ok(None);
+        };
         let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT {ALBUM_COLUMNS} FROM spotify_discography d
              JOIN spotify_album a ON a.spotify_id = d.album_id
@@ -362,8 +365,23 @@ impl Database {
         let albums = stmt
             .query_map([artist_id], album_row)?
             .collect::<rusqlite::Result<_>>()?;
-        Ok(Some((albums, read)))
+        Ok(Some(StoredDiscography {
+            albums,
+            read,
+            total,
+        }))
     }
+}
+
+/// An artist's releases on Spotify, as stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredDiscography {
+    /// In Spotify's order.
+    pub albums: Vec<SpotifyAlbum>,
+    /// When they were read (Unix seconds).
+    pub read: i64,
+    /// Spotify's count of them all while only the first are stored.
+    pub total: Option<u32>,
 }
 
 #[cfg(test)]
@@ -400,16 +418,29 @@ mod tests {
 
         // "b" is also in a discography: unsaving keeps it there.
         assert_eq!(db.discography("skz").unwrap(), None);
-        db.store_discography("skz", &[album("b", "5-STAR"), album("c", "ODDINARY")], 7)
-            .unwrap();
+        db.store_discography(
+            "skz",
+            &[album("b", "5-STAR"), album("c", "ODDINARY")],
+            7,
+            Some(52),
+        )
+        .unwrap();
         db.replace_saved_albums(&[album("a", "ROCK-STAR")]).unwrap();
         assert_eq!(db.saved_albums().unwrap().len(), 1);
-        let (albums, read) = db.discography("skz").unwrap().unwrap();
-        assert_eq!(read, 7);
+        let stored = db.discography("skz").unwrap().unwrap();
+        assert_eq!((stored.read, stored.total), (7, Some(52)));
         assert_eq!(
-            albums.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+            stored
+                .albums
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>(),
             ["5-STAR", "ODDINARY"]
         );
+        // All of them read: no count left.
+        db.store_discography("skz", &[album("b", "5-STAR")], 8, None)
+            .unwrap();
+        assert_eq!(db.discography("skz").unwrap().unwrap().total, None);
     }
 
     #[test]

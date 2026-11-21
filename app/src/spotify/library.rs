@@ -10,7 +10,7 @@ use gettextrs::gettext;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use jewelcase_core::db::{NewRelease, SpotifyAlbum, SpotifyArtist, StreamInfo};
+use jewelcase_core::db::{NewRelease, SpotifyAlbum, SpotifyArtist, StoredDiscography, StreamInfo};
 use jewelcase_core::matching::{Confidence, RemoteTrack};
 use jewelcase_spotify::Error;
 
@@ -18,9 +18,21 @@ use super::Spotify;
 use crate::application::JewelcaseApplication;
 use crate::objects::TrackObject;
 
+/// The stored first page and the rest, each release once (a release new
+/// since the first page moves the others along).
+fn after_first_page(first: &[SpotifyAlbum], rest: Vec<SpotifyAlbum>) -> Vec<SpotifyAlbum> {
+    let mut albums = first.to_vec();
+    for album in rest {
+        if !albums.iter().any(|a| a.spotify_id == album.spotify_id) {
+            albums.push(album);
+        }
+    }
+    albums
+}
+
 /// Discographies are read again after this long: a week, as Spotify
-/// counts requests to artists over a day, and a prolific artist takes
-/// several (10 releases each).
+/// counts requests to artists over a day (for all apps on the account),
+/// and all of a prolific artist's releases take several (10 each).
 const DISCOGRAPHY_AGE_S: i64 = 7 * 24 * 3600;
 
 /// An artist's releases on Spotify, and when Spotify said so.
@@ -30,6 +42,63 @@ pub struct Discography {
     pub read: i64,
     /// Spotify couldn't be asked anew (why); these are the stored ones.
     pub problem: Option<String>,
+    /// Spotify's count of them all while only the first are here (Show
+    /// All reads the rest).
+    pub total: Option<u32>,
+}
+
+impl Discography {
+    fn stored(stored: StoredDiscography, problem: Option<String>) -> Self {
+        Self {
+            albums: stored.albums,
+            read: stored.read,
+            problem,
+            total: stored.total,
+        }
+    }
+}
+
+/// How much of an artist's releases a page asks Spotify for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Ask {
+    /// The stored ones while younger than a week, else the first page.
+    #[default]
+    Stored,
+    /// Ask Spotify Again: as many as the page shows (the first page, or
+    /// all of them).
+    Again,
+    /// Show All: the rest after the first page.
+    All,
+}
+
+/// What a discography takes from Spotify.
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    /// Nothing: the stored ones do.
+    Keep,
+    /// The first page (one request).
+    Start,
+    /// All pages from this offset on; after the first page, added to the
+    /// stored ones.
+    From(u32),
+}
+
+fn plan(stored: Option<&StoredDiscography>, ask: Ask, now: i64) -> Plan {
+    const START: u32 = jewelcase_spotify::ARTIST_ALBUMS_START;
+    let fresh = stored.filter(|s| now - s.read < DISCOGRAPHY_AGE_S);
+    match ask {
+        Ask::Stored if fresh.is_some() => Plan::Keep,
+        Ask::Stored => Plan::Start,
+        Ask::Again => match stored {
+            Some(s) if s.total.is_none() && s.albums.len() > START as usize => Plan::From(0),
+            _ => Plan::Start,
+        },
+        Ask::All => match fresh {
+            Some(s) if s.total.is_some() => Plan::From(START),
+            Some(_) => Plan::Keep,
+            None => Plan::From(0),
+        },
+    }
 }
 
 /// Something that can be in the user's Spotify library: a saved album,
@@ -176,42 +245,49 @@ impl Spotify {
     }
 
     /// An artist's releases on Spotify: the stored ones while younger than
-    /// a week, else asked for anew; `refresh`: asked for anew in any case
-    /// (the page's Refresh button). Stored ones also stand in when Spotify
-    /// can't be asked.
-    pub async fn discography(&self, artist_id: &str, refresh: bool) -> Result<Discography, String> {
+    /// a week, else the first page of them anew; Spotify Again and Show All
+    /// as `ask` says. Stored ones also stand in when Spotify can't be
+    /// asked.
+    pub async fn discography(&self, artist_id: &str, ask: Ask) -> Result<Discography, String> {
         let library = JewelcaseApplication::get().library();
         let cached = library
             .db()
             .and_then(|db| db.discography(artist_id).ok().flatten());
-        if let Some((albums, read)) = &cached
-            && !refresh
-            && now() - read < DISCOGRAPHY_AGE_S
+        let plan = plan(cached.as_ref(), ask, now());
+        if plan == Plan::Keep
+            && let Some(cached) = cached
         {
-            return Ok(Discography {
-                albums: albums.clone(),
-                read: *read,
-                problem: None,
-            });
+            return Ok(Discography::stored(cached, None));
         }
         let stored = |problem: String| match &cached {
-            Some((albums, read)) => Ok(Discography {
-                albums: albums.clone(),
-                read: *read,
-                problem: Some(problem),
-            }),
+            Some(cached) => Ok(Discography::stored(cached.clone(), Some(problem))),
             None => Err(problem),
         };
         if !self.is_connected() {
             return stored(gettext("Not connected to Spotify; connect in Preferences."));
         }
         let id = artist_id.to_owned();
-        match self.call(move |client| client.artist_albums(&id)).await {
-            Ok(albums) => {
-                let albums: Vec<SpotifyAlbum> = albums.iter().map(album_from).collect();
+        let answer = match plan {
+            Plan::From(offset) => self
+                .call(move |client| client.artist_albums_from(&id, offset))
+                .await
+                .map(|albums| (albums, None)),
+            _ => {
+                self.call(move |client| client.artist_albums_start(&id))
+                    .await
+            }
+        };
+        match answer {
+            Ok((albums, total)) => {
+                let mut albums: Vec<SpotifyAlbum> = albums.iter().map(album_from).collect();
+                if let (Plan::From(offset), Some(cached)) = (&plan, &cached)
+                    && *offset > 0
+                {
+                    albums = after_first_page(&cached.albums, albums);
+                }
                 let read = now();
                 if let Some(mut db) = library.db()
-                    && let Err(err) = db.store_discography(artist_id, &albums, read)
+                    && let Err(err) = db.store_discography(artist_id, &albums, read, total)
                 {
                     tracing::warn!("Cannot store a discography: {err}");
                 }
@@ -219,6 +295,7 @@ impl Spotify {
                     albums,
                     read,
                     problem: None,
+                    total,
                 })
             }
             Err(err) => {
@@ -623,5 +700,72 @@ impl Spotify {
         } else {
             self.message(&super::sync::answer_error(err));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn album(id: &str) -> SpotifyAlbum {
+        SpotifyAlbum {
+            spotify_id: id.into(),
+            name: id.into(),
+            artist: "Stray Kids".into(),
+            artist_ids: vec!["skz".into()],
+            album_type: "album".into(),
+            year: Some(2023),
+            total_tracks: 8,
+            image_url: None,
+            upc: None,
+        }
+    }
+
+    fn stored(count: usize, read: i64, total: Option<u32>) -> StoredDiscography {
+        StoredDiscography {
+            albums: (0..count).map(|n| album(&n.to_string())).collect(),
+            read,
+            total,
+        }
+    }
+
+    /// An artist page takes one request, not one per 10 releases: 25 pages
+    /// took 85 and used up a day's allowance for the whole account.
+    #[test]
+    fn an_artist_page_reads_one_page_of_releases() {
+        let now = 1_000_000_000;
+        let week = DISCOGRAPHY_AGE_S;
+        assert_eq!(plan(None, Ask::Stored, now), Plan::Start);
+        // Read all before (older versions): kept for the week, then
+        // only the first page.
+        let all = stored(52, now - 60, None);
+        assert_eq!(plan(Some(&all), Ask::Stored, now), Plan::Keep);
+        let old = stored(52, now - week, None);
+        assert_eq!(plan(Some(&old), Ask::Stored, now), Plan::Start);
+        // Ask Spotify Again: as many as the page shows.
+        assert_eq!(plan(Some(&all), Ask::Again, now), Plan::From(0));
+        let first = stored(10, now - 60, Some(52));
+        assert_eq!(plan(Some(&first), Ask::Again, now), Plan::Start);
+        assert_eq!(
+            plan(Some(&stored(4, now, None)), Ask::Again, now),
+            Plan::Start
+        );
+        // Show All: the rest after the first page, unless it's old.
+        assert_eq!(plan(Some(&first), Ask::All, now), Plan::From(10));
+        let first_old = stored(10, now - week, Some(52));
+        assert_eq!(plan(Some(&first_old), Ask::All, now), Plan::From(0));
+        assert_eq!(plan(Some(&all), Ask::All, now), Plan::Keep);
+    }
+
+    #[test]
+    fn the_rest_follows_the_first_page_once() {
+        let first = vec![album("a"), album("b")];
+        // A new release moved "b" to the second page.
+        let rest = vec![album("b"), album("c")];
+        let ids: Vec<String> = after_first_page(&first, rest)
+            .into_iter()
+            .map(|a| a.spotify_id)
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 }

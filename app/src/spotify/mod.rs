@@ -33,7 +33,7 @@ use jewelcase_spotify::{Client, Error, Tokens};
 use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
 
-pub use library::{Discography, LibraryItem, album_from};
+pub use library::{Ask, Discography, LibraryItem, album_from};
 pub use remote::RemoteCommand;
 pub use stream::{StreamNote, fetch_covers, fetch_covers_in_batches, image_cover_key};
 pub use sync::{Op, answer_error, parse_suggestion, search_error};

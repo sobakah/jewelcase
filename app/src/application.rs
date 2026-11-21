@@ -95,6 +95,11 @@ mod imp {
             }
             if let Some(spotify) = self.spotify.get() {
                 spotify.shutdown_streaming();
+                // What this session asked, also when it was short (the
+                // count is logged hourly otherwise).
+                if let Some(client) = spotify.client() {
+                    client.log_requests();
+                }
             }
             crate::romanizer::stop();
             self.parent_shutdown();

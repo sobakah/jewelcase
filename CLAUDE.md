@@ -164,8 +164,8 @@ make test
 ```
 
 `JEWELCASE_LOG=debug` (or `trace`, `warn`) sets the log level; the log goes to the journal, with
-hourly Spotify request counts per kind. Started from the dash, its lines carry the launcher's
-name (`journalctl --user | grep jewelcase::`), not `-t jewelcase`; after the update banner's
+Spotify request counts per kind (hourly and at quit). Started from the dash, its lines carry the
+launcher's name (`journalctl --user | grep jewelcase::`), not `-t jewelcase`; after the update banner's
 restart they go nowhere. For Soloist trouble read soloistd's log first
 (`journalctl --user -t soloistd`): every song start, pause (a seek shows as one) and volume change,
 to the millisecond.
@@ -329,12 +329,16 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   too high). Some M4A files stop decoding partway in plain GStreamer too: check with
   `gst-launch-1.0` before calling it a Jewelcase bug.
 - **Spotify Web API**: the owner's own client ID (Preferences → Spotify has the steps; redirect URI
-  `http://127.0.0.1:8974/callback`). Each client ID has its own rate limits. Development Mode
-  refuses followed playlists' items (403).
-- Spotify blocks `/artists/{id}/albums` for about 21 h after roughly 20 discographies a day.
-  Discographies are kept a week (`DISCOGRAPHY_AGE_S`); artist pages say when they were read and
-  can ask again. When the owner reports a block: read the journal (hourly request counts per kind)
-  and the read-only database.
+  `http://127.0.0.1:8974/callback`). Development Mode refuses followed playlists' items (403).
+- **Spotify's allowance for artist requests is the account's, not the client ID's**: the test
+  Flatpak and the installed app (two client IDs) were blocked until the same second, 24 h after
+  the first artist request, after about 95 requests (29 discographies, 10 releases a request).
+  So an artist page reads only the first page of releases (`artist_albums_start`; Show All reads
+  the rest, `Ask` in `app/src/spotify/library.rs`); don't go back to reading all of them on open.
+  Discographies are kept a week (`DISCOGRAPHY_AGE_S`); the two builds don't share them. When the
+  owner reports a block: read the journal (request counts per kind, hourly and at quit, and with
+  the block) and the `spotify_discography_read` times in both read-only databases (the test
+  Flatpak's is under `~/.var/app/io.github.sobakah.Jewelcase.Devel/data/`).
 - **Streaming through Spotify Soloist** (default): Jewelcase attaches to soloistd's Soloist
   (address from `websocket` in `~/.config/soloistd/config.json`), else to a running Soloist, else
   starts one itself with the key from the keyring. **Spotify gives one Soloist API key per

@@ -10,6 +10,7 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **The album beside an artist page stays longer**: as the window gets narrower, the artist grid first gives up its room, down to two columns of artists; then the artist page and the album on it get narrower together, at the same rate; then the page, with the album still beside it, goes over the artist grid. Only when the window is too narrow for the page and the album side by side does the album disappear, and it comes back when the window is wide enough again. The album no longer covers the page. Before, the page got narrower while the album kept its width, and the album went over the page early.
 - The album and playlist panels likewise leave the album grid two columns before they get narrower.
+- **Artist pages ask Spotify much less**: a page shows the first 10 of the artist's releases on Spotify, with *Show All* below them for the rest. Spotify allows only so many requests about artists a day, shared by every app on your account, and reading all of a prolific artist's releases took up to nine; a few dozen artist pages in an evening could block them for the rest of the day.
 
 ### Fixed
 

@@ -120,6 +120,41 @@ fn request_kind(url: &str) -> String {
     }
 }
 
+/// How many of an artist's releases [`Client::artist_albums_start`] reads:
+/// one page.
+pub const ARTIST_ALBUMS_START: u32 = 10;
+
+fn artist_albums_query(offset: u32) -> Vec<(&'static str, String)> {
+    let mut query = vec![
+        ("include_groups", "album,single".into()),
+        // Spotify refuses more for apps in Development Mode (2026);
+        // asking for 50 first cost a request each time.
+        ("limit", ARTIST_ALBUMS_START.to_string()),
+    ];
+    if offset > 0 {
+        query.push(("offset", offset.to_string()));
+    }
+    query
+}
+
+/// A page of an artist's releases, and Spotify's count of them all when
+/// another page follows.
+fn artist_albums_page(page: &Value) -> (Vec<Album>, Option<u32>) {
+    let albums = page["items"]
+        .as_array()
+        .map(|items| items.iter().filter_map(Album::parse).collect())
+        .unwrap_or_default();
+    let more = page["next"]
+        .as_str()
+        .filter(|next| !next.is_empty())
+        .map(|_| {
+            page["total"]
+                .as_u64()
+                .map_or(0, |n| n.min(u32::MAX as u64) as u32)
+        });
+    (albums, more)
+}
+
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -262,12 +297,27 @@ impl RequestCount {
 
     fn add(&mut self, kind: &str) {
         if self.since.elapsed() >= COUNT_PERIOD {
-            if !self.kinds.is_empty() {
-                tracing::info!("Spotify requests: {}", self.summary());
-            }
-            *self = Self::default();
+            self.log();
         }
         *self.kinds.entry(kind.to_owned()).or_default() += 1;
+    }
+
+    /// Logs the counts, if any, and starts counting anew; the summary
+    /// logged, for the tests.
+    fn log(&mut self) -> Option<String> {
+        let summary = (!self.kinds.is_empty()).then(|| self.summary());
+        if let Some(summary) = &summary {
+            tracing::info!("Spotify requests: {summary}");
+        }
+        *self = Self::default();
+        summary
+    }
+}
+
+impl Drop for Client {
+    /// A disconnect or a new login: the requests of this one in the log.
+    fn drop(&mut self) {
+        self.log_requests();
     }
 }
 
@@ -288,6 +338,14 @@ impl Client {
             blocked: Mutex::default(),
             on_block: Box::new(|_, _| {}),
             requests: Mutex::default(),
+        }
+    }
+
+    /// Logs the requests counted since the last hourly count: at quit, or
+    /// sessions shorter than an hour would leave none in the log.
+    pub fn log_requests(&self) {
+        if let Ok(mut requests) = self.requests.lock() {
+            requests.log();
         }
     }
 
@@ -858,16 +916,22 @@ impl Client {
         Artist::parse(&self.get(&format!("/artists/{id}"), &[])?).ok_or(Error::Format("artist"))
     }
 
-    /// An artist's albums, EPs and singles (no compilations they appear on).
-    pub fn artist_albums(&self, id: &str) -> Result<Vec<Album>> {
+    /// The first [`ARTIST_ALBUMS_START`] of an artist's albums, EPs and
+    /// singles, in one request, and Spotify's count of them all when there
+    /// are more. Spotify allows only so many requests about artists a day
+    /// (shared by all apps on an account): reading all of them took up to
+    /// nine requests per artist page.
+    pub fn artist_albums_start(&self, id: &str) -> Result<(Vec<Album>, Option<u32>)> {
+        let page = self.get(&format!("/artists/{id}/albums"), &artist_albums_query(0))?;
+        Ok(artist_albums_page(&page))
+    }
+
+    /// An artist's albums, EPs and singles (no compilations they appear
+    /// on) from `offset` on, all pages.
+    pub fn artist_albums_from(&self, id: &str, offset: u32) -> Result<Vec<Album>> {
         let items = self.get_all(
             &format!("/artists/{id}/albums"),
-            &[
-                ("include_groups", "album,single".into()),
-                // Spotify refuses more for apps in Development Mode
-                // (2026); asking for 50 first cost a request each time.
-                ("limit", SMALL_PAGE.into()),
-            ],
+            &artist_albums_query(offset),
         )?;
         Ok(items.iter().filter_map(Album::parse).collect())
     }
@@ -1157,6 +1221,39 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
         assert_eq!(client.blocked.lock().unwrap().len(), 1);
+    }
+
+    /// An artist page reads one page of releases; Spotify's total says how
+    /// many a Show All would add.
+    #[test]
+    fn the_first_page_of_releases_says_how_many_there_are() {
+        let item = |id: &str| serde_json::json!({"id": id, "name": id, "album_type": "album"});
+        let page = serde_json::json!({
+            "items": [item("a"), item("b")],
+            "total": 52,
+            "next": "https://api.spotify.com/v1/artists/x/albums?offset=10&limit=10",
+        });
+        let (albums, more) = artist_albums_page(&page);
+        assert_eq!(albums.len(), 2);
+        assert_eq!(more, Some(52));
+        let last = serde_json::json!({"items": [item("a")], "total": 1, "next": null});
+        assert_eq!(artist_albums_page(&last).1, None);
+        assert_eq!(
+            artist_albums_query(10).last(),
+            Some(&("offset", "10".to_owned()))
+        );
+    }
+
+    /// The count is logged at quit too: sessions shorter than an hour left
+    /// none, and a block came without the requests that led to it.
+    #[test]
+    fn the_request_count_is_logged_before_an_hour_is_over() {
+        let mut count = RequestCount::default();
+        assert_eq!(count.log(), None);
+        count.add("artists");
+        count.add("artists");
+        assert_eq!(count.log().as_deref(), Some("artists 2 (in 0 min)"));
+        assert_eq!(count.log(), None);
     }
 
     #[test]

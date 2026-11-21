@@ -71,9 +71,9 @@ mod imp {
         /// Counts fills of the sections; an older "On Spotify" answer is
         /// dropped.
         pub generation: Cell<u64>,
-        /// The next look at Spotify asks it anew (Refresh), instead of
-        /// taking releases read in the last week.
-        pub ask_spotify: Cell<bool>,
+        /// What the next look at Spotify asks it for: the releases read
+        /// in the last week, anew (Refresh), or all of them (Show All).
+        pub ask_spotify: Cell<crate::spotify::Ask>,
 
         pub artist_id: Cell<i64>,
         pub artist: RefCell<Option<ArtistObject>>,
@@ -136,13 +136,12 @@ mod imp {
             // Spotify's releases asked for anew (only those: a library
             // artist's online lookup isn't repeated).
             klass.install_action("artist.refresh-spotify", None, |page, _, _| {
-                page.imp().ask_spotify.set(true);
-                page.action_set_enabled("artist.refresh-spotify", false);
-                if page.spotify_artist_id().is_some() {
-                    page.refresh_spotify();
-                } else {
-                    page.fill_sections();
-                }
+                page.ask_spotify(crate::spotify::Ask::Again);
+            });
+            // The releases after the first page (an artist page reads only
+            // that: Spotify allows few requests about artists a day).
+            klass.install_action("artist.all-releases", None, |page, _, _| {
+                page.ask_spotify(crate::spotify::Ask::All);
             });
             klass.install_action("artist.lookup", None, |page, _, _| {
                 JewelcaseApplication::get()
@@ -608,7 +607,7 @@ impl ArtistPage {
             return;
         };
         let generation = self.next_generation();
-        let refresh = self.imp().ask_spotify.take();
+        let ask = self.imp().ask_spotify.take();
         glib::spawn_future_local(glib::clone!(
             #[weak(rename_to = page)]
             self,
@@ -617,7 +616,7 @@ impl ArtistPage {
                 if let Some(artist) = spotify.spotify_artist(&id).await {
                     page.show_spotify_header(&artist);
                 }
-                let discography = spotify.discography(&id, refresh).await;
+                let discography = spotify.discography(&id, ask).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
@@ -631,11 +630,12 @@ impl ArtistPage {
                 };
                 page.imp()
                     .sections
-                    .append(&page.freshness(&discography, refresh));
+                    .append(&page.freshness(&discography, ask));
                 if discography.albums.is_empty() {
                     page.add_note(&gettext("No albums, EPs or singles on Spotify"));
                 }
                 page.add_spotify_sections(&discography.albums, None);
+                page.add_show_all(discography.total);
             }
         ));
     }
@@ -703,7 +703,7 @@ impl ArtistPage {
             return;
         };
         let generation = self.next_generation();
-        let refresh = self.imp().ask_spotify.take();
+        let ask = self.imp().ask_spotify.take();
         if !spotify.is_connected() {
             return;
         }
@@ -731,7 +731,7 @@ impl ArtistPage {
                 if page.imp().generation.get() == generation {
                     page.set_follow(&id, &name);
                 }
-                let discography = spotify.discography(&id, refresh).await;
+                let discography = spotify.discography(&id, ask).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
@@ -750,16 +750,19 @@ impl ArtistPage {
                     .filter(|album| library.local_album_for(album).is_none())
                     .cloned()
                     .collect();
-                let freshness = page.freshness(&discography, refresh);
+                let freshness = page.freshness(&discography, ask);
                 if missing.is_empty() {
                     // Still said, with Refresh: a new release shows up here.
                     page.add_spotify_heading(Some(&freshness));
-                    page.add_note(&gettext(
-                        "Everything they released on Spotify is in your library",
-                    ));
-                    return;
+                    page.add_note(&if discography.total.is_some() {
+                        gettext("The releases Spotify lists first are all in your library")
+                    } else {
+                        gettext("Everything they released on Spotify is in your library")
+                    });
+                } else {
+                    page.add_spotify_sections(&missing, Some(&freshness));
                 }
-                page.add_spotify_sections(&missing, Some(&freshness));
+                page.add_show_all(discography.total);
             }
         ));
     }
@@ -804,8 +807,12 @@ impl ArtistPage {
     /// When Spotify was asked for the releases, and a button to ask again
     /// (they're kept a week, as Spotify limits requests about artists).
     /// After a Refresh that Spotify didn't answer: why, as a message.
-    fn freshness(&self, discography: &crate::spotify::Discography, refresh: bool) -> gtk::Widget {
-        if let (true, Some(why)) = (refresh, &discography.problem) {
+    fn freshness(
+        &self,
+        discography: &crate::spotify::Discography,
+        ask: crate::spotify::Ask,
+    ) -> gtk::Widget {
+        if let (true, Some(why)) = (ask != crate::spotify::Ask::Stored, &discography.problem) {
             JewelcaseApplication::get().spotify().message(&format!(
                 "{} {why}",
                 gettext("Spotify can’t be asked right now.")
@@ -834,6 +841,37 @@ impl ArtistPage {
                 .build(),
         );
         row.upcast()
+    }
+
+    /// Spotify asked anew (Refresh, Show All): only its part of the page.
+    fn ask_spotify(&self, ask: crate::spotify::Ask) {
+        self.imp().ask_spotify.set(ask);
+        self.action_set_enabled("artist.refresh-spotify", false);
+        self.action_set_enabled("artist.all-releases", false);
+        if self.spotify_artist_id().is_some() {
+            self.refresh_spotify();
+        } else {
+            self.fill_sections();
+        }
+    }
+
+    /// Below the releases from Spotify when they're only the first ones:
+    /// a button for all `total` of them.
+    fn add_show_all(&self, total: Option<u32>) {
+        let Some(total) = total else {
+            return;
+        };
+        self.action_set_enabled("artist.all-releases", true);
+        let label = ngettext("Show All {} Release", "Show All {} Releases", total)
+            .replace("{}", &total.to_string());
+        self.imp().sections.append(
+            &gtk::Button::builder()
+                .label(label)
+                .action_name("artist.all-releases")
+                .halign(gtk::Align::Center)
+                .css_classes(["pill"])
+                .build(),
+        );
     }
 
     /// Why Spotify's part is missing (e.g. how long Spotify asks to wait).

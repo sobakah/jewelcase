@@ -78,7 +78,7 @@ Preferences → Integrations shows whether they're found and the steps to instal
 - An RPM for Fedora 45, and a Flatpak for image-based systems; English only so far.
 - No gapless playback or crossfade between a song from your files and one from Spotify.
 - The songs of Spotify playlists you follow but don't own can't be listed (Spotify doesn't allow it); they can be played through Soloist.
-- Spotify limits how often its artist pages can be read; Jewelcase keeps an artist's releases for a week and says when Spotify asks it to wait.
+- Spotify limits how often artists' releases can be read, per account (all apps on it share the allowance); an artist page reads their first 10 releases (*Show All* reads the rest), Jewelcase keeps them for a week and says when Spotify asks it to wait.
 
 ## License
 

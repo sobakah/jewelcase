@@ -24,7 +24,7 @@ mod new_releases;
 pub use new_releases::{KnownAlbums, NewRelease};
 mod spotify_library;
 mod stats;
-pub use spotify_library::{SpotifyAlbum, SpotifyArtist};
+pub use spotify_library::{SpotifyAlbum, SpotifyArtist, StoredDiscography};
 pub use stats::{PlayEntry, Ranked, Summary, Trend};
 
 const MIGRATIONS: &[M<'static>] = &[
@@ -59,6 +59,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/029_new_releases.sql")),
     M::up(include_str!("db/030_release_artists.sql")),
     M::up(include_str!("db/031_playlist_library_only.sql")),
+    M::up(include_str!("db/032_discography_total.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once
