@@ -453,65 +453,10 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
                     max-sidebar-width: 440;
                     sidebar-width-fraction: 0.38;
 
-                    content: Gtk.ScrolledWindow {
-                      hscrollbar-policy: never;
-
-                      child: Gtk.Box {
-                        orientation: vertical;
-
-                        styles [
-                          "album-grid",
-                        ]
-
-                        Gtk.FlowBox playlist_grid {
-                          max-children-per-line: 40;
-                          min-children-per-line: 2;
-                          homogeneous: true;
-                          selection-mode: none;
-                          activate-on-single-click: true;
-                          valign: start;
-
-                          styles [
-                            "playlist-flow",
-                          ]
-                        }
-
-                        // Others' Spotify playlists: Spotify doesn't show
-                        // their songs (CONCEPT.md §9.5).
-                        Gtk.Button followed_toggle {
-                          halign: start;
-                          margin-start: 9;
-                          margin-top: 18;
-                          visible: false;
-
-                          child: Adw.ButtonContent followed_content {
-                            icon-name: "pan-end-symbolic";
-                          };
-
-                          styles [
-                            "flat",
-                            "heading",
-                          ]
-                        }
-
-                        Gtk.Revealer followed_revealer {
-                          transition-type: slide_down;
-
-                          child: Gtk.FlowBox followed_grid {
-                            max-children-per-line: 40;
-                            min-children-per-line: 2;
-                            homogeneous: true;
-                            selection-mode: none;
-                            activate-on-single-click: true;
-                            valign: start;
-
-                            styles [
-                              "playlist-flow",
-                            ]
-                          };
-                        }
-                      };
-                    };
+                    // Own playlists, and below them, collapsible, followed
+                    // Spotify playlists (Spotify doesn't show their songs,
+                    // CONCEPT.md §9.5); tiles glide like the album grid's.
+                    content: $JewelcaseSectionedGrid playlist_grid {};
 
                     sidebar: $JewelcasePlaylistPanel playlist_panel {};
                   };

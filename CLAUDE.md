@@ -353,8 +353,9 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   accounts (librespot issue #1649). `Cargo.lock` pins vergen 9.0.6 for librespot-core's build
   script.
 - Jewelcase only asks LRCLIB for lyrics of Spotify songs while the lyrics are on screen.
-- **The album and artist grids** (`widgets/sectioned_grid.rs`) change their rows in place when
-  the columns change: new list items would make the list view build every row and tile anew
+- **The album, artist and playlist grids** (`widgets/sectioned_grid.rs`) change their rows in place when
+  the columns change (also a row whose items stayed: its tiles take the new columns' places):
+  new list items would make the list view build every row and tile anew
   (11 ms of a panel's first frame). Their tiles glide to the new places (`widgets/grid_reflow.rs`)
   while the rows are already laid out for the new columns; only the drawing moves.
 - **Panel widths** are worked out in each layout of `SlideView` (`set_width_rule`, rules in

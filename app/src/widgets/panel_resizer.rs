@@ -30,7 +30,9 @@ use crate::widgets::slide_view::{Panel, Place, Room};
 /// The album and playlist panels' width (shared; also the album on an
 /// artist page).
 const KEY: &str = "panel-width";
-const MIN_WIDTH: i32 = 280;
+/// Beside other content: narrower, an album's song titles were cut to a
+/// few letters (then it goes over what it covers, all of the window).
+const MIN_WIDTH: i32 = 360;
 /// Automatic album and playlist panels: this part of the room, within
 /// the two below (as in the templates).
 const AUTO_FRACTION: f64 = 0.38;
@@ -70,13 +72,8 @@ enum Kind {
 /// Whether an album is open on the artist page.
 type AlbumOpen = Rc<dyn Fn() -> bool>;
 
-/// The playlist panel.
-pub fn attach(split: &crate::widgets::SlideView, settings: &gio::Settings) {
-    attach_panel(split, settings, Kind::Panel { grid_padding: None }, None);
-}
-
-/// The album panel beside the album grid, whose covers have
-/// `grid_padding` around them.
+/// The album or playlist panel beside the album or playlist grid, whose
+/// covers have `grid_padding` around them.
 pub fn attach_beside_grid(
     split: &crate::widgets::SlideView,
     settings: &gio::Settings,
@@ -181,7 +178,8 @@ fn layout(kind: Kind, set: Set, room: Room, keep: i32, album_open: bool) -> Pane
             } else {
                 automatic(space)
             };
-            let width = wanted.min(space - keep);
+            // At its minimum, the page's content gives up its room alone.
+            let width = wanted.max(MIN_WIDTH).min(space - keep);
             if room.collapsed || width < MIN_WIDTH {
                 // No room beside the grid or the page's content: over it,
                 // all of the view (narrower, titles were cut short).
@@ -515,9 +513,9 @@ mod tests {
         assert_eq!(page(1556, 1280), beside(1280 - GRID_MIN));
         assert_eq!(page(1556, GRID_MIN + need), beside(need));
         assert_eq!(page(1556, GRID_MIN + need - 1), over(need));
-        assert_eq!(page(1556, 800), over(need));
+        assert_eq!(page(1556, 900), over(need));
         // Too narrow for both: all of the window (the album over it).
-        assert_eq!(page(1556, 700), over(700));
+        assert_eq!(page(1556, 800), over(800));
         // Set narrower than both need.
         assert_eq!(page(600, 2560), beside(need));
     }
@@ -533,10 +531,12 @@ mod tests {
         assert_eq!(album(1556), beside(647));
         // 1100/1556 of both widths (457 + 643).
         assert_eq!(album(1100), beside(457));
-        // 341 by the rate, but the page keeps its 480.
-        assert_eq!(album(820), beside(340));
-        assert_eq!(album(760), beside(MIN_WIDTH));
-        assert_eq!(album(759), over(759));
+        assert_eq!(album(887), beside(369));
+        // 358 by the rate: the album keeps its minimum, the page's
+        // content alone gets narrower, down to its 480.
+        assert_eq!(album(860), beside(MIN_WIDTH));
+        assert_eq!(album(840), beside(MIN_WIDTH));
+        assert_eq!(album(839), over(839));
         assert_eq!(album(400), over(400));
         // A page content wider than its minimum keeps that instead.
         let wide_content = Room {
@@ -544,7 +544,13 @@ mod tests {
             ..room(900)
         };
         let panel = layout(ALBUM, set(647, 1556), wide_content, PAGE_CONTENT_MIN, false);
-        assert_eq!(panel, beside(300));
+        assert_eq!(panel, over(900));
+        let wide_content = Room {
+            content_min: 600,
+            ..room(1000)
+        };
+        let panel = layout(ALBUM, set(647, 1556), wide_content, PAGE_CONTENT_MIN, false);
+        assert_eq!(panel, beside(400));
     }
 
     /// The album and playlist panels: the grid keeps two columns, then
@@ -562,8 +568,8 @@ mod tests {
         };
         assert_eq!(panel(700, 2400), beside(700));
         assert_eq!(panel(700, 1000), beside(620));
-        assert_eq!(panel(700, 660), beside(MIN_WIDTH));
-        assert_eq!(panel(700, 659), over(659));
+        assert_eq!(panel(700, 740), beside(MIN_WIDTH));
+        assert_eq!(panel(700, 739), over(739));
         assert_eq!(panel(0, 1000), beside(380));
         assert_eq!(panel(0, 500), over(500));
     }

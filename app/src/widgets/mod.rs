@@ -47,7 +47,7 @@ pub use queue_view::QueueView;
 pub use search_view::SearchView;
 pub use sectioned_grid::SectionedGrid;
 pub use slide_view::SlideView;
-pub use spotify_tile::{ShelfItem, tile_content};
+pub use spotify_tile::{ShelfItem, ShelfKind, tile_content};
 pub use track_row::TrackRow;
 pub use visualizer::Visualizer;
 

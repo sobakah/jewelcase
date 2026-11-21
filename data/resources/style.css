@@ -20,11 +20,6 @@
   padding: 12px;
 }
 
-.playlist-flow > flowboxchild {
-  padding: 9px;
-  border-radius: 15px;
-}
-
 /* The album and artist grids are rows of tile buttons (sectioned_grid.rs),
    with Spotify's section at the end (§9.8). */
 .sectioned-grid > row {

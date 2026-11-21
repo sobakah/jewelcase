@@ -161,15 +161,7 @@ mod imp {
         #[template_child]
         pub playlist_split: TemplateChild<crate::widgets::SlideView>,
         #[template_child]
-        pub playlist_grid: TemplateChild<gtk::FlowBox>,
-        #[template_child]
-        pub followed_grid: TemplateChild<gtk::FlowBox>,
-        #[template_child]
-        pub followed_toggle: TemplateChild<gtk::Button>,
-        #[template_child]
-        pub followed_content: TemplateChild<adw::ButtonContent>,
-        #[template_child]
-        pub followed_revealer: TemplateChild<gtk::Revealer>,
+        pub playlist_grid: TemplateChild<crate::widgets::SectionedGrid>,
         #[template_child]
         pub playlist_panel: TemplateChild<PlaylistPanel>,
         pub settings: OnceCell<gio::Settings>,
@@ -695,7 +687,6 @@ impl JewelcaseWindow {
         let library = JewelcaseApplication::get().library();
         // Own playlists, and below them, collapsed by default, followed
         // Spotify playlists (Spotify doesn't show their songs, §9.5).
-        let settings = self.settings();
         let readable = gtk::FilterListModel::new(
             Some(library.playlists().clone()),
             Some(gtk::CustomFilter::new(|item| {
@@ -710,88 +701,65 @@ impl JewelcaseWindow {
                     .is_some_and(|p| !p.playlist().readable)
             })),
         );
-        let tile = |item: &glib::Object| -> gtk::Widget {
-            let tile = PlaylistTile::new();
-            // Its cell in the flow box only as wide as the tile (a wider
-            // cell, highlighted, would look like a larger tile).
-            // (After the flow box has added it: not while inserting.)
-            tile.connect_notify_local(Some("parent"), |tile, _| {
-                let tile = tile.downgrade();
-                glib::idle_add_local_once(move || {
-                    if let Some(child) = tile.upgrade().and_then(|t| t.parent()) {
-                        child.set_halign(gtk::Align::Center);
+        imp.playlist_grid.setup(
+            &readable,
+            // Their tiles are as the album grid's.
+            ALBUM_TILE_PADDING,
+            "album-grid",
+            || PlaylistTile::new().upcast(),
+            |tile, item| {
+                if let (Some(tile), Some(playlist)) = (
+                    tile.downcast_ref::<PlaylistTile>(),
+                    item.downcast_ref::<PlaylistObject>(),
+                ) {
+                    tile.bind(playlist);
+                    tile.update_property(&[gtk::accessible::Property::Label(
+                        &playlist.playlist().name,
+                    )]);
+                }
+            },
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |item| {
+                    if let Some(playlist) = item.downcast_ref::<PlaylistObject>() {
+                        window.show_playlist(playlist);
                     }
-                });
-            });
-            if let Some(playlist) = item.downcast_ref::<PlaylistObject>() {
-                tile.bind(playlist);
-                tile.update_property(&[gtk::accessible::Property::Label(
-                    &playlist.playlist().name,
-                )]);
-            }
-            tile.upcast()
-        };
-        imp.playlist_grid.bind_model(Some(&readable), tile);
-        imp.followed_grid.bind_model(Some(&followed), tile);
-        for (grid, model) in [
-            (imp.playlist_grid.get(), readable.clone()),
-            (imp.followed_grid.get(), followed.clone()),
-        ] {
-            grid.connect_child_activated(move |grid, child| {
-                let Some(playlist) = model
-                    .item(child.index() as u32)
-                    .and_downcast::<PlaylistObject>()
-                else {
-                    return;
-                };
-                if let Some(window) = grid.root().and_downcast::<JewelcaseWindow>() {
-                    window.show_playlist(&playlist);
+                }
+            ),
+        );
+        // Translators: {} is a number of playlists.
+        let section = imp.playlist_grid.add_section(
+            &gettext("Followed Playlists ({})"),
+            "show-followed-playlists",
+        );
+        let window = self.downgrade();
+        let update_followed = move |followed: &gtk::FilterListModel| {
+            let Some(grid) = window.upgrade().map(|w| w.imp().playlist_grid.get()) else {
+                return;
+            };
+            let playlists: Vec<PlaylistObject> = (0..followed.n_items())
+                .filter_map(|i| followed.item(i).and_downcast())
+                .collect();
+            let items = playlists
+                .iter()
+                .map(|playlist| crate::widgets::ShelfItem {
+                    cover_key: playlist.cover_key(),
+                    title: playlist.playlist().name.clone(),
+                    // Translators: a playlist tile.
+                    subtitle: gettext("Spotify · Followed"),
+                    kind: crate::widgets::ShelfKind::Playlist,
+                })
+                .collect();
+            let window = window.clone();
+            grid.set_section(section, items, false, move |index| {
+                if let (Some(window), Some(playlist)) = (window.upgrade(), playlists.get(index)) {
+                    window.show_playlist(playlist);
                 }
             });
-        }
-        let toggle = imp.followed_toggle.get();
-        let content = imp.followed_content.get();
-        let revealer = imp.followed_revealer.get();
-        let update_toggle = glib::clone!(
-            #[weak]
-            toggle,
-            #[weak]
-            content,
-            #[weak]
-            revealer,
-            #[strong]
-            settings,
-            move |followed: &gtk::FilterListModel| {
-                let count = followed.n_items();
-                let open = settings.boolean("show-followed-playlists");
-                toggle.set_visible(count > 0);
-                // Translators: {} is a number of playlists.
-                content.set_label(
-                    &gettext("Followed Playlists ({})").replace("{}", &count.to_string()),
-                );
-                content.set_icon_name(if open {
-                    "pan-down-symbolic"
-                } else {
-                    "pan-end-symbolic"
-                });
-                revealer.set_reveal_child(open && count > 0);
-            }
-        );
-        update_toggle(&followed);
-        let on_items = update_toggle.clone();
-        followed.connect_items_changed(move |followed, _, _, _| on_items(followed));
-        let on_setting = followed.clone();
-        settings.connect_changed(Some("show-followed-playlists"), move |_, _| {
-            update_toggle(&on_setting);
-        });
-        toggle.connect_clicked(glib::clone!(
-            #[strong]
-            settings,
-            move |_| {
-                let open = settings.boolean("show-followed-playlists");
-                let _ = settings.set_boolean("show-followed-playlists", !open);
-            }
-        ));
+        };
+        update_followed(&followed);
+        followed.connect_items_changed(move |followed, _, _, _| update_followed(followed));
         imp.playlist_panel.connect_local(
             "close",
             false,
@@ -1103,7 +1071,7 @@ impl JewelcaseWindow {
                 cover_key: album.cover_key(),
                 title: album.name.clone(),
                 subtitle: album.artist.clone(),
-                artist: false,
+                kind: crate::widgets::ShelfKind::Album,
             })
             .collect();
         imp.album_grid.set_section(
@@ -1150,7 +1118,7 @@ impl JewelcaseWindow {
                 cover_key: artist.cover_key(),
                 title: artist.name.clone(),
                 subtitle: artist.genres.first().cloned().unwrap_or_default(),
-                artist: true,
+                kind: crate::widgets::ShelfKind::Artist,
             })
             .collect();
         imp.artist_grid.set_section(
@@ -1614,7 +1582,7 @@ impl JewelcaseWindow {
     fn setup_panel_resizers(&self) {
         let imp = self.imp();
         panel_resizer::attach_beside_grid(&imp.split_view, self.settings(), ALBUM_TILE_PADDING);
-        panel_resizer::attach(&imp.playlist_split, self.settings());
+        panel_resizer::attach_beside_grid(&imp.playlist_split, self.settings(), ALBUM_TILE_PADDING);
         let window = self.downgrade();
         panel_resizer::attach_artist(
             &imp.artist_split,

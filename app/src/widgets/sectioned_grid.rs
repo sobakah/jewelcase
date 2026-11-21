@@ -43,6 +43,32 @@ pub fn min_width(tile_size: i32, tile_padding: i32) -> i32 {
     KEPT_COLUMNS * (tile_size + tile_padding) + 2 * PADDING
 }
 
+/// How many rows at the start stay as they are: the same lines, their
+/// items unchanged (`local_dirty`, `dirty` per section), and laid out for
+/// the same columns (a row of fewer items than columns is the same line
+/// for other columns, but its tiles go to other places).
+fn rows_kept(
+    old: &[Row],
+    new: &[Row],
+    local_dirty: bool,
+    dirty: &[bool],
+    columns_changed: bool,
+) -> usize {
+    old.iter()
+        .zip(new)
+        .take_while(|(a, b)| {
+            a == b
+                && match a {
+                    Row::Local { .. } => !local_dirty && !columns_changed,
+                    Row::Section { section, .. } => {
+                        !dirty.get(*section).copied().unwrap_or(true) && !columns_changed
+                    }
+                    Row::Header(_) => true,
+                }
+        })
+        .count()
+}
+
 /// One line of the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
@@ -667,7 +693,10 @@ impl SectionedGrid {
                 }));
             }
         }
-        imp.built_columns.set(columns);
+        // A row with the same items is laid out anew for other columns
+        // (with fewer items than columns, the row didn't change, and kept
+        // the old columns' places: its tiles overlapped).
+        let columns_changed = imp.built_columns.replace(columns) != columns;
         // Only what changed: rows that stay keep their widgets (no new
         // textures, focus kept); changed items change every row after them.
         let old = imp.shown.replace(rows.clone());
@@ -682,18 +711,7 @@ impl SectionedGrid {
         if local_dirty || dirty.contains(&true) {
             self.end_reflow();
         }
-        let keep = old
-            .iter()
-            .zip(&rows)
-            .take_while(|(a, b)| {
-                a == b
-                    && match a {
-                        Row::Local { .. } => !local_dirty,
-                        Row::Section { section, .. } => !dirty[*section],
-                        Row::Header(_) => true,
-                    }
-            })
-            .count();
+        let keep = rows_kept(&old, &rows, local_dirty, &dirty, columns_changed);
         if let Some(store) = imp.rows.get() {
             // The changed rows that were there before show their new
             // lines (their widgets stay: new ones would build every tile
@@ -1262,5 +1280,26 @@ mod tests {
         assert_eq!(columns(360, 160, 18), 1);
         assert_eq!(columns(2 * 178 + 2 * PADDING, 160, 18), 2);
         assert_eq!(columns(0, 160, 18), 1);
+    }
+
+    /// Two playlists in a row of eight columns, then of two: the row is
+    /// the same line ("items 0 and 1"), but its tiles were left in the
+    /// eight columns' places, on top of each other.
+    #[test]
+    fn a_short_row_is_laid_out_again_for_other_columns() {
+        let rows = [
+            Row::Local { start: 0, len: 2 },
+            Row::Header(0),
+            Row::Section {
+                section: 0,
+                start: 0,
+                len: 1,
+            },
+        ];
+        assert_eq!(rows_kept(&rows, &rows, false, &[false], false), 3);
+        assert_eq!(rows_kept(&rows, &rows, false, &[false], true), 0);
+        // Changed items: their rows and every row after them.
+        assert_eq!(rows_kept(&rows, &rows, true, &[false], false), 0);
+        assert_eq!(rows_kept(&rows[1..], &rows[1..], false, &[true], false), 1);
     }
 }

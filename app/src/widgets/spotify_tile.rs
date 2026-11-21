@@ -1,5 +1,5 @@
-//! Tiles for Spotify's albums and artists (CONCEPT.md §9.8): cover, title
-//! and a dim line, like the library's tiles.
+//! Tiles for Spotify's albums, artists and followed playlists (CONCEPT.md
+//! §9.8): cover, title and a dim line, like the library's tiles.
 
 use adw::prelude::*;
 
@@ -11,17 +11,28 @@ pub struct ShelfItem {
     pub cover_key: Option<String>,
     pub title: String,
     pub subtitle: String,
-    /// Artists show a person when there's no picture, and their name bold.
-    pub artist: bool,
+    pub kind: ShelfKind,
+}
+
+/// What kind of thing a tile shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShelfKind {
+    /// In a jewel case when those are on.
+    #[default]
+    Album,
+    /// A person when there's no picture, and the name bold.
+    Artist,
+    /// As the library's playlist tiles.
+    Playlist,
 }
 
 /// The tile's content, and its cover (to show it once downloaded).
 pub fn tile_content(item: &ShelfItem) -> (gtk::Box, CoverImage) {
     let cover = super::tile_cover();
-    if item.artist {
-        cover.set_placeholder_icon("avatar-default-symbolic");
-    } else {
-        super::album_case(&cover);
+    match item.kind {
+        ShelfKind::Artist => cover.set_placeholder_icon("avatar-default-symbolic"),
+        ShelfKind::Album => super::album_case(&cover),
+        ShelfKind::Playlist => {}
     }
     cover.set_cover(item.cover_key.as_deref());
     cover.set_label(&item.title);
@@ -39,15 +50,12 @@ pub fn tile_content(item: &ShelfItem) -> (gtk::Box, CoverImage) {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 3);
     // The cover's size, also in a wider cell.
     content.set_halign(gtk::Align::Center);
-    content.add_css_class(if item.artist {
-        "artist-tile"
-    } else {
-        "album-tile"
-    });
+    let artist = item.kind == ShelfKind::Artist;
+    content.add_css_class(if artist { "artist-tile" } else { "album-tile" });
     content.append(&cover);
     content.append(&label(
         &item.title,
-        if item.artist {
+        if artist {
             &["artist-name"]
         } else {
             &["album-title"]

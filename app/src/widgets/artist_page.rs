@@ -932,7 +932,7 @@ impl ArtistPage {
                 cover_key: album.cover_key(),
                 title: album.name.clone(),
                 subtitle: album.year.map(|y| y.to_string()).unwrap_or_default(),
-                artist: false,
+                kind: super::ShelfKind::Album,
             };
             let (tile, cover) = super::tile_content(&item);
             super::tooltip_when_cut(&tile);
