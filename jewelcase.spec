@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.10.0
+Version:        0.11.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sat Nov 21 2026 sobakah - 0.11.0-1
+- Popular songs on artist pages: your most played, optionally Deezer's
+- Every song in the queue has a menu with Go to Album and Go to Artist
+- Add to Playlist opens as a menu and can be sorted
+- The visualizer follows its setting again
+
 * Sat Nov 21 2026 sobakah - 0.10.0-1
 - Window layout keeps what was opened last in view as the window narrows
 - Nothing is cut off at the window's edge at any width

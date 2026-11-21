@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-21
+
+The library database changes (Deezer's popular songs of an artist are kept a day); 0.10.0 can't
+open it any more.
+
 ### Added
 
 - Songs in the queue and under Recently Played open their album or artist from their ⋮ menu (*Go to Album*, *Go to Artist*).
@@ -208,7 +213,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/sobakah/jewelcase/releases/tag/0.11.0
 [0.10.0]: https://github.com/sobakah/jewelcase/releases/tag/0.10.0
 [0.9.0]: https://github.com/sobakah/jewelcase/releases/tag/0.9.0
 [0.8.0]: https://github.com/sobakah/jewelcase/releases/tag/0.8.0

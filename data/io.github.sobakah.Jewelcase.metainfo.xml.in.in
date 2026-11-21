@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.11.0" date="2026-11-21" type="development">
+      <description>
+        <ul>
+          <li>Popular songs on artist pages: your most played, and optionally Deezer’s</li>
+          <li>Every song in the queue has a menu that also opens its album or artist</li>
+          <li>Add to Playlist opens as a menu and can be sorted by last change or name</li>
+          <li>The visualizer follows its setting again</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-11-21" type="development">
       <description>
         <ul>
