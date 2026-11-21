@@ -11,12 +11,10 @@
 //! `keep-open`), and uncollapsing brings back one that was open.
 //!
 //! `set_width_rule` decides the panel's width, and whether it goes over
-//! the content or out of sight for want of room (an album on an artist
-//! page), in each layout from the room there is (panel_resizer.rs): never
-//! a frame behind the window, so a panel doesn't cover content that
-//! should be beside it while the window is resized. A panel out of sight
-//! comes back when there's room again; one opened without room goes over
-//! the content (there's no other place for it).
+//! the content for want of room, in each layout from the room there is
+//! (panel_resizer.rs): never a frame behind the window, so a panel
+//! doesn't cover content that should be beside it while the window is
+//! resized, and comes back beside it as soon as there's room.
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -53,8 +51,6 @@ pub enum Place {
     Beside,
     /// Over the content, which is dimmed.
     Over,
-    /// No room: out of sight (over the content if it was opened so).
-    Away,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -107,10 +103,6 @@ mod imp {
         /// notified after the layout.
         #[property(get = Self::is_over, name = "over", type = bool)]
         pub over: Cell<bool>,
-        /// The rule found room for the panel in the last layout.
-        pub fits: Cell<bool>,
-        /// Opened without room: over the content until there's room.
-        pub opened_cramped: Cell<bool>,
         /// 0 hidden, 1 in place; above 1 while it bounces.
         pub progress: Cell<f64>,
         pub animation: OnceCell<adw::SpringAnimation>,
@@ -136,8 +128,6 @@ mod imp {
                 width_rule: RefCell::new(None),
                 can_go_over: Cell::new(false),
                 over: Cell::new(false),
-                fits: Cell::new(true),
-                opened_cramped: Cell::new(false),
                 progress: Cell::new(0.0),
                 animation: OnceCell::new(),
                 open_before_collapse: Cell::new(false),
@@ -251,17 +241,6 @@ mod imp {
                 width: panel,
                 place,
             } = self.layout(width, content_min);
-            self.fits.set(place != Place::Away);
-            let place = match place {
-                // Over the content, unless it can't be that narrow either
-                // (then it would be cut off by the window's edge).
-                Place::Away if self.opened_cramped.get() && panel <= width => Place::Over,
-                Place::Beside => {
-                    self.opened_cramped.set(false);
-                    Place::Beside
-                }
-                place => place,
-            };
             let over = place == Place::Over;
             if self.over.replace(over) != over {
                 // Not during the layout: new style classes would undo it
@@ -302,12 +281,7 @@ mod imp {
             // wider, an artist page could change its number of columns
             // for a moment).
             let shown = f64::from(panel) * progress;
-            // Out of sight: just past the end (the view clips it).
-            let x = if place == Place::Away {
-                f64::from(width)
-            } else {
-                f64::from(width) - shown
-            };
+            let x = f64::from(width) - shown;
             let stretch = (shown / f64::from(panel.max(1))).max(1.0);
             let transform = gtk::gsk::Transform::new()
                 .translate(&gtk::graphene::Point::new(x.round() as f32, 0.0))
@@ -401,8 +375,6 @@ mod imp {
             if self.collapsed.get() {
                 self.open_before_collapse.set(false);
             }
-            // Opened without room beside the content: over it.
-            self.opened_cramped.set(show && !self.fits.get());
             self.animate_to(if show { 1.0 } else { 0.0 });
             self.obj().queue_resize();
         }
@@ -558,44 +530,45 @@ mod tests {
         });
     }
 
-    /// A panel without room (an album on an artist page) goes out of
-    /// sight and the content gets the whole width, in the same layout; it
-    /// comes back beside the content when there's room. Opened without
-    /// room, it goes over the content.
+    /// A panel without room beside the content stays open over it, in the
+    /// same layout, and comes back beside it when there's room: what was
+    /// opened last stays in sight.
     #[test]
-    fn a_panel_without_room_goes_out_of_sight() {
+    fn a_panel_without_room_lies_over_the_content() {
         crate::gtk_test::run(|| {
             let view = SlideView::default();
             let content = gtk::Label::new(Some("page"));
             view.set_content(Some(content.upcast_ref::<gtk::Widget>()));
-            view.set_sidebar(Some(
-                gtk::Label::new(Some("album")).upcast_ref::<gtk::Widget>(),
-            ));
-            view.set_width_rule(true, |room| Panel {
-                width: 320,
-                place: if room.width - 320 < 480 {
-                    Place::Away
+            let album = gtk::Label::new(Some("album"));
+            view.set_sidebar(Some(album.upcast_ref::<gtk::Widget>()));
+            view.set_width_rule(true, |room| {
+                if room.width - 320 < 480 {
+                    Panel {
+                        width: room.width,
+                        place: Place::Over,
+                    }
                 } else {
-                    Place::Beside
-                },
+                    Panel {
+                        width: 320,
+                        place: Place::Beside,
+                    }
+                }
             });
             view.set_show_sidebar(true);
-            let _ = view.measure(gtk::Orientation::Horizontal, -1);
-            // No room: out of sight, the content has it all.
+            // Asks for no room beside the content.
+            assert_eq!(
+                view.measure(gtk::Orientation::Horizontal, -1).0,
+                content.measure(gtk::Orientation::Horizontal, -1).0
+            );
+            // No room: over the content, all of the view; still open.
             view.allocate(700, 600, -1, None);
-            assert!(!view.over());
-            assert_eq!(content.width(), 700);
+            assert!(view.over());
+            assert!(view.show_sidebar());
+            assert_eq!(album.width(), 700);
             // Room again: back beside it.
             view.allocate(900, 600, -1, None);
             assert!(!view.over());
             assert_eq!(content.width(), 900 - 320);
-            // Opened without room: over the content.
-            view.set_show_sidebar(false);
-            view.allocate(700, 600, -1, None);
-            view.set_show_sidebar(true);
-            view.allocate(700, 600, -1, None);
-            assert!(view.over());
-            assert_eq!(content.width(), 700);
         });
     }
 }

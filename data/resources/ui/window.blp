@@ -7,20 +7,10 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
   width-request: 360;
   height-request: 294;
   title: _("Jewelcase");
-  // Only the last matching breakpoint applies, so the narrower ones repeat
-  // the setters of the wider ones.
-  // An artist page goes over the grid by its own rule (panel_resizer.rs:
-  // it needs more room with an album open).
-
-  Adw.Breakpoint {
-    condition ("max-width: 700sp")
-
-    setters {
-      split_view.collapsed: true;
-      playlist_split.collapsed: true;
-      artist_split.collapsed: true;
-    }
-  }
+  // Panels (album, playlist, artist page) go over what they cover by
+  // their width rules, worked out from the room in each layout
+  // (panel_resizer.rs), not by a breakpoint: what was opened last stays
+  // in sight.
 
   Adw.Breakpoint {
     condition ("max-width: 640sp")
@@ -29,9 +19,6 @@ template $JewelcaseWindow: Adw.ApplicationWindow {
       header_bar.show-title: false;
       bottom_sheet.full-width: true;
       mini_player.compact: true;
-      split_view.collapsed: true;
-      playlist_split.collapsed: true;
-      artist_split.collapsed: true;
     }
   }
 
