@@ -521,12 +521,12 @@ mod tests {
     fn the_grid_gives_up_its_room_before_the_page() {
         let page =
             |set_width, window| layout(PAGE, set(set_width, 0), room(window), GRID_MIN, false);
-        assert_eq!(page(1556, 2560), beside(1556));
-        assert_eq!(page(1556, 1280), beside(1280 - GRID_MIN));
-        assert_eq!(page(1556, 952), beside(ARTIST_BESIDE_MIN));
+        assert_eq!(page(1500, 2400), beside(1500));
+        assert_eq!(page(1500, 1280), beside(1280 - GRID_MIN));
+        assert_eq!(page(1500, 952), beside(ARTIST_BESIDE_MIN));
         // Narrower: over the grid, as narrow as it was.
-        assert_eq!(page(1556, 940), over(ARTIST_BESIDE_MIN));
-        assert_eq!(page(700, 2560), beside(700));
+        assert_eq!(page(1500, 940), over(ARTIST_BESIDE_MIN));
+        assert_eq!(page(700, 2400), beside(700));
     }
 
     /// With an album open, the page needs room for its content and the
@@ -537,14 +537,14 @@ mod tests {
         let page =
             |set_width, window| layout(PAGE, set(set_width, 0), room(window), GRID_MIN, true);
         let need = PAGE_CONTENT_MIN + MIN_WIDTH;
-        assert_eq!(page(1556, 1280), beside(1280 - GRID_MIN));
-        assert_eq!(page(1556, GRID_MIN + need), beside(need));
-        assert_eq!(page(1556, GRID_MIN + need - 1), over(need));
-        assert_eq!(page(1556, 900), over(need));
+        assert_eq!(page(1500, 1280), beside(1280 - GRID_MIN));
+        assert_eq!(page(1500, GRID_MIN + need), beside(need));
+        assert_eq!(page(1500, GRID_MIN + need - 1), over(need));
+        assert_eq!(page(1500, 900), over(need));
         // Too narrow for both: all of the window (the album over it).
-        assert_eq!(page(1556, 800), over(800));
+        assert_eq!(page(1500, 800), over(800));
         // Set narrower than both need.
-        assert_eq!(page(600, 2560), beside(need));
+        assert_eq!(page(600, 2400), beside(need));
     }
 
     /// An album on an artist page narrower than set is narrower at the
@@ -554,14 +554,14 @@ mod tests {
     /// and no album could be opened on a narrow window).
     #[test]
     fn an_album_shrinks_with_its_page_then_lies_over_it() {
-        let album = |page| layout(ALBUM, set(647, 1556), room(page), PAGE_CONTENT_MIN, false);
-        assert_eq!(album(1556), beside(647));
-        // 1100/1556 of both widths (457 + 643).
-        assert_eq!(album(1100), beside(457));
-        assert_eq!(album(887), beside(369));
-        // 358 by the rate: the album keeps its minimum, the page's
+        let album = |page| layout(ALBUM, set(600, 1500), room(page), PAGE_CONTENT_MIN, false);
+        assert_eq!(album(1500), beside(600));
+        // 1100/1500 of both widths (440 + 660).
+        assert_eq!(album(1100), beside(440));
+        assert_eq!(album(950), beside(380));
+        // 352 by the rate: the album keeps its minimum, the page's
         // content alone gets narrower, down to its 480.
-        assert_eq!(album(860), beside(MIN_WIDTH));
+        assert_eq!(album(880), beside(MIN_WIDTH));
         assert_eq!(album(840), beside(MIN_WIDTH));
         assert_eq!(album(839), over(839));
         assert_eq!(album(400), over(400));
@@ -570,13 +570,13 @@ mod tests {
             content_min: 600,
             ..room(900)
         };
-        let panel = layout(ALBUM, set(647, 1556), wide_content, PAGE_CONTENT_MIN, false);
+        let panel = layout(ALBUM, set(600, 1500), wide_content, PAGE_CONTENT_MIN, false);
         assert_eq!(panel, over(900));
         let wide_content = Room {
             content_min: 600,
             ..room(1000)
         };
-        let panel = layout(ALBUM, set(647, 1556), wide_content, PAGE_CONTENT_MIN, false);
+        let panel = layout(ALBUM, set(600, 1500), wide_content, PAGE_CONTENT_MIN, false);
         assert_eq!(panel, beside(400));
     }
 
@@ -586,10 +586,10 @@ mod tests {
     #[test]
     fn a_dragged_width_stays_within_the_rule() {
         let width = Width::default();
-        width.set.set(set(1556, 0));
+        width.set.set(set(1500, 0));
         width.dragged.set(Some(560));
         // An album open: not narrower than the page's content and it.
-        let page = width.for_room_keeping(PAGE, room(2560), GRID_MIN, true);
+        let page = width.for_room_keeping(PAGE, room(2400), GRID_MIN, true);
         assert_eq!(page, beside(PAGE_CONTENT_MIN + MIN_WIDTH));
         // Over the grid: as the rule says.
         let panel = Kind::Panel {

@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.10.0" date="2026-11-21" type="development">
+      <description>
+        <ul>
+          <li>As the window narrows, what was opened last stays in view</li>
+          <li>Nothing is cut off at the window's edge at any width</li>
+          <li>Playlists glide to their new places like albums and artists</li>
+          <li>Artist pages read their first 10 releases from Spotify, with Show All for the rest</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-11-20" type="development">
       <description>
         <ul>

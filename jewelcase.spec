@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.9.0
+Version:        0.10.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Sat Nov 21 2026 sobakah - 0.10.0-1
+- Window layout keeps what was opened last in view as the window narrows
+- Nothing is cut off at the window's edge at any width
+- Playlists glide to their new places like albums and artists
+- Artist pages read their first 10 releases from Spotify (Show All)
+
 * Fri Nov 20 2026 sobakah - 0.9.0-1
 - Large playlists scroll smoothly and open at once
 - Albums glide to their places when a panel opens, closes or is resized

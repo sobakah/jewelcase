@@ -6,6 +6,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-21
+
+The library database changes (artist pages remember when only their first releases from Spotify
+are stored); 0.9.0 can't open it any more.
+
 ### Changed
 
 - **The album beside an artist page stays longer**: as the window gets narrower, the artist grid first gives up its room, down to two columns of artists; then the artist page and the album on it get narrower together, at the same rate; then the page, with the album still beside it, goes over the artist grid. Only when the window is too narrow for the page and the album side by side does the album cover the page, using the whole window; it moves back beside the page when the window is wide enough again. Before, the page got narrower while the album kept its width, and the album went over the page early.
@@ -186,7 +191,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/sobakah/jewelcase/releases/tag/0.10.0
 [0.9.0]: https://github.com/sobakah/jewelcase/releases/tag/0.9.0
 [0.8.0]: https://github.com/sobakah/jewelcase/releases/tag/0.8.0
 [0.7.0]: https://github.com/sobakah/jewelcase/releases/tag/0.7.0
