@@ -74,6 +74,37 @@ impl Database {
         Ok(())
     }
 
+    /// An artist's songs you played most, most first (then the most
+    /// recently played): (song, plays). Library songs on their albums or
+    /// with them as a track artist (`artist_id`, if a library artist), and
+    /// streamed songs by `name`.
+    pub fn artist_most_played(
+        &self,
+        artist_id: Option<i64>,
+        name: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, u32)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT p.track_id, count(*) AS plays FROM play_log p
+             WHERE p.track_id IN (
+                     SELECT track_id FROM track_artist WHERE artist_id = ?1
+                     UNION
+                     SELECT t.id FROM track t
+                       JOIN album_artist aa ON aa.album_id = t.album_id
+                     WHERE aa.artist_id = ?1)
+                OR (p.track_id < 0
+                    AND (lower(p.artist) = lower(?2) OR lower(p.album_artist) = lower(?2)))
+             GROUP BY p.track_id
+             ORDER BY plays DESC, max(p.played) DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![artist_id.unwrap_or(-1), name, limit as i64],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// The plays from `from` (inclusive) to `to` (exclusive), oldest first.
     pub fn play_log(&self, from: i64, to: i64) -> Result<Vec<PlayEntry>> {
         let mut stmt = self.conn.prepare_cached(
@@ -325,6 +356,76 @@ mod tests {
             album_artist: Some(artist.into()),
             genre: genre.map(Into::into),
         }
+    }
+
+    /// An artist page's "Your Most Played": the artist's library songs
+    /// and streamed ones by name, most played first.
+    #[test]
+    fn an_artists_most_played_songs() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.upsert_tracks(
+            &[
+                file("/m/A/B/01.flac", "B", "One", 1),
+                file("/m/A/B/02.flac", "B", "Two", 2),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let ids: Vec<i64> = db
+            .conn
+            .prepare("SELECT id FROM track ORDER BY title")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let (one, two) = (ids[0], ids[1]);
+        let adele = db.artist_named("Adele").unwrap().unwrap();
+        let stream = db
+            .stream_track_id(&StreamInfo {
+                uri: "spotify:track:s".into(),
+                title: "Streamed".into(),
+                artist: Some("adele".into()),
+                duration_ms: 1000,
+                ..StreamInfo::default()
+            })
+            .unwrap();
+        let other = db
+            .stream_track_id(&StreamInfo {
+                uri: "spotify:track:o".into(),
+                title: "Other".into(),
+                artist: Some("Someone".into()),
+                duration_ms: 1000,
+                ..StreamInfo::default()
+            })
+            .unwrap();
+        for (track, at) in [
+            (two, 1),
+            (two, 2),
+            (one, 3),
+            (stream, 4),
+            (stream, 5),
+            (other, 6),
+        ] {
+            db.log_play(track, at, 1000).unwrap();
+        }
+        // Two plays each: the more recently played first.
+        assert_eq!(
+            db.artist_most_played(Some(adele), "Adele", 10).unwrap(),
+            [(stream, 2), (two, 2), (one, 1)]
+        );
+        assert_eq!(
+            db.artist_most_played(Some(adele), "Adele", 1)
+                .unwrap()
+                .len(),
+            1
+        );
+        // A Spotify artist's page: only the streamed songs, by name.
+        assert_eq!(
+            db.artist_most_played(None, "Adele", 10).unwrap(),
+            [(stream, 2)]
+        );
     }
 
     #[test]

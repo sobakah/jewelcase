@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 mod releases;
-pub use releases::{DeezerRelease, date_string, recent_releases};
+pub use releases::{DeezerRelease, DeezerTrack, date_string, parse_top, recent_releases};
 
 /// Deezer artists of the same name whose albums are compared.
 const DEEZER_COMPARED: usize = 3;

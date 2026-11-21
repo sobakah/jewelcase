@@ -970,6 +970,50 @@ impl Library {
         answer.recv().await.map_err(|e| e.to_string())?
     }
 
+    /// An artist's most popular songs on Deezer (see Job::PopularSongs).
+    pub async fn popular_songs(
+        &self,
+        key: String,
+        name: String,
+        titles: Vec<String>,
+    ) -> Result<Vec<jewelcase_metadata::DeezerTrack>, String> {
+        let (reply, answer) = async_channel::bounded(1);
+        self.send_job(Job::PopularSongs {
+            key,
+            name,
+            titles,
+            reply,
+        });
+        answer.recv().await.map_err(|e| e.to_string())?
+    }
+
+    /// A Deezer song's ISRC.
+    pub async fn deezer_isrc(&self, track_id: u64) -> Result<Option<String>, String> {
+        let (reply, answer) = async_channel::bounded(1);
+        self.send_job(Job::DeezerIsrc { track_id, reply });
+        answer.recv().await.map_err(|e| e.to_string())?
+    }
+
+    /// An artist's songs you played most: (song, plays).
+    pub fn most_played(
+        &self,
+        artist_id: Option<i64>,
+        name: &str,
+        limit: usize,
+    ) -> Vec<(TrackObject, u32)> {
+        let Some(found) = self
+            .db()
+            .and_then(|db| db.artist_most_played(artist_id, name, limit).ok())
+        else {
+            return Vec::new();
+        };
+        let mut tracks = self.tracks(&found.iter().map(|(id, _)| *id).collect::<Vec<_>>());
+        found
+            .into_iter()
+            .filter_map(|(id, plays)| Some((TrackObject::new(tracks.remove(&id)?), plays)))
+            .collect()
+    }
+
     /// Portrait candidates from every provider: (portrait key, candidate).
     pub async fn portrait_candidates(
         &self,

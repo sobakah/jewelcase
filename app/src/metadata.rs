@@ -39,6 +39,9 @@ pub type SpotifyClient = Option<Arc<jewelcase_spotify::Client>>;
 const LOCAL_PORTRAIT_NAMES: &[&str] = &["artist", "folder"];
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
+/// Songs in an artist page's Popular section from Deezer.
+const POPULAR_SONGS: u32 = 5;
+
 pub enum Job {
     /// Local portrait, plus the online lookup if `online`. `urgent`: an
     /// open artist page or "Look Up Again" (before tiles' lookups);
@@ -83,6 +86,21 @@ pub enum Job {
         spotify_id: String,
         name: String,
         reply: async_channel::Sender<Result<usize, String>>,
+    },
+    /// An artist's most popular songs on Deezer, for their page's Popular
+    /// section. `key` keeps the Deezer artist found: their Spotify ID, or
+    /// "name:" and the name; `titles` are their album titles (to tell
+    /// artists of one name apart).
+    PopularSongs {
+        key: String,
+        name: String,
+        titles: Vec<String>,
+        reply: async_channel::Sender<Result<Vec<jewelcase_metadata::DeezerTrack>, String>>,
+    },
+    /// A Deezer song's ISRC, to find it on Spotify when it's played.
+    DeezerIsrc {
+        track_id: u64,
+        reply: async_channel::Sender<Result<Option<String>, String>>,
     },
     /// After the artists: forgets releases of artists no longer followed
     /// and reads the barcodes of new ones.
@@ -329,6 +347,18 @@ impl Worker {
             }
             Job::ReleaseBarcodes { reply } => {
                 let _ = reply.send_blocking(self.release_barcodes());
+            }
+            Job::PopularSongs {
+                key,
+                name,
+                titles,
+                reply,
+            } => {
+                let _ = reply.send_blocking(self.popular_songs(&key, &name, titles));
+            }
+            Job::DeezerIsrc { track_id, reply } => {
+                let _ = reply
+                    .send_blocking(self.client.deezer_isrc(track_id).map_err(|e| e.to_string()));
             }
             Job::SetCustom {
                 artist_id,
@@ -609,6 +639,54 @@ impl Worker {
         let result = request();
         self.last_spotify = Some(std::time::Instant::now());
         result
+    }
+
+    /// An artist's popular songs on Deezer (see Job::PopularSongs); none
+    /// when Deezer doesn't have them, or not clearly.
+    fn popular_songs(
+        &mut self,
+        key: &str,
+        name: &str,
+        mut titles: Vec<String>,
+    ) -> Result<Vec<jewelcase_metadata::DeezerTrack>, String> {
+        let Some(id) = self.deezer_artist_for(key, name, &mut titles)? else {
+            return Ok(Vec::new());
+        };
+        self.client
+            .deezer_top(id, POPULAR_SONGS)
+            .map_err(|e| e.to_string())
+    }
+
+    /// The Deezer artist kept under `key` (a Spotify ID, or "name:" and the
+    /// name), else looked for, and kept (looked for again after a week
+    /// when not found). `titles`: album titles that tell artists of one
+    /// name apart; a Spotify artist's known albums are added.
+    fn deezer_artist_for(
+        &mut self,
+        key: &str,
+        name: &str,
+        titles: &mut Vec<String>,
+    ) -> Result<Option<u64>, String> {
+        let now = now();
+        match self.db.deezer_artist(key).map_err(|e| e.to_string())? {
+            Some((Some(id), _)) => return Ok(Some(id as u64)),
+            Some((None, matched)) if now - matched < REFRESH_FAILED => return Ok(None),
+            _ => {}
+        }
+        let mut upcs = Vec::new();
+        if !key.starts_with("name:") {
+            let known = self.db.known_albums(key, name).map_err(|e| e.to_string())?;
+            upcs = known.upcs;
+            titles.extend(known.titles);
+        }
+        let id = self
+            .client
+            .deezer_artist(name, &upcs, titles)
+            .map_err(|e| e.to_string())?;
+        self.db
+            .set_deezer_artist(key, id.map(|i| i as i64), now)
+            .map_err(|e| e.to_string())?;
+        Ok(id)
     }
 
     /// A followed artist's recent releases on Deezer (§9.8). Their Deezer

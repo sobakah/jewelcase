@@ -29,6 +29,40 @@ fn deezer_base() -> String {
     server.unwrap_or_else(|| "https://api.deezer.com".to_owned())
 }
 
+/// A song in an artist's top list on Deezer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeezerTrack {
+    pub id: u64,
+    /// With its version ("(Live)"), as the library's titles are.
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub duration_ms: u64,
+    pub cover_url: Option<String>,
+}
+
+/// The songs of an artist's top list (`/artist/{id}/top`).
+pub fn parse_top(json: &Value) -> Vec<DeezerTrack> {
+    json["data"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(DeezerTrack {
+                        id: item["id"].as_u64()?,
+                        title: text(item, "title")?,
+                        artist: text(&item["artist"], "name").unwrap_or_default(),
+                        album: text(&item["album"], "title"),
+                        duration_ms: item["duration"].as_u64().unwrap_or(0) * 1000,
+                        cover_url: text(&item["album"], "cover_medium"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A release on Deezer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeezerRelease {
@@ -111,6 +145,23 @@ impl Client {
             }
         }
         Ok(releases)
+    }
+
+    /// An artist's most popular songs on Deezer (Deezer's own ranking,
+    /// from listening there), most popular first.
+    pub fn deezer_top(&self, artist_id: u64, limit: u32) -> Result<Vec<DeezerTrack>> {
+        let json = self.deezer(
+            &format!("/artist/{artist_id}/top"),
+            &[("limit", &limit.to_string())],
+        )?;
+        Ok(parse_top(&json))
+    }
+
+    /// A song's ISRC (not in the top list's songs): to find it on Spotify
+    /// exactly, when it's played.
+    pub fn deezer_isrc(&self, track_id: u64) -> Result<Option<String>> {
+        let json = self.deezer(&format!("/track/{track_id}"), &[])?;
+        Ok(text(&json, "isrc"))
     }
 
     /// A release's barcode.
@@ -212,6 +263,25 @@ pub fn date_string(unix: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Deezer's top list: its order, the title with its version, the
+    /// length in milliseconds; an item without an ID is left out.
+    #[test]
+    fn an_artists_top_songs() {
+        let json = serde_json::json!({"data": [
+            {"id": 1, "title": "Hello (Live)", "duration": 295,
+             "artist": {"name": "Adele"},
+             "album": {"title": "25", "cover_medium": "https://e-cdns/25.jpg"}},
+            {"title": "No ID"},
+            {"id": 2, "title": "Skyfall", "duration": 286, "artist": {"name": "Adele"}, "album": {}}
+        ]});
+        let top = parse_top(&json);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].title, "Hello (Live)");
+        assert_eq!(top[0].duration_ms, 295_000);
+        assert_eq!(top[0].cover_url.as_deref(), Some("https://e-cdns/25.jpg"));
+        assert_eq!(top[1].album, None);
+    }
     use serde_json::json;
 
     fn release(id: u64, title: &str, date: &str, kind: &str) -> DeezerRelease {

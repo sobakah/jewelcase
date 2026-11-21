@@ -169,6 +169,25 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    // The Popular section of artist pages (CONCEPT.md §4.2).
+    Adw.PreferencesGroup {
+      title: _("Artist Pages");
+
+      Adw.ComboRow popular_row {
+        title: _("P_opular Songs");
+        subtitle: _("Deezer’s list needs Look Up Artists Online; songs not in your library play from Spotify");
+        use-underline: true;
+
+        model: Gtk.StringList {
+          strings [
+            _("Off"),
+            _("Your Most Played"),
+            _("Your Most Played and Deezer’s"),
+          ]
+        };
+      }
+    }
+
     // Smart shuffle's analysis (CONCEPT.md §7), filled in from
     // preferences_dialog.rs.
     Adw.PreferencesGroup {

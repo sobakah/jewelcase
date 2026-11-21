@@ -60,6 +60,8 @@ mod imp {
         #[template_child]
         pub playlist_sort_row: TemplateChild<adw::ComboRow>,
         #[template_child]
+        pub popular_row: TemplateChild<adw::ComboRow>,
+        #[template_child]
         pub spotify_playlist_sort_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub tile_size_scale: TemplateChild<gtk::Scale>,
@@ -181,6 +183,12 @@ mod imp {
                 "spotify-playlist-sort",
                 &self.spotify_playlist_sort_row,
                 sorts,
+            );
+            bind_choice(
+                &settings,
+                "popular-songs",
+                &self.popular_row,
+                &crate::widgets::POPULAR_CHOICES,
             );
             settings
                 .bind("tile-size", &self.tile_size_scale.adjustment(), "value")

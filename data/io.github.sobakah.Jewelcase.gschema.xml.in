@@ -126,6 +126,16 @@
       <summary>Music folders</summary>
       <description>Folders the library is read from. While this key is unset, the XDG Music folder is used.</description>
     </key>
+    <key name="popular-songs" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="local"/>
+        <choice value="deezer"/>
+      </choices>
+      <default>"local"</default>
+      <summary>Popular songs on artist pages</summary>
+      <description>“local”: the artist’s songs you played most (from the play log); “deezer”: also their most popular songs on Deezer beside them (only those when you haven’t played the artist); “off”: no Popular section.</description>
+    </key>
     <key name="playlist-picker-sort" type="s">
       <choices>
         <choice value="changed"/>

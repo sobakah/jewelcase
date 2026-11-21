@@ -1259,6 +1259,28 @@ impl Spotify {
                 .db()
                 .and_then(|db| db.track_isrc(track_id).ok().flatten());
         }
+        let best = self.search_spotify(local).await?;
+        let version = SpotifyVersion {
+            uri: best.as_ref().map(|(_, t)| t.uri.clone()),
+            confidence: best.as_ref().map(|(c, _)| *c),
+            title: best.as_ref().map(|(_, t)| t.name.clone()),
+            artist: best.as_ref().map(|(_, t)| t.artist_line()),
+            checked: now(),
+        };
+        if let Some(mut db) = library.db() {
+            let _ = db.set_spotify_version(track_id, &version);
+        }
+        Ok(version)
+    }
+
+    /// `local`'s best version on Spotify, by its ISRC, then by title and
+    /// artist (from the most exact query; stopping at a sure match), and
+    /// how sure it is; `None` if no result agrees.
+    pub(crate) async fn search_spotify(
+        &self,
+        local: LocalTrack,
+    ) -> Result<Option<(Confidence, jewelcase_spotify::Track)>, Error> {
+        let library = JewelcaseApplication::get().library();
         let isrc = local.isrc.clone();
         let queries = search_queries(&local);
         let title = local.title.clone();
@@ -1321,17 +1343,52 @@ impl Spotify {
             })
             .max_by_key(|(confidence, closeness, _)| (*confidence, *closeness))
             .map(|(confidence, _, t)| (confidence, t.clone()));
-        let version = SpotifyVersion {
-            uri: best.as_ref().map(|(_, t)| t.uri.clone()),
-            confidence: best.as_ref().map(|(c, _)| *c),
-            title: best.as_ref().map(|(_, t)| t.name.clone()),
-            artist: best.as_ref().map(|(_, t)| t.artist_line()),
-            checked: now(),
-        };
-        if let Some(mut db) = library.db() {
-            let _ = db.set_spotify_version(track_id, &version);
+        Ok(best)
+    }
+
+    /// A song from elsewhere (an artist's popular songs on Deezer) on
+    /// Spotify, ready to stream (kept like an album's streamed songs);
+    /// `None` if Spotify can't be asked or has no version that agrees.
+    /// One search with an ISRC (more without, or when that finds none).
+    pub async fn find_song(
+        &self,
+        title: String,
+        artist: String,
+        album: Option<String>,
+        duration_ms: u64,
+        isrc: Option<String>,
+    ) -> Option<crate::objects::TrackObject> {
+        if !self.is_connected() {
+            return None;
         }
-        Ok(version)
+        let local = LocalTrack {
+            track_id: 0,
+            title,
+            artist: Some(artist.clone()),
+            album_artist: Some(artist),
+            album,
+            duration_ms,
+            isrc,
+            format: String::new(),
+        };
+        let (_, track) = self.search_spotify(local).await.ok()??;
+        let library = JewelcaseApplication::get().library();
+        let id = library
+            .db()?
+            .stream_track_id(&jewelcase_core::db::StreamInfo {
+                uri: track.uri.clone(),
+                title: track.name.clone(),
+                artist: Some(track.artist_line()),
+                album: track.album.clone(),
+                duration_ms: track.duration_ms,
+                isrc: track.isrc.clone(),
+                image_url: track.image_url.clone(),
+            })
+            .ok()?;
+        library
+            .tracks(&[id])
+            .remove(&id)
+            .map(crate::objects::TrackObject::new)
     }
 
     /// Library songs in a linked playlist get their Spotify version: sure

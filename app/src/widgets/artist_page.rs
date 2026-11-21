@@ -221,6 +221,23 @@ mod imp {
                 }
             ));
             crate::widgets::disconnect_with(&*obj, &spotify, status);
+            // The Popular section follows its setting at once.
+            let settings = gtk::gio::Settings::new(crate::config::APP_ID);
+            let popular = settings.connect_changed(
+                Some("popular-songs"),
+                glib::clone!(
+                    #[weak]
+                    obj,
+                    move |_, _| {
+                        if obj.spotify_artist_id().is_some() {
+                            obj.refresh_spotify();
+                        } else if obj.imp().artist.borrow().is_some() {
+                            obj.fill_sections();
+                        }
+                    }
+                ),
+            );
+            crate::widgets::disconnect_with(&*obj, &settings, popular);
             let followed = spotify.connect_local(
                 "library-changed",
                 false,
@@ -588,6 +605,24 @@ impl ArtistPage {
         let soundtracks = pick(&|a, r| r == AlbumRole::Credit && a.soundtrack);
         let collaborations = pick(&|_, r| r == AlbumRole::Collaboration);
 
+        if let Some(artist) = imp.artist.borrow().clone() {
+            let info = artist.artist();
+            let popular = super::popular_songs::Artist {
+                id: Some(self.artist_id()),
+                name: info.name.clone(),
+                deezer_key: super::popular_songs::Artist::deezer_key(
+                    info.meta.spotify_id.as_deref(),
+                    &info.name,
+                ),
+                titles: albums
+                    .iter()
+                    .map(|(album, _)| album.title.clone())
+                    .collect(),
+            };
+            if let Some(section) = super::popular_songs::section(popular) {
+                imp.sections.append(&section);
+            }
+        }
         self.add_album_section(&gettext("Albums"), &full);
         self.add_album_section(&gettext("EPs & Singles"), &short);
         self.add_album_section(&gettext("Soundtracks"), &soundtracks);
@@ -613,14 +648,32 @@ impl ArtistPage {
             self,
             async move {
                 let spotify = JewelcaseApplication::get().spotify();
-                if let Some(artist) = spotify.spotify_artist(&id).await {
-                    page.show_spotify_header(&artist);
+                let artist = spotify.spotify_artist(&id).await;
+                if let Some(artist) = &artist {
+                    page.show_spotify_header(artist);
                 }
                 let discography = spotify.discography(&id, ask).await;
                 if page.imp().generation.get() != generation {
                     return;
                 }
                 page.clear_sections();
+                // Your streamed songs of theirs, and Deezer's (not
+                // Spotify's: it has no top tracks for apps like this).
+                if let Some(artist) = &artist {
+                    let titles = match &discography {
+                        Ok(d) => d.albums.iter().map(|a| a.name.clone()).collect(),
+                        Err(_) => Vec::new(),
+                    };
+                    let popular = super::popular_songs::Artist {
+                        id: None,
+                        name: artist.name.clone(),
+                        deezer_key: artist.spotify_id.clone(),
+                        titles,
+                    };
+                    if let Some(section) = super::popular_songs::section(popular) {
+                        page.imp().sections.append(&section);
+                    }
+                }
                 let discography = match discography {
                     Ok(discography) => discography,
                     Err(why) => {

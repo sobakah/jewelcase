@@ -9,6 +9,7 @@ All notable changes to Jewelcase are documented here. The format follows
 ### Added
 
 - Songs in the queue and under Recently Played open their album or artist from their ⋮ menu (*Go to Album*, *Go to Artist*).
+- **Popular songs on artist pages**: the artist's songs you played most, with how often, above their albums; a click plays them. Optionally also their most popular songs on Deezer beside them, which is all the section shows for an artist you haven't played; songs you don't have play from Spotify, looked up only when you click one. Preferences → Library → *Popular Songs*: Off, *Your Most Played* (the default) or *Your Most Played and Deezer's* (needs *Look Up Artists Online*).
 - **Add to Playlist… can be sorted**: by when a playlist last changed (the default, newest first) or by name, either way round, from the sort button in its title; the order is remembered. Playlists that already have the song stay on top, sorted the same way.
 
 ### Changed
