@@ -7,7 +7,7 @@
 use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gettextrs::{gettext, ngettext};
-use gtk::{gdk, glib};
+use gtk::glib;
 use jewelcase_core::queue::Origin;
 
 use super::CoverImage;
@@ -418,12 +418,13 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
         track.is_stand_in(),
         track.artist().as_deref(),
     );
+    // As the queue's rows: covers and ⋮ buttons line up.
     let line = gtk::Box::builder()
         .spacing(12)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(8)
-        .margin_bottom(8)
+        .margin_start(6)
+        .margin_end(6)
+        .margin_top(9)
+        .margin_bottom(9)
         .build();
     line.append(&cover);
     line.append(&text);
@@ -433,16 +434,9 @@ fn history_row(track: &TrackObject) -> gtk::ListBoxRow {
             .css_classes(["dim-label", "numeric"])
             .build(),
     );
-    let more = gtk::MenuButton::builder()
-        .icon_name("view-more-symbolic")
-        .valign(gtk::Align::Center)
-        .css_classes(["flat", "circular"])
-        .build();
-    super::set_accessible_label(&more, &gettext("More"));
-    line.append(&more);
     let row = gtk::ListBoxRow::builder().child(&line).build();
     row.add_css_class("history-row");
-    song_menu(&row, track, SongRow::Played, Some(&more));
+    line.append(&song_menu(&row, track, SongRow::Played));
     row
 }
 
@@ -457,15 +451,11 @@ enum SongRow {
     Queued(usize),
 }
 
-/// The song's menu, on right-click and on `button`: Play Next and Add to
-/// Queue for a played song, Remove from Queue for a queued one, Add to
-/// Playlist… for all.
-fn song_menu(
-    row: &gtk::ListBoxRow,
-    track: &TrackObject,
-    kind: SongRow,
-    button: Option<&gtk::MenuButton>,
-) {
+/// The song's ⋮ button, the same on every row: Play Next and Add to Queue
+/// for a played song, Add to Playlist… for all, Remove from Queue for a
+/// queued one, and its album's and artist's pages (the library's, else
+/// Spotify's). No right-click menu besides: it said the same again.
+fn song_menu(row: &gtk::ListBoxRow, track: &TrackObject, kind: SongRow) -> gtk::MenuButton {
     let menu = gtk::gio::Menu::new();
     let actions = gtk::gio::SimpleActionGroup::new();
     let add = |name: &str, activate: Box<dyn Fn()>| {
@@ -474,16 +464,8 @@ fn song_menu(
         actions.add_action(&action);
     };
     let player = JewelcaseApplication::get().player();
-    if let SongRow::Queued(offset) = kind {
-        add(
-            "remove",
-            Box::new(glib::clone!(
-                #[weak]
-                player,
-                move || player.remove_upcoming(offset)
-            )),
-        );
-    } else if kind == SongRow::Played {
+    let queue = gtk::gio::Menu::new();
+    if kind == SongRow::Played {
         let next = track.clone();
         add(
             "play-next",
@@ -502,8 +484,8 @@ fn song_menu(
                 move || player.add_to_queue(vec![later.clone()])
             )),
         );
-        menu.append(Some(&gettext("Play _Next")), Some("song.play-next"));
-        menu.append(Some(&gettext("Add to _Queue")), Some("song.add-to-queue"));
+        queue.append(Some(&gettext("Play _Next")), Some("song.play-next"));
+        queue.append(Some(&gettext("Add to _Queue")), Some("song.add-to-queue"));
     }
     let id = track.id();
     add(
@@ -514,33 +496,75 @@ fn song_menu(
             move || super::playlist_picker::show(&row, vec![id])
         )),
     );
-    menu.append(
+    queue.append(
         Some(&gettext("Add to _Playlist…")),
         Some("song.add-to-playlist"),
     );
-    if let SongRow::Queued(_) = kind {
-        menu.append(Some(&gettext("_Remove from Queue")), Some("song.remove"));
+    if let SongRow::Queued(offset) = kind {
+        add(
+            "remove",
+            Box::new(glib::clone!(
+                #[weak]
+                player,
+                move || player.remove_upcoming(offset)
+            )),
+        );
+        queue.append(Some(&gettext("_Remove from Queue")), Some("song.remove"));
     }
-    row.insert_action_group("song", Some(&actions));
-    if let Some(button) = button {
-        button.set_menu_model(Some(&menu));
-    }
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
-    popover.set_parent(row);
-    popover.set_has_arrow(false);
-    let click = gtk::GestureClick::builder()
-        .button(gdk::BUTTON_SECONDARY)
-        .build();
-    click.connect_pressed(glib::clone!(
-        #[weak]
-        popover,
-        move |_, _, x, y| {
-            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-            popover.popup();
+    menu.append_section(None, &queue);
+
+    // Where it's from: the library's pages, else Spotify's (as in a
+    // playlist's song menu).
+    let pages = gtk::gio::Menu::new();
+    if let Some(album) = track.track().album_id {
+        pages.append(
+            Some(&gettext("Go to _Album")),
+            Some(&gtk::gio::Action::print_detailed_name(
+                "win.show-album",
+                Some(&album.to_variant()),
+            )),
+        );
+        let artist = JewelcaseApplication::get()
+            .library()
+            .album_artists(album)
+            .first()
+            .map(|(id, _)| *id);
+        if let Some(artist) = artist {
+            pages.append(
+                Some(&gettext("Go to A_rtist")),
+                Some(&gtk::gio::Action::print_detailed_name(
+                    "win.show-artist",
+                    Some(&artist.to_variant()),
+                )),
+            );
         }
-    ));
-    row.add_controller(click);
-    row.connect_destroy(move |_| popover.unparent());
+    } else if let Some(uri) = JewelcaseApplication::get()
+        .spotify()
+        .stand_in_uri(id)
+        .filter(|uri| uri.starts_with("spotify:track:"))
+    {
+        for (name, label, artist) in [
+            ("album", gettext("Go to _Album"), false),
+            ("artist", gettext("Go to A_rtist"), true),
+        ] {
+            let uri = uri.clone();
+            add(
+                name,
+                Box::new(move || super::open_song_page(uri.clone(), artist)),
+            );
+            pages.append(Some(&label), Some(&format!("song.{name}")));
+        }
+    }
+    menu.append_section(None, &pages);
+    row.insert_action_group("song", Some(&actions));
+    let button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .valign(gtk::Align::Center)
+        .menu_model(&menu)
+        .css_classes(["flat", "circular"])
+        .build();
+    super::set_accessible_label(&button, &gettext("More"));
+    button
 }
 
 /// The entry a row shows: rows are in model order.
@@ -699,8 +723,7 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
     if offset == 0 {
         row.add_css_class("now-playing");
         row.set_activatable(false);
-        // Right-click: Add to Playlist….
-        song_menu(&row, track, SongRow::Playing, None);
+        line.append(&song_menu(&row, track, SongRow::Playing));
         return row.upcast();
     }
 
@@ -716,9 +739,8 @@ fn queue_row(player: &Player, entry: &QueueEntry) -> gtk::Widget {
         move |_| player.remove_upcoming(offset)
     ));
     line.append(&remove);
-
-    // Right-click: Add to Playlist…, Remove from Queue.
-    song_menu(&row, track, SongRow::Queued(offset), None);
+    // Last, so the ⋮ buttons of all rows line up.
+    line.append(&song_menu(&row, track, SongRow::Queued(offset)));
 
     // Drag and drop to reorder (§6.2), within the row's section.
     super::reorder::attach(

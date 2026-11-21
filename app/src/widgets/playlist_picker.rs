@@ -109,11 +109,18 @@ pub async fn create_or_add(parent: &impl IsA<gtk::Widget>, name: &str, tracks: &
     }
 }
 
-/// Lets the user pick a playlist (or create one) for `tracks`.
+/// Lets the user pick a playlist (or create one) for `tracks`: a popover
+/// at `parent` (the button or row it was chosen from), closed by a click
+/// beside it like Jewelcase's other menus (a dialog stayed open).
 pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
     if tracks.is_empty() {
         return;
     }
+    // New Playlist's questions: over the window (the popover is closed by
+    // then, and a row it pointed at may be gone).
+    let Some(window) = parent.root().and_upcast::<gtk::Widget>() else {
+        return;
+    };
     let library = JewelcaseApplication::get().library();
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
@@ -191,43 +198,53 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
         list.append(&row);
     }
 
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .margin_start(6)
+        .margin_end(6)
+        .build();
+    content.append(
+        &gtk::Label::builder()
+            .label(gettext("Add to Playlist"))
+            .css_classes(["heading"])
+            .build(),
+    );
+    content.append(
         &gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
-            .child(
-                &adw::Clamp::builder()
-                    .margin_start(12)
-                    .margin_end(12)
-                    .margin_bottom(12)
-                    .child(&list)
-                    .build(),
-            )
+            .max_content_height(420)
+            .min_content_width(320)
+            .child(&list)
             .build(),
-    ));
-    let dialog = adw::Dialog::builder()
-        .title(gettext("Add to Playlist"))
-        .content_width(400)
-        .child(&toolbar)
-        .build();
+    );
+    let popover = gtk::Popover::builder().child(&content).build();
+    popover.set_parent(parent);
+    popover.connect_closed(|popover| {
+        // Not while it's still closing.
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
 
     list.connect_row_activated(glib::clone!(
         #[weak]
-        dialog,
+        popover,
         move |_, row| {
             let library = JewelcaseApplication::get().library();
             match row.index() {
                 0 => {
+                    popover.popdown();
                     let tracks = tracks.clone();
+                    let window = window.clone();
                     glib::spawn_future_local(async move {
                         let name =
-                            ask_name(&dialog, &gettext("New Playlist"), "", &gettext("_Create"))
+                            ask_name(&window, &gettext("New Playlist"), "", &gettext("_Create"))
                                 .await;
                         if let Some(name) = name {
-                            create_or_add(&dialog, &name, &tracks).await;
-                            dialog.close();
+                            create_or_add(&window, &name, &tracks).await;
                         }
                     });
                 }
@@ -249,10 +266,10 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                             library.add_to_playlist(id, &missing, true);
                         }
                     }
-                    dialog.close();
+                    popover.popdown();
                 }
             }
         }
     ));
-    dialog.present(Some(parent));
+    popover.popup();
 }

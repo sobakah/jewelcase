@@ -23,6 +23,8 @@ mod imp {
     #[template(resource = "/io/github/sobakah/Jewelcase/ui/album_panel.ui")]
     pub struct AlbumPanel {
         #[template_child]
+        pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
         pub backdrop: TemplateChild<CoverBackdrop>,
@@ -85,7 +87,8 @@ mod imp {
                     .iter()
                     .map(TrackObject::id)
                     .collect();
-                super::super::playlist_picker::show(panel, ids);
+                // At the ⋮ button it was chosen from.
+                super::super::playlist_picker::show(&panel.imp().menu_button.get(), ids);
             });
             klass.install_action("panel.edit-tags", None, |panel, _, _| {
                 let files = panel.track_paths();

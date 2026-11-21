@@ -52,6 +52,8 @@ mod imp {
     #[template(resource = "/io/github/sobakah/Jewelcase/ui/playlist_panel.ui")]
     pub struct PlaylistPanel {
         #[template_child]
+        pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
         pub backdrop: TemplateChild<CoverBackdrop>,
@@ -181,7 +183,8 @@ mod imp {
                     .flatten()
                     .collect();
                 if !ids.is_empty() {
-                    super::super::playlist_picker::show(panel, ids);
+                    // At the ⋮ button it was chosen from.
+                    super::super::playlist_picker::show(&panel.imp().menu_button.get(), ids);
                 }
             });
             klass.install_action("playlist.shuffle", None, |panel, _, _| {

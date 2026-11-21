@@ -6,6 +6,16 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Songs in the queue and under Recently Played open their album or artist from their ⋮ menu (*Go to Album*, *Go to Artist*).
+
+### Changed
+
+- **Every song in the queue has the same ⋮ menu**: Now Playing and the songs coming up have one too, like Recently Played. The right-click menus are gone (on Recently Played they repeated the ⋮ menu).
+- *Add to Playlist…* opens as a menu next to where you chose it and closes when you click beside it, like Jewelcase's other menus.
+- The *Play On…* button shows a speaker instead of an icon that looked like a printer.
+
 ## [0.10.0] — 2026-11-21
 
 The library database changes (artist pages remember when only their first releases from Spotify

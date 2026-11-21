@@ -73,7 +73,6 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/pan-end-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/pan-up-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/phone-symbolic.svg</file>
-    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/preferences-system-devices-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/system-search-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/tablet-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/text-x-generic-symbolic.svg</file>
