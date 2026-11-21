@@ -38,6 +38,24 @@ const PANE_WIDTH: i32 = 420;
 /// Room left beside the player, so it reads as a card.
 const SIDE_GAP: i32 = 24;
 
+/// The layout for a window whose surface is `available` wide, with `room`
+/// for the player (the window's own width less the side gap): by the
+/// window's width, but narrow while the wide layout was measured wider
+/// than the room (`wide_min`, with the panes now open).
+fn width_for(available: i32, room: i32, wide_min: Option<i32>) -> Width {
+    let width = if available < NARROW_BELOW {
+        Width::Narrow
+    } else if available < WIDE_FROM {
+        Width::Medium
+    } else {
+        Width::Wide
+    };
+    match wide_min {
+        Some(min) if min > room => Width::Narrow,
+        _ => width,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Width {
     #[default]
@@ -135,6 +153,12 @@ mod imp {
         pub width: Cell<Width>,
         /// The window's width (see set_available_width).
         pub available: Cell<i32>,
+        /// The window's own width, without its shadow.
+        pub window_width: Cell<i32>,
+        /// The wide layout's minimum width with these panes open (lyrics,
+        /// queue), measured when it didn't fit: narrow while the window
+        /// has less room.
+        pub too_wide: Cell<Option<(i32, (bool, bool))>>,
         /// Avoids re-entrant toggling while panes are updated.
         pub updating: Cell<bool>,
         /// The lyrics pane was closed for a Spotify song without lyrics and
@@ -458,29 +482,62 @@ impl PlayerView {
         update_play_button(&imp.play_button, player.playing());
     }
 
-    /// The window's width, from which the player picks its layout and its
-    /// own width (it isn't full width: the main column stays in the
-    /// middle, side panes widen it). Deciding from the window, not from
-    /// the player's own width, keeps opening panes from changing the
+    /// The window's width (`available`: its surface's, with the shadow;
+    /// `window_width`: without), from which the player picks its layout
+    /// and its own width (it isn't full width: the main column stays in
+    /// the middle, side panes widen it). Deciding from the window, not
+    /// from the player's own width, keeps opening panes from changing the
     /// layout class.
-    pub fn set_available_width(&self, available: i32) {
+    pub fn set_available_width(&self, available: i32, window_width: i32) {
         let imp = self.imp();
-        if imp.available.replace(available) == available {
+        let same = imp.available.replace(available) == available;
+        if imp.window_width.replace(window_width) == window_width && same {
             return;
         }
         self.place_pane_buttons(available > 0 && available < TINY_BELOW);
-        let width = if available < NARROW_BELOW {
-            Width::Narrow
-        } else if available < WIDE_FROM {
-            Width::Medium
-        } else {
-            Width::Wide
-        };
+        self.choose_width();
+    }
+
+    /// The layout for the window's width; narrow also while the wide one,
+    /// with the panes open, doesn't fit: the player (in its sheet, also
+    /// while closed) asked the window for more width than it had, and the
+    /// window cut off its right side (mini player, panels).
+    fn choose_width(&self) {
+        let imp = self.imp();
+        if imp.available.get() <= 0 {
+            // Not shown yet: set_available_width decides.
+            return;
+        }
+        let room = imp.window_width.get() - SIDE_GAP;
+        let panes = self.open_panes();
+        let known = imp
+            .too_wide
+            .get()
+            .filter(|(_, open)| *open == panes)
+            .map(|(min, _)| min);
+        let width = width_for(imp.available.get(), room, known);
         if width != imp.width.get() {
             self.set_width(width);
         } else {
             self.queue_resize();
         }
+        if width == Width::Narrow || imp.window_width.get() <= 0 {
+            return;
+        }
+        // Measured in the wide layout (just set, the panes as now open).
+        let min = self
+            .child()
+            .map_or(0, |child| child.measure(gtk::Orientation::Horizontal, -1).0);
+        if min > room {
+            imp.too_wide.set(Some((min, self.open_panes())));
+            self.set_width(Width::Narrow);
+        }
+    }
+
+    /// Which panes are open: (lyrics, queue).
+    fn open_panes(&self) -> (bool, bool) {
+        let imp = self.imp();
+        (imp.lyrics_button.is_active(), imp.queue_button.is_active())
     }
 
     /// The width the player asks for: the main column plus open panes.
@@ -583,6 +640,9 @@ impl PlayerView {
             let _ = settings.set_boolean("queue-pane-open", imp.queue_button.is_active());
         }
         self.update_panes();
+        // A pane beside the main column may not fit (or, closed, let the
+        // wide layout back).
+        self.choose_width();
     }
 
     fn update_panes(&self) {
@@ -801,5 +861,23 @@ impl PlayerView {
 
     fn update_repeat(&self, player: &Player) {
         super::mini_player::update_repeat_button(&self.imp().repeat_button, player);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Between 640 px and the width the main column and an open pane need
+    /// (about 880), the wide layout asked the window for more than it had,
+    /// and the window cut off the player and the panels on its right.
+    #[test]
+    fn a_pane_without_room_beside_the_controls_makes_the_player_narrow() {
+        assert_eq!(width_for(800, 776, None), Width::Medium);
+        // The wide layout with the lyrics pane needs 879 px.
+        assert_eq!(width_for(800, 776, Some(879)), Width::Narrow);
+        assert_eq!(width_for(1000, 976, Some(879)), Width::Medium);
+        assert_eq!(width_for(1500, 1476, Some(879)), Width::Wide);
+        assert_eq!(width_for(600, 576, None), Width::Narrow);
     }
 }

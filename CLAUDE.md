@@ -369,8 +369,11 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
 - **Nothing may ask for more width than the window has**: `AdwApplicationWindow` with breakpoints
   doesn't stop at its content's minimum, it clips the right side (header buttons, player, panels).
   Widths that depend on the content (the header's view switcher: `FitBin`; the mini player's full
-  bar) adapt in their own layout, not by a breakpoint in sp. To check: measure the window's
-  content (`window.content().measure(Horizontal)`) against `window.width()` at several widths.
+  bar; the full player with a pane open: `PlayerView::choose_width`) adapt in their own layout,
+  not by a breakpoint in sp. The full player counts while closed (it's in the bottom sheet). To
+  check: measure the window's content (`window.content().measure(Horizontal)`) against
+  `window.width()` at several widths, with the player's panes open (`win.toggle-queue`: settings
+  set by the screenshot hook come after the player read them).
 - **`adw::Bin` subclasses with their own `measure`/`size_allocate`** must
   `set_layout_manager(None)` in `constructed` and allocate the child themselves: with the bin's
   layout manager, GTK calls neither (the mini player's measure was ignored; `parent_size_allocate`

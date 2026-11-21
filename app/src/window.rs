@@ -1483,10 +1483,12 @@ impl JewelcaseWindow {
                 #[weak]
                 window,
                 move |surface: &gtk::gdk::Surface| {
+                    // The shadow is as wide on the right as on the left.
+                    let shadow = window.surface_transform().0.round() as i32;
                     window
                         .imp()
                         .player_view
-                        .set_available_width(surface.width());
+                        .set_available_width(surface.width(), surface.width() - 2 * shadow);
                 }
             );
             update(&surface);
