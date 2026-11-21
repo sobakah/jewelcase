@@ -84,6 +84,10 @@ mod imp {
             // Its own measure and size_allocate (below): with adw::Bin's
             // layout manager, GTK wouldn't call them.
             obj.set_layout_manager(None::<gtk::LayoutManager>);
+            // The full bar, laid out at its minimum for the frame before it
+            // turns compact (size_allocate), is cut at the player's edge,
+            // not at the window's.
+            obj.set_overflow(gtk::Overflow::Hidden);
             let player = JewelcaseApplication::get().player();
             player.connect_current_track_notify(glib::clone!(
                 #[weak]

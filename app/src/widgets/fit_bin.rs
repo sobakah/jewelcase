@@ -67,9 +67,12 @@ mod imp {
             let (min, _, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
             let fits = width >= min;
             // Laid out at its minimum when it doesn't fit, and neither
-            // drawn (snapshot) nor clickable.
+            // drawn (snapshot) nor clickable, reached with Tab or read out
+            // (the switcher bar at the bottom stands in).
             child.allocate(width.max(min), height, baseline, None);
             child.set_can_target(fits);
+            child.set_can_focus(fits);
+            child.update_state(&[gtk::accessible::State::Hidden(!fits)]);
             if self.fits.replace(fits) != fits {
                 // Not during the layout (the window reveals the switcher
                 // bar, which changes it).
@@ -122,8 +125,11 @@ mod tests {
             assert_eq!(bin.measure(gtk::Orientation::Horizontal, -1).0, 0);
             bin.allocate(200, 40, -1, None);
             assert!(!bin.fits());
+            // Not reached with Tab either.
+            assert!(!child.can_focus());
             bin.allocate(320, 40, -1, None);
             assert!(bin.fits());
+            assert!(child.can_focus());
         });
     }
 }

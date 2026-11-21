@@ -635,7 +635,7 @@ impl ArtistPage {
                     page.add_note(&gettext("No albums, EPs or singles on Spotify"));
                 }
                 page.add_spotify_sections(&discography.albums, None);
-                page.add_show_all(discography.total);
+                page.add_show_all(discography.total, true);
             }
         ));
     }
@@ -762,7 +762,7 @@ impl ArtistPage {
                 } else {
                     page.add_spotify_sections(&missing, Some(&freshness));
                 }
-                page.add_show_all(discography.total);
+                page.add_show_all(discography.total, false);
             }
         ));
     }
@@ -856,14 +856,20 @@ impl ArtistPage {
     }
 
     /// Below the releases from Spotify when they're only the first ones:
-    /// a button for all `total` of them.
-    fn add_show_all(&self, total: Option<u32>) {
+    /// a button for all `total` of them; with `counted`, it says how many
+    /// (not on a library artist's page, which shows only those missing
+    /// from the library: the count would promise more than it shows).
+    fn add_show_all(&self, total: Option<u32>, counted: bool) {
         let Some(total) = total else {
             return;
         };
         self.action_set_enabled("artist.all-releases", true);
-        let label = ngettext("Show All {} Release", "Show All {} Releases", total)
-            .replace("{}", &total.to_string());
+        let label = if counted && total > 0 {
+            ngettext("Show All {} Release", "Show All {} Releases", total)
+                .replace("{}", &total.to_string())
+        } else {
+            gettext("Show All Releases")
+        };
         self.imp().sections.append(
             &gtk::Button::builder()
                 .label(label)

@@ -247,6 +247,23 @@ impl PlayerView {
         let player = JewelcaseApplication::get().player();
         // The overlay sizes itself from the controls, not the backdrop.
         imp.overlay.set_measure_overlay(&*imp.toolbar, true);
+        // Another font or text size: the wide layout's measured minimum
+        // (too_wide) no longer holds.
+        if let Some(settings) = gtk::Settings::default() {
+            for property in ["gtk-font-name", "gtk-xft-dpi"] {
+                settings.connect_notify_local(
+                    Some(property),
+                    glib::clone!(
+                        #[weak(rename_to = view)]
+                        self,
+                        move |_, _| {
+                            view.imp().too_wide.set(None);
+                            view.choose_width();
+                        }
+                    ),
+                );
+            }
+        }
         // The artist and album under the title open their pages.
         imp.subtitle.connect_activate_link(glib::clone!(
             #[weak(rename_to = view)]

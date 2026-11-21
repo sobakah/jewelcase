@@ -365,9 +365,9 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   beside its content) over the grid, then the album over the page, the whole window wide. **What
   was opened last stays in sight longest** (the owner's rule): no panel closes or goes out of
   sight for want of room; album and playlist panels lie over their grid, window-wide (CONCEPT.md
-  §4.1). The artist page's sections keep a minimum of
-  two columns: with the current count as minimum, the page's minimum width followed its columns
-  and an album stayed over the page. `ArtistPage::size_allocate` allocates its child itself
+  §4.1). The artist page's sections go down to one column (`min_children_per_line(1)`): with
+  the current count as minimum, the page's minimum width followed its columns and an album
+  stayed over the page; with two, a page as narrow as the window was cut off. `ArtistPage::size_allocate` allocates its child itself
   (`adw::Bin`'s parent allocate doesn't: the page drew empty).
 - **Nothing may ask for more width than the window has**: `AdwApplicationWindow` with breakpoints
   doesn't stop at its content's minimum, it clips the right side (header buttons, player, panels).

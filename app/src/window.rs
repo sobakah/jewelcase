@@ -19,11 +19,13 @@ use crate::widgets::{
 const SAVED_SECTION: usize = 0;
 const FOLLOWED_SECTION: usize = 0;
 
-/// How long a Spotify request runs before the header bar's spinner shows,
-/// and how long it stays after the last one.
-/// The padding around each cover in the album and artist grids.
+/// The padding around each cover in the album (and playlist) and artist
+/// grids.
 const ALBUM_TILE_PADDING: i32 = 18;
 const ARTIST_TILE_PADDING: i32 = 24;
+
+/// How long a Spotify request runs before the header bar's spinner shows,
+/// and how long it stays after the last one.
 const LOADING_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 const LOADING_LINGER: std::time::Duration = std::time::Duration::from_millis(300);
 
@@ -1419,8 +1421,8 @@ impl JewelcaseWindow {
 
     fn open_artist_page(&self, page: ArtistPage) {
         let imp = self.imp();
-        // An album's panel on the page goes beside or over it by the page's
-        // own width (artist_page.blp).
+        // An album's panel on the page goes beside or over it by its width
+        // rule (panel_resizer::attach_album_on_page, below).
         page.connect_local(
             "close",
             false,

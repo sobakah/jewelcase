@@ -216,11 +216,25 @@ struct Width {
 
 impl Width {
     fn for_room(&self, kind: Kind, room: Room, album_open: bool) -> Panel {
-        let panel = layout(kind, self.set.get(), room, keep(kind), album_open);
+        self.for_room_keeping(kind, room, keep(kind), album_open)
+    }
+
+    /// As `for_room`, the content keeping `keep` beside the panel.
+    fn for_room_keeping(&self, kind: Kind, room: Room, keep: i32, album_open: bool) -> Panel {
+        let panel = layout(kind, self.set.get(), room, keep, album_open);
         match self.dragged.get() {
-            // Where it is, as wide as dragged (within the limits).
-            Some(width) => Panel { width, ..panel },
-            None => panel,
+            // As wide as dragged while beside the content, within what the
+            // rule allows there (the window may change during the drag);
+            // over it, as the rule says (all of the window).
+            Some(width) if panel.place == Place::Beside => {
+                let narrowest = narrowest_beside(kind, album_open);
+                let widest = (room.width - keep.max(room.content_min)).max(narrowest);
+                Panel {
+                    width: width.clamp(narrowest, widest),
+                    ..panel
+                }
+            }
+            _ => panel,
         }
     }
 
@@ -237,14 +251,22 @@ fn content_min(split: &crate::widgets::SlideView) -> i32 {
         .map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).0)
 }
 
+/// The narrowest a panel is beside the content: an artist page with an
+/// album open has room for both.
+fn narrowest_beside(kind: Kind, album_open: bool) -> i32 {
+    match kind {
+        Kind::Artist { .. } => page_min(album_open),
+        _ => MIN_WIDTH,
+    }
+}
+
 /// The narrowest and widest the panel may be dragged now.
-fn limits(split: &crate::widgets::SlideView, kind: Kind) -> (i32, i32) {
+fn limits(split: &crate::widgets::SlideView, kind: Kind, album_open: bool) -> (i32, i32) {
     let room = split.width();
     let keep = keep(kind).max(content_min(split));
     let narrowest = match kind {
         Kind::Artist { .. } if split.over() => ARTIST_MIN_WIDTH,
-        Kind::Artist { .. } => ARTIST_BESIDE_MIN,
-        _ => MIN_WIDTH,
+        _ => narrowest_beside(kind, album_open),
     };
     let keep = if split.over() { MIN_CONTENT } else { keep };
     (narrowest, (room - keep).max(narrowest))
@@ -279,6 +301,10 @@ fn attach_panel(
     overlay.add_overlay(&handle);
     split.set_sidebar(Some(overlay.upcast_ref::<gtk::Widget>()));
 
+    let open_now: Rc<dyn Fn() -> bool> = {
+        let album_open = album_open.clone();
+        Rc::new(move || album_open.as_ref().is_some_and(|open| open()))
+    };
     let width = Rc::new(Width::default());
     let read = glib::clone!(
         #[strong]
@@ -321,6 +347,7 @@ fn attach_panel(
         .sync_create()
         .build();
 
+    let open_now_keys = open_now.clone();
     let drag = gtk::GestureDrag::new();
     // Where in the handle it was grabbed, and the width the drag asks for.
     let grab = std::rc::Rc::new(std::cell::Cell::new(0.0));
@@ -360,7 +387,7 @@ fn attach_panel(
             // The handle is on the panel's left edge: left widens it.
             let edge = f64::from(point.x()) - grab.get();
             let width = f64::from(split.width()) - edge;
-            let (narrowest, widest) = limits(&split, kind);
+            let (narrowest, widest) = limits(&split, kind, open_now());
             Some((width as i32).clamp(narrowest, widest))
         }
     );
@@ -423,7 +450,7 @@ fn attach_panel(
                 _ => return glib::Propagation::Proceed,
             };
             let now = split.sidebar_width();
-            let (narrowest, widest) = limits(&split, kind);
+            let (narrowest, widest) = limits(&split, kind, open_now_keys());
             let now = (now + change).clamp(narrowest, widest);
             let _ = settings.set_int(setting, width.to_keep(kind, now, split.width()));
             glib::Propagation::Stop
@@ -551,6 +578,33 @@ mod tests {
         };
         let panel = layout(ALBUM, set(647, 1556), wide_content, PAGE_CONTENT_MIN, false);
         assert_eq!(panel, beside(400));
+    }
+
+    /// A dragged edge sets the width only beside the content, within what
+    /// the rule allows there: an artist page kept room for its album, and
+    /// a panel the window put over the grid stayed as wide as dragged.
+    #[test]
+    fn a_dragged_width_stays_within_the_rule() {
+        let width = Width::default();
+        width.set.set(set(1556, 0));
+        width.dragged.set(Some(560));
+        // An album open: not narrower than the page's content and it.
+        let page = width.for_room_keeping(PAGE, room(2560), GRID_MIN, true);
+        assert_eq!(page, beside(PAGE_CONTENT_MIN + MIN_WIDTH));
+        // Over the grid: as the rule says.
+        let panel = Kind::Panel {
+            grid_padding: Some(18),
+        };
+        width.set.set(set(700, 0));
+        width.dragged.set(Some(500));
+        assert_eq!(
+            width.for_room_keeping(panel, room(600), 380, false),
+            over(600)
+        );
+        assert_eq!(
+            width.for_room_keeping(panel, room(1000), 380, false),
+            beside(500)
+        );
     }
 
     /// The album and playlist panels: the grid keeps two columns, then
