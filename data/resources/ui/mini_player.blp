@@ -101,7 +101,7 @@ template $JewelcaseMiniPlayer: Adw.Bin {
 
         // Not in a compact bar: the controls need the room on a phone.
         $JewelcaseVisualizer {
-          visible: bind template.narrow inverted;
+          compact: bind template.narrow;
           slot: 7;
           fill: 0.6;
           min-bars: 4;

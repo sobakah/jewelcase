@@ -110,9 +110,60 @@ pub fn sort_spotify<T, K>(
     keyed.into_iter().map(|(_, item)| item).collect()
 }
 
+/// A playlist in "Add to Playlist…": whether it has any of the songs
+/// (those come first, sorted among themselves), its name and when it last
+/// changed (Unix seconds).
+#[derive(Debug, Clone, Copy)]
+pub struct PickerKey<'a> {
+    pub has: bool,
+    pub name: &'a str,
+    pub changed: i64,
+}
+
+/// `sort` is the `playlist-picker-sort` setting: "changed" (the most
+/// recently changed first) or "name" (A to Z), with "-reversed" for the
+/// other way round. Playlists that have some of the songs come first
+/// either way.
+pub fn compare_picker(sort: &str, a: &PickerKey, b: &PickerKey) -> Ordering {
+    let (by, reversed) = match sort.strip_suffix("-reversed") {
+        Some(by) => (by, true),
+        None => (sort, false),
+    };
+    let name = || a.name.to_lowercase().cmp(&b.name.to_lowercase());
+    let order = match by {
+        "name" => name().then(b.changed.cmp(&a.changed)),
+        _ => b.changed.cmp(&a.changed).then_with(name),
+    };
+    b.has
+        .cmp(&a.has)
+        .then(if reversed { order.reverse() } else { order })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Playlists that have the songs first, then the rest, each sorted as
+    /// chosen; reversing doesn't move the groups.
+    #[test]
+    fn the_picker_keeps_playlists_with_the_songs_first() {
+        let key = |has, name, changed| PickerKey { has, name, changed };
+        let list = [
+            key(false, "b", 30),
+            key(true, "z", 10),
+            key(false, "A", 20),
+            key(true, "c", 40),
+        ];
+        let sorted = |sort: &str| {
+            let mut list = list.to_vec();
+            list.sort_by(|a, b| compare_picker(sort, a, b));
+            list.iter().map(|k| k.name).collect::<Vec<_>>()
+        };
+        assert_eq!(sorted("changed"), ["c", "z", "b", "A"]);
+        assert_eq!(sorted("changed-reversed"), ["z", "c", "A", "b"]);
+        assert_eq!(sorted("name"), ["c", "z", "A", "b"]);
+        assert_eq!(sorted("name-reversed"), ["z", "c", "b", "A"]);
+    }
 
     fn saved(name: &str, artist: &str, year: i32) -> SpotifyAlbum {
         SpotifyAlbum {

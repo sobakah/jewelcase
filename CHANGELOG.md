@@ -9,12 +9,17 @@ All notable changes to Jewelcase are documented here. The format follows
 ### Added
 
 - Songs in the queue and under Recently Played open their album or artist from their ⋮ menu (*Go to Album*, *Go to Artist*).
+- **Add to Playlist… can be sorted**: by when a playlist last changed (the default, newest first) or by name, either way round, from the sort button in its title; the order is remembered. Playlists that already have the song stay on top, sorted the same way.
 
 ### Changed
 
 - **Every song in the queue has the same ⋮ menu**: Now Playing and the songs coming up have one too, like Recently Played. The right-click menus are gone (on Recently Played they repeated the ⋮ menu).
 - *Add to Playlist…* opens as a menu next to where you chose it and closes when you click beside it, like Jewelcase's other menus.
 - The *Play On…* button shows a speaker instead of an icon that looked like a printer.
+
+### Fixed
+
+- The visualizer in the player bar showed with its setting off (since 0.10.0).
 
 ## [0.10.0] — 2026-11-21
 

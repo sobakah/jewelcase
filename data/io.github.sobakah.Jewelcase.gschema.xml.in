@@ -126,6 +126,17 @@
       <summary>Music folders</summary>
       <description>Folders the library is read from. While this key is unset, the XDG Music folder is used.</description>
     </key>
+    <key name="playlist-picker-sort" type="s">
+      <choices>
+        <choice value="changed"/>
+        <choice value="changed-reversed"/>
+        <choice value="name"/>
+        <choice value="name-reversed"/>
+      </choices>
+      <default>"changed"</default>
+      <summary>Order of the playlists in “Add to Playlist…”</summary>
+      <description>“changed” has the most recently changed playlist first, “name” is A to Z; “-reversed” the other way round. Playlists that already have the songs come first either way. Changed from the menu’s sort button.</description>
+    </key>
     <key name="album-sort" type="s">
       <choices>
         <choice value="artist"/>

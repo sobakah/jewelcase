@@ -46,6 +46,11 @@ mod imp {
         pub min_bars: Cell<u32>,
         #[property(get, set, minimum = 1, maximum = 128, default = 24)]
         pub max_bars: Cell<u32>,
+        /// In a compact player bar: hidden whatever the setting (the
+        /// controls need the room). Not `visible` bound from outside: that
+        /// overrode the setting, and the visualizer showed while off.
+        #[property(get, set = Self::set_compact)]
+        pub compact: Cell<bool>,
         pub levels: RefCell<Vec<f32>>,
         pub tick: RefCell<Option<gtk::TickCallbackId>>,
         pub last_frame: Cell<i64>,
@@ -61,6 +66,7 @@ mod imp {
                 slot: Cell::new(0.0),
                 min_bars: Cell::new(4),
                 max_bars: Cell::new(24),
+                compact: Cell::new(false),
                 levels: RefCell::new(vec![0.0; 32]),
                 tick: RefCell::default(),
                 last_frame: Cell::new(0),
@@ -210,12 +216,24 @@ mod imp {
     }
 
     impl Visualizer {
+        fn set_compact(&self, compact: bool) {
+            if self.compact.replace(compact) != compact {
+                self.obj().update_visible();
+            }
+        }
+
         fn set_bars(&self, bars: u32) {
             self.bars.set(bars);
             self.levels.replace(vec![0.0; bars as usize]);
             self.obj().queue_draw();
         }
     }
+}
+
+/// Whether the visualizer shows: the setting decides, GNOME's animations
+/// and a compact bar can only hide it.
+fn shown(setting: bool, animations: bool, compact: bool) -> bool {
+    setting && animations && !compact
 }
 
 glib::wrapper! {
@@ -225,11 +243,12 @@ glib::wrapper! {
 }
 
 impl Visualizer {
-    /// Shown with the setting on and GNOME's animations on.
+    /// Shown with the setting on and GNOME's animations on, unless in a
+    /// compact bar.
     fn update_visible(&self) {
         let setting = gtk::gio::Settings::new(APP_ID).boolean("visualizer");
         let animations = gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations());
-        self.set_visible(setting && animations);
+        self.set_visible(shown(setting, animations, self.compact()));
     }
 
     /// Ticks while on screen and playing (and until the bars have
@@ -309,6 +328,17 @@ fn next_level(level: f32, target: f32, dt: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The setting decides; animations off and a compact bar only hide it.
+    /// The compact bar's binding overrode `visible`, and the visualizer
+    /// showed with the setting off.
+    #[test]
+    fn only_the_setting_shows_the_visualizer() {
+        assert!(!shown(false, true, false));
+        assert!(shown(true, true, false));
+        assert!(!shown(true, true, true));
+        assert!(!shown(true, false, false));
+    }
 
     #[test]
     fn bars_rise_over_frames_and_fall_gently() {

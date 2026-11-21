@@ -109,6 +109,9 @@ pub async fn create_or_add(parent: &impl IsA<gtk::Widget>, name: &str, tracks: &
     }
 }
 
+/// The setting that keeps the list's order (see `sorting::compare_picker`).
+const SORT_KEY: &str = "playlist-picker-sort";
+
 /// Lets the user pick a playlist (or create one) for `tracks`: a popover
 /// at `parent` (the button or row it was chosen from), closed by a click
 /// beside it like Jewelcase's other menus (a dialog stayed open).
@@ -149,21 +152,24 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
         }
     }
     let has_all = |playlist: i64| has.get(&playlist).is_some_and(|s| s.len() >= tracks.len());
-    // The playlists that have them come first: choosing one removes them.
-    let mut playlists: Vec<PlaylistObject> = {
+    let playlists: Vec<PlaylistObject> = {
         let store = library.playlists();
         (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<PlaylistObject>())
             .collect()
     };
-    playlists.sort_by_key(|p| !has_all(p.id()));
+    // Each playlist's row, made once; the sort only orders them.
+    let mut rows: Vec<(i64, adw::ActionRow)> = Vec::new();
+    // What they're sorted by: has some of the songs, name, last change.
+    let mut keys: Vec<(bool, String, i64)> = Vec::new();
     for playlist in &playlists {
+        let info = playlist.playlist();
         let row = adw::ActionRow::builder()
             .use_markup(false)
             .activatable(true)
             .build();
-        row.set_title(&playlist.playlist().name);
-        let count = crate::format::song_count(playlist.playlist().item_count);
+        row.set_title(&info.name);
+        let count = crate::format::song_count(info.item_count);
         let n = has.get(&playlist.id()).map_or(0, Vec::len);
         let subtitle = if n == 0 {
             count
@@ -195,8 +201,110 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
             format!("{note} · {count}")
         };
         row.set_subtitle(&subtitle);
-        list.append(&row);
+        keys.push((n > 0, info.name.clone(), info.modified));
+        rows.push((playlist.id(), row));
     }
+    let rows = std::rc::Rc::new(rows);
+
+    // The playlists that have some of the songs first (choosing one that
+    // has them all removes them), each group in the chosen order.
+    let arrange = {
+        let list = list.clone();
+        let rows = rows.clone();
+        move |sort: &str| {
+            let key = |i: usize| crate::sorting::PickerKey {
+                has: keys[i].0,
+                name: &keys[i].1,
+                changed: keys[i].2,
+            };
+            let mut order: Vec<usize> = (0..rows.len()).collect();
+            order.sort_by(|&a, &b| crate::sorting::compare_picker(sort, &key(a), &key(b)));
+            for (_, row) in rows.iter() {
+                if row.parent().is_some() {
+                    list.remove(row);
+                }
+            }
+            for i in order {
+                list.append(&rows[i].1);
+            }
+        }
+    };
+    let settings = gtk::gio::Settings::new(crate::config::APP_ID);
+    let sort = settings.string(SORT_KEY);
+    arrange(&sort);
+    let (by, reversed) = match sort.strip_suffix("-reversed") {
+        Some(by) => (by.to_owned(), true),
+        None => (sort.to_string(), false),
+    };
+    // The sort menu, as the playlist panel's: by what, and reversed.
+    let by_action =
+        gtk::gio::SimpleAction::new_stateful("by", Some(glib::VariantTy::STRING), &by.to_variant());
+    let reversed_action =
+        gtk::gio::SimpleAction::new_stateful("reversed", None, &reversed.to_variant());
+    let apply = {
+        let settings = settings.clone();
+        let by_action = by_action.clone();
+        let reversed_action = reversed_action.clone();
+        move || {
+            let by = by_action
+                .state()
+                .and_then(|s| s.get::<String>())
+                .unwrap_or_default();
+            let reversed = reversed_action
+                .state()
+                .and_then(|s| s.get::<bool>())
+                .unwrap_or(false);
+            let sort = if reversed {
+                format!("{by}-reversed")
+            } else {
+                by
+            };
+            // Remembered for the next time.
+            let _ = settings.set_string(SORT_KEY, &sort);
+            arrange(&sort);
+        }
+    };
+    let apply = std::rc::Rc::new(apply);
+    by_action.connect_activate({
+        let apply = apply.clone();
+        move |action, target| {
+            if let Some(target) = target {
+                action.set_state(target);
+                apply();
+            }
+        }
+    });
+    reversed_action.connect_activate(move |action, _| {
+        let reversed = action
+            .state()
+            .and_then(|s| s.get::<bool>())
+            .unwrap_or(false);
+        action.set_state(&(!reversed).to_variant());
+        apply();
+    });
+    let actions = gtk::gio::SimpleActionGroup::new();
+    actions.add_action(&by_action);
+    actions.add_action(&reversed_action);
+    let sort_menu = gtk::gio::Menu::new();
+    let by_section = gtk::gio::Menu::new();
+    for (label, target) in [
+        (gettext("Last _Changed"), "changed"),
+        (gettext("_Name"), "name"),
+    ] {
+        let item = gtk::gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("picker.by"), Some(&target.to_variant()));
+        by_section.append_item(&item);
+    }
+    sort_menu.append_section(None, &by_section);
+    let reverse_section = gtk::gio::Menu::new();
+    reverse_section.append(Some(&gettext("_Reverse Order")), Some("picker.reversed"));
+    sort_menu.append_section(None, &reverse_section);
+    let sort_button = gtk::MenuButton::builder()
+        .icon_name("view-sort-descending-symbolic")
+        .tooltip_text(gettext("Sort"))
+        .menu_model(&sort_menu)
+        .css_classes(["flat", "circular"])
+        .build();
 
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -206,12 +314,16 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
         .margin_start(6)
         .margin_end(6)
         .build();
-    content.append(
+    content.insert_action_group("picker", Some(&actions));
+    let title = gtk::CenterBox::new();
+    title.set_center_widget(Some(
         &gtk::Label::builder()
             .label(gettext("Add to Playlist"))
             .css_classes(["heading"])
             .build(),
-    );
+    ));
+    title.set_end_widget(Some(&sort_button));
+    content.append(&title);
     content.append(
         &gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -248,9 +360,12 @@ pub fn show(parent: &impl IsA<gtk::Widget>, tracks: Vec<i64>) {
                         }
                     });
                 }
-                index => {
-                    if let Some(playlist) = playlists.get(index as usize - 1) {
-                        let id = playlist.id();
+                _ => {
+                    if let Some(id) = rows
+                        .iter()
+                        .find(|(_, r)| r.upcast_ref::<gtk::ListBoxRow>() == row)
+                        .map(|(id, _)| *id)
+                    {
                         let had = has.get(&id).cloned().unwrap_or_default();
                         if had.len() >= tracks.len() {
                             // All there: chosen again, they're removed.
