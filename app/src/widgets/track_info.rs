@@ -106,8 +106,8 @@ pub fn grid(track: &TrackObject, full: bool) -> gtk::Grid {
             }
             add(gettext("ReplayGain"), value);
         }
-        if let Some(isrc) = &tags.isrc {
-            add(gettext("ISRC"), isrc.clone());
+        if !tags.isrcs.is_empty() {
+            add(gettext("ISRC"), tags.isrcs.join(", "));
         }
         if let Some(barcode) = &tags.barcode {
             add(gettext("Barcode"), barcode.clone());

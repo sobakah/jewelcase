@@ -29,7 +29,9 @@ pub struct LocalTrack {
     pub album_artist: Option<String>,
     pub album: Option<String>,
     pub duration_ms: u64,
-    pub isrc: Option<String>,
+    /// All of the song's ISRCs (a recording often has several); the first
+    /// is the one Spotify is asked for.
+    pub isrcs: Vec<String>,
     /// "FLAC", "MPEG-4", …; decides between several copies.
     pub format: String,
 }
@@ -50,8 +52,8 @@ const LIKELY_DURATION_MS: u64 = 10_000;
 /// How sure we are that both are the same recording; `None` if they
 /// aren't.
 pub fn compare(local: &LocalTrack, remote: &RemoteTrack, aliases: &Aliases) -> Option<Confidence> {
-    if let (Some(a), Some(b)) = (&local.isrc, &remote.isrc)
-        && a.eq_ignore_ascii_case(b)
+    if let Some(b) = &remote.isrc
+        && local.isrcs.iter().any(|a| a.eq_ignore_ascii_case(b))
     {
         return Some(Confidence::Sure);
     }
@@ -412,7 +414,7 @@ impl MatchIndex {
         let mut by_isrc: HashMap<String, Vec<usize>> = HashMap::new();
         let mut by_title: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, track) in tracks.iter().enumerate() {
-            if let Some(isrc) = &track.isrc {
+            for isrc in &track.isrcs {
                 by_isrc.entry(isrc.to_uppercase()).or_default().push(i);
             }
             let title = Title::parse(&track.title);
@@ -492,7 +494,7 @@ mod tests {
             album_artist: Some(artist.into()),
             album: Some("Album".into()),
             duration_ms: duration_s * 1000,
-            isrc: None,
+            isrcs: Vec::new(),
             format: "FLAC".into(),
         }
     }
@@ -717,10 +719,26 @@ mod tests {
     fn isrc_wins() {
         let aliases = Aliases::default();
         let mut track = local(1, "Something else", "Nobody", 10);
-        track.isrc = Some("KRA382000123".into());
+        track.isrcs = vec!["KRA382000123".into()];
         let mut entry = remote("Different", &["Other"], 300);
         entry.isrc = Some("kra382000123".into());
         assert_eq!(compare(&track, &entry, &aliases), Some(Confidence::Sure));
+    }
+
+    #[test]
+    fn any_of_a_songs_isrcs_matches() {
+        // The 1997 release's ISRC first, the 2017 reissue's second:
+        // Spotify's copy may carry either.
+        let aliases = Aliases::default();
+        let mut track = local(1, "Airbag", "Radiohead", 284);
+        track.isrcs = vec!["GBAYE9701274".into(), "GBBKS1700107".into()];
+        let mut entry = remote("Airbag - Remastered", &["Radiohead"], 290);
+        entry.isrc = Some("GBBKS1700107".into());
+        assert_eq!(compare(&track, &entry, &aliases), Some(Confidence::Sure));
+        let index = MatchIndex::new(vec![local(2, "Other", "X", 10), track], &aliases);
+        // Found by the second ISRC alone, though the title differs.
+        entry.title = "Airbag (Live)".into();
+        assert_eq!(index.find(&entry), Some((1, Confidence::Sure)));
     }
 
     #[test]

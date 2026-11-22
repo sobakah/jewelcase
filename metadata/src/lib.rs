@@ -641,13 +641,20 @@ pub fn parse_release_isrcs(release: &Value) -> Vec<(u32, u32, String)> {
             let Some(position) = number(&track["position"]) else {
                 continue;
             };
-            if let Some(isrc) = track["recording"]["isrcs"]
+            // All of them: a recording often has several (a reissue,
+            // another label), and Spotify's copy may carry any.
+            for isrc in track["recording"]["isrcs"]
                 .as_array()
-                .and_then(|list| list.iter().find_map(Value::as_str))
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
                 .map(|isrc| isrc.trim().to_uppercase())
                 .filter(|isrc| isrc.len() == 12)
             {
-                isrcs.push((disc, position, isrc));
+                let entry = (disc, position, isrc);
+                if !isrcs.contains(&entry) {
+                    isrcs.push(entry);
+                }
             }
         }
     }
@@ -1224,7 +1231,7 @@ mod tests {
                     {"position": 2, "recording": {"isrcs": []}},
                 ]},
                 {"position": 2, "tracks": [
-                    {"position": 1, "recording": {"isrcs": ["GBAYE0000001"]}},
+                    {"position": 1, "recording": {"isrcs": ["GBAYE0000001", "GBBKS1700107", "gbaye0000001"]}},
                 ]},
             ]
         });
@@ -1232,7 +1239,8 @@ mod tests {
             parse_release_isrcs(&release),
             [
                 (1, 1, "KRA382000123".to_owned()),
-                (2, 1, "GBAYE0000001".to_owned())
+                (2, 1, "GBAYE0000001".to_owned()),
+                (2, 1, "GBBKS1700107".to_owned())
             ]
         );
     }

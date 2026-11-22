@@ -30,7 +30,12 @@ pub struct TrackTags {
     pub release_comment: Option<String>,
     pub release_type: Option<String>,
     pub compilation: bool,
+    /// The first of `isrcs`: shown, and what Spotify is asked for.
     pub isrc: Option<String>,
+    /// Every ISRC the file has. A recording often has several (a reissue,
+    /// another label: lyrembed writes all MusicBrainz knows), and a Spotify
+    /// copy may carry any of them.
+    pub isrcs: Vec<String>,
     pub barcode: Option<String>,
     pub bpm: Option<f64>,
     pub lyrics: Option<Lyrics>,
@@ -155,7 +160,14 @@ fn fill_from_tag(tags: &mut TrackTags, tag: &Tag) {
         .collect();
     tags.release_type = text(ItemKey::MusicBrainzReleaseType);
     tags.compilation = text(ItemKey::FlagCompilation).is_some_and(|v| v == "1" || v == "true");
-    tags.isrc = text(ItemKey::Isrc).or_else(|| text(ItemKey::AppleXid).and_then(isrc_from_xid));
+    tags.isrcs = texts(ItemKey::Isrc);
+    if tags.isrcs.is_empty() {
+        tags.isrcs
+            .extend(text(ItemKey::AppleXid).and_then(isrc_from_xid));
+    }
+    let mut seen = std::collections::HashSet::new();
+    tags.isrcs.retain(|isrc| seen.insert(isrc.to_uppercase()));
+    tags.isrc = tags.isrcs.first().cloned();
     tags.barcode = text(ItemKey::Barcode);
     tags.bpm = text(ItemKey::Bpm)
         .or_else(|| text(ItemKey::IntegerBpm))
@@ -333,6 +345,53 @@ mod tests {
             Some("DEQ021801392".into())
         );
         assert_eq!(isrc_from_xid("label:upc:123".into()), None);
+    }
+
+    /// A FLAC stream with these Vorbis comments and no audio.
+    fn flac_with_comments(comments: &[&str]) -> Vec<u8> {
+        let mut flac = b"fLaC".to_vec();
+        // STREAMINFO: 44.1 kHz, stereo, 16 bit, 10 s.
+        flac.extend([0x00, 0x00, 0x00, 0x22]);
+        flac.extend([0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0]);
+        flac.extend([0x0a, 0xc4, 0x42, 0xf0, 0x00, 0x06, 0xba, 0xa8]);
+        flac.extend([0; 16]);
+        let mut block = Vec::new();
+        let vendor = b"test";
+        block.extend((vendor.len() as u32).to_le_bytes());
+        block.extend(vendor);
+        block.extend((comments.len() as u32).to_le_bytes());
+        for comment in comments {
+            block.extend((comment.len() as u32).to_le_bytes());
+            block.extend(comment.as_bytes());
+        }
+        let len = block.len() as u32;
+        flac.push(0x80 | 4); // the last block, VORBIS_COMMENT
+        flac.extend(&len.to_be_bytes()[1..]);
+        flac.extend(block);
+        flac
+    }
+
+    #[test]
+    fn every_isrc_of_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.flac");
+        std::fs::write(
+            &path,
+            flac_with_comments(&[
+                "TITLE=Airbag",
+                "ISRC=GBAYE9701274",
+                "ISRC=GBBKS1700107",
+                "ISRC=gbaye9701274",
+            ]),
+        )
+        .unwrap();
+        let (tags, _) = read_tags(&path).unwrap();
+        assert_eq!(tags.isrcs, ["GBAYE9701274", "GBBKS1700107"]);
+        assert_eq!(tags.isrc.as_deref(), Some("GBAYE9701274"));
+
+        std::fs::write(&path, flac_with_comments(&["TITLE=Airbag"])).unwrap();
+        let (tags, _) = read_tags(&path).unwrap();
+        assert!(tags.isrcs.is_empty() && tags.isrc.is_none());
     }
 
     #[test]

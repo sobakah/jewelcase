@@ -6,6 +6,13 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Spotify songs match files with several ISRCs**: a recording often has more than one (a
+  reissue, another label), and only the first was compared; now any of them matches, also those
+  MusicBrainz knows for files without one. The song details show all of them. Files with an ISRC
+  are read again once.
+
 ## [0.11.0] — 2026-11-21
 
 The library database changes (Deezer's popular songs of an artist are kept a day); 0.10.0 can't

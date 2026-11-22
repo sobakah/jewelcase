@@ -475,7 +475,7 @@ pub fn local_track(track: &Track) -> LocalTrack {
         album_artist: track.album_artist.clone().or(tags.album_artist.clone()),
         album: track.album_title.clone().or(tags.album.clone()),
         duration_ms: tags.duration_ms,
-        isrc: tags.isrc.clone(),
+        isrcs: tags.isrcs.clone(),
         format: tags.format.clone(),
     }
 }
@@ -1254,10 +1254,11 @@ impl Spotify {
         };
         let mut local = local_track(&track);
         // MusicBrainz' when the file has none (§9.5, step 2).
-        if local.isrc.is_none() {
-            local.isrc = library
+        if local.isrcs.is_empty() {
+            local.isrcs = library
                 .db()
-                .and_then(|db| db.track_isrc(track_id).ok().flatten());
+                .and_then(|db| db.musicbrainz_isrcs(track_id).ok())
+                .unwrap_or_default();
         }
         let best = self.search_spotify(local).await?;
         let version = SpotifyVersion {
@@ -1281,7 +1282,9 @@ impl Spotify {
         local: LocalTrack,
     ) -> Result<Option<(Confidence, jewelcase_spotify::Track)>, Error> {
         let library = JewelcaseApplication::get().library();
-        let isrc = local.isrc.clone();
+        // One query by ISRC, the first; the results of the title queries
+        // are compared with all of them.
+        let isrc = local.isrcs.first().cloned();
         let queries = search_queries(&local);
         let title = local.title.clone();
         let aliases = library.aliases().clone();
@@ -1368,7 +1371,7 @@ impl Spotify {
             album_artist: Some(artist),
             album,
             duration_ms,
-            isrc,
+            isrcs: isrc.into_iter().collect(),
             format: String::new(),
         };
         let (_, track) = self.search_spotify(local).await.ok()??;

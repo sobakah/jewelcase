@@ -275,13 +275,24 @@ impl Database {
     pub fn match_tracks(&self) -> Result<Vec<LocalTrack>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.title, t.artist, t.album_artist, COALESCE(a.title, t.album),
-                    t.duration_ms, COALESCE(t.isrc, m.isrc), t.format
+                    t.duration_ms, NULLIF(t.isrcs, ''), t.isrc, t.format,
+                    (SELECT group_concat(m.isrc, char(31)) FROM mb_isrc m
+                     WHERE m.release = t.mb_album_id
+                       AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number)
              FROM track t LEFT JOIN album a ON a.id = t.album_id
-               LEFT JOIN mb_isrc m ON m.release = t.mb_album_id
-                 AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number
              WHERE t.title IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |row| {
+            // The file's ISRCs (only the first in rows from before the
+            // column), else MusicBrainz'.
+            let file: Option<String> = row.get(6)?;
+            let first: Option<String> = row.get(7)?;
+            let musicbrainz: Option<String> = row.get(9)?;
+            let isrcs = file
+                .or(first)
+                .or(musicbrainz)
+                .map(|joined| joined.split('\u{1f}').map(str::to_owned).collect())
+                .unwrap_or_default();
             Ok(LocalTrack {
                 track_id: row.get(0)?,
                 title: row.get(1)?,
@@ -289,8 +300,8 @@ impl Database {
                 album_artist: row.get(3)?,
                 album: row.get(4)?,
                 duration_ms: row.get::<_, i64>(5)?.max(0) as u64,
-                isrc: row.get(6)?,
-                format: row.get(7)?,
+                isrcs,
+                format: row.get(8)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -931,20 +942,17 @@ impl Database {
         Ok(())
     }
 
-    /// A song's ISRC: its own, else MusicBrainz'.
-    pub fn track_isrc(&self, track_id: i64) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT COALESCE(t.isrc, m.isrc) FROM track t
-                 LEFT JOIN mb_isrc m ON m.release = t.mb_album_id
-                   AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number
-                 WHERE t.id = ?1",
-                [track_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten())
+    /// The ISRCs MusicBrainz knows for a song (by its album, disc and
+    /// track number), for songs whose files have none.
+    pub fn musicbrainz_isrcs(&self, track_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.isrc FROM track t
+             JOIN mb_isrc m ON m.release = t.mb_album_id
+               AND m.disc = COALESCE(t.disc, 1) AND m.number = t.number
+             WHERE t.id = ?1 ORDER BY m.rowid",
+        )?;
+        let rows = stmt.query_map([track_id], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     // Outbox (§9.6) ------------------------------------------------------------
@@ -1028,6 +1036,37 @@ mod tests {
             .into_iter()
             .map(|i| (i.spotify_uri, i.match_state, i.track.is_some()))
             .collect()
+    }
+
+    #[test]
+    fn matching_sees_every_isrc_of_the_file_or_musicbrainz() {
+        let mut db = Database::open_in_memory().unwrap();
+        let mut tagged = file("/m/ok/01.flac", "OK Computer", "Airbag", 1);
+        tagged.tags.isrcs = vec!["GBAYE9701274".into(), "GBBKS1700107".into()];
+        tagged.tags.isrc = Some("GBAYE9701274".into());
+        let mut untagged = file("/m/ok/02.flac", "OK Computer", "Paranoid Android", 2);
+        untagged.tags.mb_album_id = Some("r1".into());
+        untagged.tags.disc = Some(1);
+        db.upsert_tracks(&[tagged, untagged], 1).unwrap();
+        rebuild(&mut db);
+        db.set_release_isrcs(
+            "r1",
+            &[(1, 2, "GBAYE9701376".into()), (1, 2, "GBBKS1700108".into())],
+            3,
+        )
+        .unwrap();
+        let tracks = db.match_tracks().unwrap();
+        let isrcs: Vec<&[String]> = tracks.iter().map(|t| t.isrcs.as_slice()).collect();
+        assert_eq!(isrcs.len(), 2);
+        assert_eq!(isrcs[0], ["GBAYE9701274", "GBBKS1700107"]);
+        let mut from_musicbrainz = isrcs[1].to_vec();
+        from_musicbrainz.sort();
+        assert_eq!(from_musicbrainz, ["GBAYE9701376", "GBBKS1700108"]);
+        assert_eq!(
+            db.musicbrainz_isrcs(tracks[1].track_id).unwrap(),
+            ["GBAYE9701376", "GBBKS1700108"]
+        );
+        assert!(db.musicbrainz_isrcs(tracks[0].track_id).unwrap().is_empty());
     }
 
     #[test]

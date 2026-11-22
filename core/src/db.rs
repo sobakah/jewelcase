@@ -63,6 +63,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/031_playlist_library_only.sql")),
     M::up(include_str!("db/032_discography_total.sql")),
     M::up(include_str!("db/033_popular_songs.sql")),
+    M::up(include_str!("db/034_all_isrcs.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once
@@ -439,6 +440,7 @@ impl Database {
                     t.channels,
                     file.cover_key,
                     t.barcode,
+                    join_list(&t.isrcs),
                 ])?;
             }
         }
@@ -2105,8 +2107,8 @@ const TRACK_COLUMNS: &str = "t.id, t.path, t.added, t.title, t.artist, t.album, 
     t.mb_album_id, t.mb_release_group_id, t.mb_track_id, t.mb_album_artist_ids,
     t.release_comment, t.release_type, t.compilation, t.isrc, t.bpm, t.lyrics_synced,
     t.lyrics_excerpt, t.replaygain_track, t.replaygain_album, t.duration_ms, t.format,
-    t.bitrate, t.sample_rate, t.bit_depth, t.channels, t.cover_key, t.barcode";
-const TRACK_COLUMN_COUNT: usize = 35;
+    t.bitrate, t.sample_rate, t.bit_depth, t.channels, t.cover_key, t.barcode, t.isrcs";
+const TRACK_COLUMN_COUNT: usize = 36;
 const TRACK_ALBUM_COLUMNS: &str = "t.album_id, a.title, a.artist_credit, a.cover_key, t.album_disc";
 
 const ALBUM_COLUMNS: &str = "id, group_key, title, sort_title, edition, artist_credit,
@@ -2130,9 +2132,9 @@ const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, 
     mb_album_id, mb_release_group_id, mb_track_id, mb_album_artist_ids, release_comment,
     release_type, compilation, isrc, bpm, lyrics_synced, lyrics_excerpt, replaygain_track,
     replaygain_album, duration_ms, format, bitrate, sample_rate, bit_depth, channels, cover_key,
-    barcode)
+    barcode, isrcs)
   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)
+    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37)
   ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size,
     content_key = NULL,
     title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -2148,7 +2150,8 @@ const UPSERT_TRACK: &str = "INSERT INTO track (path, mtime, size, added, title, 
     replaygain_track = excluded.replaygain_track, replaygain_album = excluded.replaygain_album,
     duration_ms = excluded.duration_ms, format = excluded.format, bitrate = excluded.bitrate,
     sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth,
-    channels = excluded.channels, cover_key = excluded.cover_key, barcode = excluded.barcode";
+    channels = excluded.channels, cover_key = excluded.cover_key, barcode = excluded.barcode,
+    isrcs = excluded.isrcs";
 
 const UPSERT_ALBUM: &str = "INSERT INTO album (key, group_key, title, sort_title, edition,
     artist_credit, artist_sort, year, release_type, soundtrack, compilation, mb_album_id,
@@ -2225,7 +2228,13 @@ fn find_track(conn: &Connection, s: &Snapshot) -> rusqlite::Result<Option<i64>> 
     )? {
         return Ok(Some(id));
     }
-    if let Some(id) = by("SELECT id FROM track WHERE isrc = ?1", &s.isrc)? {
+    // Any of a song's ISRCs (isrcs is NULL in rows from before it).
+    if let Some(id) = by(
+        "SELECT id FROM track WHERE isrc = ?1
+            OR instr(char(31) || isrcs || char(31), char(31) || ?1 || char(31)) > 0
+         ORDER BY isrc = ?1 DESC, id LIMIT 1",
+        &s.isrc,
+    )? {
         return Ok(Some(id));
     }
     let Some(title) = &s.title else {
@@ -2447,6 +2456,12 @@ fn delete_except(tx: &rusqlite::Transaction, table: &str, keep: &HashSet<i64>) -
 fn track_record(row: &Row) -> rusqlite::Result<TrackRecord> {
     let lyrics_synced: Option<bool> = row.get(23)?;
     let lyrics_excerpt: Option<String> = row.get(24)?;
+    let isrc: Option<String> = row.get(21)?;
+    // Rows from before the column have only the one.
+    let isrcs = row
+        .get::<_, Option<String>>(35)?
+        .map(split_list)
+        .unwrap_or_else(|| isrc.iter().cloned().collect());
     Ok(TrackRecord {
         id: row.get(0)?,
         path: PathBuf::from(row.get::<_, String>(1)?),
@@ -2470,7 +2485,8 @@ fn track_record(row: &Row) -> rusqlite::Result<TrackRecord> {
             release_comment: row.get(18)?,
             release_type: row.get(19)?,
             compilation: row.get(20)?,
-            isrc: row.get(21)?,
+            isrc,
+            isrcs,
             barcode: row.get(34)?,
             bpm: row.get(22)?,
             lyrics: lyrics_synced
@@ -2572,6 +2588,100 @@ mod tests {
             },
             cover_key: Some("eabc".into()),
         }
+    }
+
+    #[test]
+    fn every_isrc_is_kept_and_finds_the_song() {
+        let mut db = Database::open_in_memory().unwrap();
+        let mut airbag = file("/m/ok/01.flac", "OK Computer", "Airbag", 1);
+        airbag.tags.isrcs = vec!["GBAYE9701274".into(), "GBBKS1700107".into()];
+        airbag.tags.isrc = Some("GBAYE9701274".into());
+        db.upsert_tracks(
+            &[
+                airbag,
+                file("/m/ok/02.flac", "OK Computer", "Paranoid Android", 2),
+            ],
+            1,
+        )
+        .unwrap();
+        rebuild(&mut db);
+        let isrcs = |db: &Database| -> Vec<Vec<String>> {
+            db.all_tracks()
+                .unwrap()
+                .into_iter()
+                .map(|t| t.tags.isrcs)
+                .collect()
+        };
+        assert_eq!(
+            isrcs(&db),
+            [vec!["GBAYE9701274", "GBBKS1700107"], Vec::<&str>::new()]
+        );
+        let by_isrc = |isrc: &str| Snapshot {
+            path: None,
+            mb_track_id: None,
+            isrc: Some(isrc.into()),
+            title: None,
+            artist: None,
+            duration_ms: None,
+        };
+        let id = db.all_tracks().unwrap()[0].id;
+        // A playlist entry with the reissue's ISRC finds the song.
+        assert_eq!(
+            find_track(&db.conn, &by_isrc("GBBKS1700107")).unwrap(),
+            Some(id)
+        );
+        assert_eq!(find_track(&db.conn, &by_isrc("GBBKS170010")).unwrap(), None);
+
+        // Rows from before the column have only their first ISRC.
+        db.conn
+            .execute("UPDATE track SET isrcs = NULL", [])
+            .unwrap();
+        assert_eq!(isrcs(&db), [vec!["GBAYE9701274"], Vec::<&str>::new()]);
+        assert_eq!(
+            find_track(&db.conn, &by_isrc("GBAYE9701274")).unwrap(),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn the_isrc_migration_rereads_files_with_one_and_asks_musicbrainz_again() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let migrations = Migrations::from_slice(MIGRATIONS);
+        migrations
+            .to_version(&mut conn, MIGRATIONS.len() - 1)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO track (path, mtime, size, added, album_artists, genres,
+                 mb_album_artist_ids, compilation, duration_ms, format, isrc)
+               VALUES ('/a.flac', 5, 1, 1, '', '', '', 0, 1000, 'FLAC', 'GBAYE9701274'),
+                      ('/b.flac', 5, 1, 1, '', '', '', 0, 1000, 'FLAC', NULL);
+             INSERT INTO mb_isrc VALUES ('r', 1, 1, 'GBAYE9701274');
+             INSERT INTO mb_isrc_release VALUES ('r', 7);",
+        )
+        .unwrap();
+        migrations.to_latest(&mut conn).unwrap();
+        let mtimes: Vec<i64> = conn
+            .prepare("SELECT mtime FROM track ORDER BY path")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(mtimes, [-1, 5]);
+        let left: i64 = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM mb_isrc) + (SELECT COUNT(*) FROM mb_isrc_release)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
+        // Several ISRCs per song now fit.
+        conn.execute_batch(
+            "INSERT INTO mb_isrc VALUES ('r', 1, 1, 'GBAYE9701274');
+             INSERT INTO mb_isrc VALUES ('r', 1, 1, 'GBBKS1700107');",
+        )
+        .unwrap();
     }
 
     #[test]
