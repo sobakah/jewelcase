@@ -9,19 +9,20 @@ as an RPM for Fedora 45 and as a Flatpak bundle for image-based systems. User do
 
 ## The program family
 
-<!-- This section is the same in all six repositories. Change it in all of them or none. -->
+<!-- This section is the same in all seven repositories. Change it in all of them or none. -->
 
-Six programs by the same owner, each in its own private repository `sobakah/<name>` with its own
+Seven programs by the same owner, each in its own private repository `sobakah/<name>` with its own
 CLAUDE.md. Other sessions work in the other repositories: change one only when the owner asks.
 
 | Program | What it does | Works with |
 |---|---|---|
 | picktag | Tags and searches pictures, videos and documents (GTK 4, libadwaita) | reads keepbest's and media-optimizer's file journals; starts keepbest for *Find Duplicates* |
-| keepbest | Finds duplicate pictures and videos and keeps the best copy (page in the browser) | hands its tab to media-optimizer; writes a file journal |
+| keepbest | Finds duplicate pictures and videos and keeps the best copy (page in the browser) | hands its tab to media-optimizer; writes a file journal; D-Bus service for picktag |
 | media-optimizer | Converts pictures, GIFs and videos to smaller formats (page in the browser) | started from keepbest; writes a file journal |
 | cdport | Rips CDs, tags them and adds covers and lyrics (page in the browser) | starts lyrembed; D-Bus service for Jewelcase |
 | lyrembed | Finds lyrics, embeds them in music files, romanizes them (page in the browser) | started from cdport; D-Bus service for Jewelcase |
 | Jewelcase | A GNOME music player for an album library, with Spotify (GTK 4, libadwaita) | uses cdport and lyrembed; never writes music files |
+| Jewelcase Mobile | Jewelcase's idea on Android: Spotify playlists played from your own files, synced lyrics (Compose, Material 3) | code copied from Jewelcase; never writes music files |
 
 The file journal format is specified in picktag's `docs/JOURNAL_SPEC.md`. The programs with a page
 share its look (libadwaita's design language): `static/base.css` and `static/icons.js` are
@@ -35,8 +36,8 @@ or distrobox, what the host starts (app-menu entry, D-Bus service) enters the co
 a program opens in other apps (browser, Flatpaks, file manager) leaves it: `container.py`,
 lyrembed's, copied unchanged into cdport, keepbest and media-optimizer; picktag's
 `core/desktop.py`. The suites of the four make no container unless a test asks (an autouse
-fixture), so they run alike in a toolbox. Each README has a section *Fedora Silverblue, Bluefin
-and other image-based systems* under its installation.
+fixture), so they run alike in a toolbox. Each desktop program's README has a section *Fedora
+Silverblue, Bluefin and other image-based systems* under its installation.
 
 ### Working rules
 
@@ -88,8 +89,9 @@ and other image-based systems* under its installation.
 
 ### Wording
 
-British spelling (colour, behaviour, analyse); names of code, GTK and GNOME stay as they are.
-Program names are written as above (lower case, except Jewelcase). Terms used in all six:
+British spelling (colour, behaviour, analyse); names of code, GTK, GNOME and Android stay as they
+are. Program names are written as above (lower case, except Jewelcase and Jewelcase Mobile).
+Terms used in all seven:
 
 | Use | Not |
 |---|---|
