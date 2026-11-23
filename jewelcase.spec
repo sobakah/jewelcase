@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.12.0
+Version:        0.13.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,10 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Mon Nov 23 2026 sobakah - 0.13.0-1
+- Sync with Jewelcase Mobile through a shared folder or a USB-connected phone
+- Choose which devices to sync with
+
 * Sun Nov 22 2026 sobakah - 0.12.0-1
 - Spotify songs match files by any of their ISRCs
 

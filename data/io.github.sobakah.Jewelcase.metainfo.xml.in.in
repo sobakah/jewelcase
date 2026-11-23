@@ -48,6 +48,14 @@
   </branding>
 
   <releases>
+    <release version="0.13.0" date="2026-11-23" type="development">
+      <description>
+        <ul>
+          <li>Sync with Jewelcase Mobile through a shared folder or a phone connected over USB</li>
+          <li>Choose which devices to sync with</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.12.0" date="2026-11-22" type="development">
       <description>
         <ul>

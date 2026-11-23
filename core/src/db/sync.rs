@@ -385,6 +385,9 @@ impl Database {
             )?;
             return Ok(true);
         }
+        // Back from another device: no longer deleted here (or its file says both).
+        self.conn
+            .execute("DELETE FROM playlist_deleted WHERE sync_id = ?1", [sync_id])?;
         let name = str_of(playlist, "name").unwrap_or_default();
         let seconds = modified / 1000;
         let id = match local {
@@ -725,9 +728,10 @@ impl Database {
                     "deleted": false, "songs": songs
                 }));
             }
-            let mut stmt = self
-                .conn
-                .prepare("SELECT sync_id, at FROM playlist_deleted")?;
+            let mut stmt = self.conn.prepare(
+                "SELECT sync_id, at FROM playlist_deleted d
+                     WHERE NOT EXISTS (SELECT 1 FROM playlist p WHERE p.sync_id = d.sync_id)",
+            )?;
             for row in stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })? {
@@ -869,6 +873,35 @@ mod tests {
             )
             .unwrap();
         (serde_json::from_str(&text).unwrap(), result)
+    }
+
+    #[test]
+    fn a_playlist_back_from_another_device_is_written_alive_only() {
+        let mut db = db_with_songs();
+        db.conn
+            .execute(
+                "INSERT INTO playlist_deleted (sync_id, at) VALUES ('p1', 30000)",
+                [],
+            )
+            .unwrap();
+        let files = [phone(json!({ "playlists": [{ "id": "p1", "name": "Back",
+            "created": 1000, "modified": 40000, "deleted": false, "songs": [] }] }))];
+        let (mine, _) = sync(&mut db, &files);
+        let listed: Vec<(&str, bool)> = mine["playlists"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["id"] == "p1")
+            .map(|p| (p["id"].as_str().unwrap(), p["deleted"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(listed, [("p1", false)]);
+        let markers: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM playlist_deleted", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(markers, 0);
     }
 
     #[test]

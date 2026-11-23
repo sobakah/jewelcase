@@ -6,7 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
-The library database changes (for the sync with Jewelcase Mobile).
+## [0.13.0] — 2026-11-23
+
+The library database changes (for the sync with Jewelcase Mobile); 0.12.0 can't open it any
+more.
 
 ### Added
 
@@ -238,7 +241,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.12.0...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.13.0...HEAD
+[0.13.0]: https://github.com/sobakah/jewelcase/compare/0.12.0...0.13.0
 [0.12.0]: https://github.com/sobakah/jewelcase/compare/0.11.0...0.12.0
 [0.11.0]: https://github.com/sobakah/jewelcase/releases/tag/0.11.0
 [0.10.0]: https://github.com/sobakah/jewelcase/releases/tag/0.10.0
