@@ -158,29 +158,44 @@ fn file_names(folder: &gio::File) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// Writes this device's file, whole or not at all: a temporary file moved into place.
+/// Writes this device's file. On a local folder a temporary file is moved into place, so a
+/// reader never sees half of it. On a phone (`mtp://`, or a FUSE path over it: gvfs's, or the
+/// portal's when the sync folder is on the phone) renames can't be trusted: gvfs's MTP backend
+/// keeps the old name pointing at the renamed file, so the next sync's write to the temporary
+/// file went into this one and its move deleted both. There the file is deleted and written
+/// anew, without a rename.
 fn write_own(folder: &gio::File, device: &str, text: &str) -> Result<(), String> {
-    write_own_with(folder, device, text, |from, to| {
-        from.move_(
-            to,
-            gio::FileCopyFlags::OVERWRITE,
-            gio::Cancellable::NONE,
-            None,
-        )
-    })
+    let fs_type = folder
+        .query_filesystem_info(gio::FILE_ATTRIBUTE_FILESYSTEM_TYPE, gio::Cancellable::NONE)
+        .ok()
+        .and_then(|info| info.attribute_string(gio::FILE_ATTRIBUTE_FILESYSTEM_TYPE))
+        .map(String::from);
+    write_own_on(folder, device, text, fs_type.as_deref())
 }
 
-/// `write_own` with the move given. A phone's folder through gvfs's FUSE mount (the portal's
-/// path when the sync folder is on the phone) takes a rename onto an existing file as done
-/// but only deletes the target, the temporary file keeping its name: then it is moved again,
-/// onto no file now.
-fn write_own_with(
+/// `write_own` on a folder whose filesystem type is `fs_type` (GIO's `filesystem::type`).
+fn write_own_on(
     folder: &gio::File,
     device: &str,
     text: &str,
-    move_file: impl Fn(&gio::File, &gio::File) -> Result<(), glib::Error>,
+    fs_type: Option<&str>,
 ) -> Result<(), String> {
     let own = folder.child(sync::file_name(device));
+    let error = |e: glib::Error| format!("{}: {e}", own.parse_name());
+    if !renames_safely(fs_type) {
+        match own.delete(gio::Cancellable::NONE) {
+            Err(e) if !e.matches(gio::IOErrorEnum::NotFound) => return Err(error(e)),
+            _ => {}
+        }
+        // Not replace_contents: on a FUSE path GLib replaces a file through a rename too.
+        let stream = own
+            .create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE)
+            .map_err(error)?;
+        stream
+            .write_all(text.as_bytes(), gio::Cancellable::NONE)
+            .map_err(error)?;
+        return stream.close(gio::Cancellable::NONE).map_err(error);
+    }
     let temp = folder.child(format!("{}.tmp", sync::file_name(device)));
     temp.replace_contents(
         text.as_bytes(),
@@ -189,13 +204,21 @@ fn write_own_with(
         gio::FileCreateFlags::NONE,
         gio::Cancellable::NONE,
     )
-    .map_err(|e| e.to_string())?;
-    move_file(&temp, &own).map_err(|e| e.to_string())?;
-    if temp.query_exists(gio::Cancellable::NONE) {
-        tracing::info!("{} stayed after its move: moved again", temp.parse_name());
-        move_file(&temp, &own).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    .map_err(error)?;
+    temp.move_(
+        &own,
+        gio::FileCopyFlags::OVERWRITE,
+        gio::Cancellable::NONE,
+        None,
+    )
+    .map_err(error)
+}
+
+/// Whether a rename onto an existing file can be trusted on a filesystem of this type: not on
+/// a phone through gvfs (`mtpfs`), nor through FUSE (gvfs's mount, or the portal's, which may
+/// be over it), nor when the type is unknown.
+fn renames_safely(fs_type: Option<&str>) -> bool {
+    fs_type.is_some_and(|t| t != "mtpfs" && t != "fuse" && !t.starts_with("fuse."))
 }
 
 /// The folder on a connected phone that holds another device's sync file (`own`: this
@@ -422,29 +445,34 @@ mod tests {
         );
     }
 
-    /// gvfs's FUSE mount of a phone: a rename onto an existing file deletes that file and
-    /// leaves the source where it was, and says it worked.
-    fn fuse_mtp_move(from: &gio::File, to: &gio::File) -> Result<(), glib::Error> {
-        if to.query_exists(gio::Cancellable::NONE) {
-            return to.delete(gio::Cancellable::NONE);
+    #[test]
+    fn a_phones_folder_is_written_without_a_rename() {
+        for fs_type in [None, Some("mtpfs"), Some("fuse"), Some("fuse.portal")] {
+            assert!(!renames_safely(fs_type), "{fs_type:?}");
         }
-        from.move_(to, gio::FileCopyFlags::NONE, gio::Cancellable::NONE, None)
+        for fs_type in ["btrfs", "ext4", "tmpfs", "xfs"] {
+            assert!(renames_safely(Some(fs_type)), "{fs_type}");
+        }
     }
 
     #[test]
-    fn its_file_lands_under_its_name_on_a_phone_through_fuse() {
+    fn its_file_is_written_anew_on_a_phone() {
         let folder = tempfile::tempdir().unwrap();
-        write(&folder.path().join("jewelcase-sync-desktop.json"), "old");
+        write(
+            &folder.path().join("jewelcase-sync-desktop.json"),
+            "old, and longer",
+        );
         let dir = gio::File::for_path(folder.path());
 
-        write_own_with(&dir, "desktop", "new", fuse_mtp_move).unwrap();
-        let own = folder.path().join("jewelcase-sync-desktop.json");
-        assert_eq!(std::fs::read_to_string(own).unwrap(), "new");
-        assert!(
-            !folder
-                .path()
-                .join("jewelcase-sync-desktop.json.tmp")
-                .exists()
-        );
+        for text in ["new", "newer"] {
+            write_own_on(&dir, "desktop", text, Some("mtpfs")).unwrap();
+            let own = folder.path().join("jewelcase-sync-desktop.json");
+            assert_eq!(std::fs::read_to_string(own).unwrap(), text);
+        }
+        let names: Vec<_> = std::fs::read_dir(folder.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["jewelcase-sync-desktop.json"]);
     }
 }

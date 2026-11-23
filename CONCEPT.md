@@ -348,7 +348,8 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
 
 - Preferences → Library → *Jewelcase Mobile*: *Sync Folder* (`sync-folder`) and *Sync Now*
   with the last sync's outcome. Jewelcase writes `jewelcase-sync-<device>.json` there
-  (`sync-device`: a random UUID made once; a temporary file renamed into place) and reads the
+  (`sync-device`: a random UUID made once; a temporary file renamed into place, except on a
+  phone, below) and reads the
   others. It syncs at start, when the window comes back (at most every five minutes), at quit,
   and with *Sync Now* (`app/src/sync.rs`).
 - **A phone connected over USB** (2026-11-23, the owner's wish): GIO's volume monitor reports
@@ -359,9 +360,12 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
   through GIO's `mtp://` off the main loop, the merge on it. The phone's name comes from the
   MTP volume monitor's mount (gvfs's own, shadowed, is just "mtp"). The Flatpak needs
   `--talk-name=org.gtk.vfs.*` and `--filesystem=xdg-run/gvfsd` for it.
-- Through gvfs's FUSE mount of a phone (the portal's path when the sync folder is chosen on
-  the phone), a rename onto an existing file deletes that file and leaves the source under its
-  name while reporting success: the temporary file is moved again when it is still there.
+- **No renames on a phone** (filesystem type `mtpfs`, `fuse` or `fuse.*`, or unknown): gvfs's
+  MTP backend keeps a renamed file's old name pointing at it, through `mtp://` and FUSE alike.
+  So the next sync's write to `….json.tmp` went into the `.json`, and moving the one onto the
+  other deleted both while reporting success: the phone never had the desktop's file (found
+  2026-11-23). There Jewelcase deletes its file and creates it anew (`create`, not
+  `replace_contents`, which renames on a FUSE path too). Tried on the phone through both.
 - Merged (`core/src/db/sync.rs`, `Database::sync`): the user's choices for Spotify songs
   (*user_matched* with its file, *user_pinned_spotify*; forgotten ones too) by the latest time
   per song, applied to every playlist entry of the song (Jewelcase keeps choices per entry);
