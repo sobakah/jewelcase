@@ -2049,10 +2049,20 @@ impl JewelcaseWindow {
             .unwrap_or(8);
         let actions = std::env::var("JEWELCASE_SCREENSHOT_ACTIONS").unwrap_or_default();
         // `JEWELCASE_SCREENSHOT_SETTINGS="mix-similar=true mix-every=1"`:
-        // GSettings values (GVariant text), set first.
+        // GSettings values (GVariant text), set first; one a line instead when
+        // there are line breaks, so a value may hold spaces (`@a(ssx) [...]`).
         if let Ok(values) = std::env::var("JEWELCASE_SCREENSHOT_SETTINGS") {
             let settings = self.settings();
-            for pair in values.split_whitespace() {
+            let pairs: Vec<&str> = if values.contains('\n') {
+                values
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .collect()
+            } else {
+                values.split_whitespace().collect()
+            };
+            for pair in pairs {
                 let Some((key, value)) = pair.split_once('=') else {
                     continue;
                 };

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use adw::prelude::*;
 use gettextrs::gettext;
 use gtk::{gio, glib};
-use jewelcase_core::db::sync::{self, Device, SyncResult};
+use jewelcase_core::db::sync::{self, Device, SyncDevice, SyncResult};
 
 use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
@@ -71,13 +71,72 @@ fn finish(result: Result<SyncResult, String>) -> Result<SyncResult, String> {
     LAST_RUN.set(glib::real_time() / 1_000_000);
     match &result {
         Ok(done) => {
-            tracing::info!("Synced with {:?}, skipped {:?}", done.devices, done.skipped);
+            tracing::info!(
+                "Synced with {:?}, skipped {:?}",
+                done.synced(),
+                done.skipped
+            );
+            let found: Vec<(String, String, i64)> = done
+                .devices
+                .iter()
+                .map(|d| (d.id.clone(), d.name.clone(), d.written))
+                .collect();
+            if let Err(err) =
+                gio::Settings::new(APP_ID).set_value("sync-devices", &found.to_variant())
+            {
+                tracing::warn!("Cannot keep the devices in the sync folder: {err}");
+            }
             JewelcaseApplication::get().library().reload_playlists();
         }
         Err(err) => tracing::warn!("The sync with Jewelcase Mobile failed: {err}"),
     }
     LAST.set(Some(result.clone()));
     result
+}
+
+/// The other devices found at the last sync (newest first), each synced unless turned off.
+pub fn devices() -> Vec<SyncDevice> {
+    let settings = gio::Settings::new(APP_ID);
+    let off = settings.strv("sync-off-devices");
+    settings
+        .get::<Vec<(String, String, i64)>>("sync-devices")
+        .into_iter()
+        .map(|(id, name, written)| SyncDevice {
+            synced: !off.iter().any(|o| o.as_str() == id),
+            id,
+            name,
+            written,
+        })
+        .collect()
+}
+
+/// Turns syncing with `device` on (and syncs, to read it now) or off.
+pub fn set_synced(device: &str, on: bool) {
+    let settings = gio::Settings::new(APP_ID);
+    let mut off: Vec<String> = settings
+        .strv("sync-off-devices")
+        .iter()
+        .map(|o| o.to_string())
+        .filter(|o| o != device)
+        .collect();
+    if !on {
+        off.push(device.to_owned());
+    }
+    if let Err(err) = settings.set_strv("sync-off-devices", off) {
+        tracing::warn!("Cannot keep the devices turned off: {err}");
+    } else if on {
+        sync_now();
+    }
+}
+
+/// This installation's name in its sync file: the Devel build's its own, so the other
+/// devices tell them apart.
+fn device_name() -> &'static str {
+    if crate::config::is_development() {
+        "Jewelcase (Development)"
+    } else {
+        "Jewelcase"
+    }
 }
 
 /// This installation's ID in the sync files, made at the first sync.
@@ -107,12 +166,18 @@ fn merge(
     let Some(mut db) = library.db() else {
         return Err("the library isn't open".into());
     };
+    let off: Vec<String> = settings
+        .strv("sync-off-devices")
+        .iter()
+        .map(|o| o.to_string())
+        .collect();
     db.sync(
         &Device {
             id: device,
-            name: "Jewelcase",
+            name: device_name(),
         },
         files,
+        &off,
         &folders,
         aliases.as_deref(),
         sync::now_ms(),

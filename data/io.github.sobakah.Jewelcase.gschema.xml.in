@@ -136,6 +136,16 @@
       <summary>Sync device ID</summary>
       <description>This installation's random ID in the sync files, made once.</description>
     </key>
+    <key name="sync-devices" type="a(ssx)">
+      <default>[]</default>
+      <summary>Devices in the sync folder</summary>
+      <description>The other devices' sync files found at the last sync: ID, name, and when written (Unix ms).</description>
+    </key>
+    <key name="sync-off-devices" type="as">
+      <default>[]</default>
+      <summary>Devices not synced with</summary>
+      <description>The IDs of devices whose sync files aren't read (turned off in Preferences).</description>
+    </key>
     <key name="library-folders" type="as">
       <default>[]</default>
       <summary>Music folders</summary>

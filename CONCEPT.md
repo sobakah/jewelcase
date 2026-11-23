@@ -360,6 +360,12 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
   through GIO's `mtp://` off the main loop, the merge on it. The phone's name comes from the
   MTP volume monitor's mount (gvfs's own, shadowed, is just "mtp"). The Flatpak needs
   `--talk-name=org.gtk.vfs.*` and `--filesystem=xdg-run/gvfsd` for it.
+- **Devices in the folder** (2026-11-23, the owner's wish): the last sync's other devices
+  (`sync-devices`: ID, name, written) are rows of switches under *Sync With a Connected Phone*;
+  turned off (`sync-off-devices`), a device's file isn't merged but still listed, and turning
+  one on syncs. What came from a device stays. Devices pass on what they merged (all but plays),
+  so keeping one apart takes turning it off on each. The Devel build calls itself "Jewelcase
+  (Development)" in its file, Jewelcase Mobile's debug build "Jewelcase Mobile Dev".
 - **No renames on a phone** (filesystem type `mtpfs`, `fuse` or `fuse.*`, or unknown): gvfs's
   MTP backend keeps a renamed file's old name pointing at it, through `mtp://` and FUSE alike.
   So the next sync's write to `….json.tmp` went into the `.json`, and moving the one onto the

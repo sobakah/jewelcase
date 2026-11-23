@@ -130,6 +130,9 @@ mod imp {
         #[template_child]
         pub analysis_pause: TemplateChild<gtk::Button>,
         pub folder_rows: RefCell<Vec<adw::ActionRow>>,
+        #[template_child]
+        pub sync_group: TemplateChild<adw::PreferencesGroup>,
+        pub sync_device_rows: RefCell<Vec<adw::PreferencesRow>>,
         pub settings: OnceCell<gio::Settings>,
     }
 
@@ -697,9 +700,66 @@ impl PreferencesDialog {
             Some(Ok(done)) if done.devices.is_empty() => {
                 gettext("Synced; no file of Jewelcase Mobile in the folder yet")
             }
-            Some(Ok(done)) => gettext("Synced with {}").replace("{}", &done.devices.join(", ")),
+            Some(Ok(done)) if done.synced().is_empty() => {
+                gettext("Synced; every other device is turned off below")
+            }
+            Some(Ok(done)) => gettext("Synced with {}").replace("{}", &done.synced().join(", ")),
         };
         imp.sync_status_row.set_subtitle(&status);
+        self.show_sync_devices();
+    }
+
+    /// The other devices in the sync folder, each a switch: turned off, its file isn't read.
+    fn show_sync_devices(&self) {
+        let imp = self.imp();
+        for row in imp.sync_device_rows.take() {
+            imp.sync_group.remove(&row);
+        }
+        let devices = crate::sync::devices();
+        if devices.is_empty() {
+            return;
+        }
+        let mut rows: Vec<adw::PreferencesRow> = vec![
+            adw::ActionRow::builder()
+                .title(gettext("Devices in the Folder"))
+                .subtitle(gettext(
+                    "A device turned off isn’t read; what came from it stays. Devices pass on what they read, so turn a device off on each of them to keep it apart.",
+                ))
+                .build()
+                .upcast(),
+        ];
+        for device in &devices {
+            let written = crate::format::days_ago(device.written / 1000);
+            // Translators: {} is when, e.g. "today" or "3 days ago".
+            let mut subtitle = gettext("Wrote {}").replace("{}", &written);
+            if devices.iter().filter(|d| d.name == device.name).count() > 1 {
+                subtitle = format!("{subtitle} · {}", &device.id[..device.id.len().min(8)]);
+            }
+            let row = adw::SwitchRow::builder()
+                .title(device.name.as_str())
+                .subtitle(subtitle)
+                .active(device.synced)
+                .build();
+            let id = device.id.clone();
+            row.connect_active_notify(glib::clone!(
+                #[weak(rename_to = dialog)]
+                self,
+                move |row| {
+                    crate::sync::set_synced(&id, row.is_active());
+                    // Not from within the row's own signal: the rows are made anew.
+                    glib::idle_add_local_once(glib::clone!(
+                        #[weak]
+                        dialog,
+                        move || dialog.show_sync_state()
+                    ));
+                }
+            ));
+            rows.push(row.upcast());
+        }
+        for row in &rows {
+            imp.sync_group.add(row);
+        }
+        imp.sync_device_rows.replace(rows);
     }
 
     async fn add_folder(&self) {

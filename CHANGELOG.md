@@ -17,6 +17,8 @@ The library database changes (for the sync with Jewelcase Mobile).
 - **A phone connected over USB** with Jewelcase Mobile's sync file in its Music, Download or
   Documents folder: Jewelcase offers to sync with it, or syncs without asking (Preferences →
   Library → Jewelcase Mobile → *Sync With a Connected Phone*).
+- **Choose the devices to sync with**: Preferences → Library → Jewelcase Mobile lists the
+  other devices in the sync folder, each with a switch; a device turned off isn't read.
 
 ## [0.12.0] — 2026-11-22
 

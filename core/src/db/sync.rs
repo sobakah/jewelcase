@@ -41,21 +41,44 @@ pub struct Device<'a> {
     pub name: &'a str,
 }
 
-/// What a sync did: the other devices read (by name) and the files skipped.
+/// Another device's file in the folder; `synced`: read, not turned off in Preferences.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDevice {
+    pub id: String,
+    pub name: String,
+    /// When it was written, Unix ms.
+    pub written: i64,
+    pub synced: bool,
+}
+
+/// What a sync did: the other devices' files found (newest first) and the files skipped.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncResult {
-    pub devices: Vec<String>,
+    pub devices: Vec<SyncDevice>,
     pub skipped: Vec<String>,
+}
+
+impl SyncResult {
+    /// The names of the devices synced with.
+    pub fn synced(&self) -> Vec<&str> {
+        self.devices
+            .iter()
+            .filter(|d| d.synced)
+            .map(|d| d.name.as_str())
+            .collect()
+    }
 }
 
 impl Database {
     /// Merges the other devices' files (`files`: name and text; this device's own is passed
-    /// over) and returns this device's file. `folders`: the library folders, which paths are
-    /// relative to in the files; `aliases`: lyrembed's list to pass on.
+    /// over) but those of the devices `off` (their IDs, turned off in Preferences; still
+    /// listed), and returns this device's file. `folders`: the library folders, which paths
+    /// are relative to in the files; `aliases`: lyrembed's list to pass on.
     pub fn sync(
         &mut self,
         device: &Device,
         files: &[(String, String)],
+        off: &[String],
         folders: &[PathBuf],
         aliases: Option<&str>,
         now_ms: i64,
@@ -75,13 +98,20 @@ impl Database {
         others.sort_by_key(|f| f.get("written").and_then(Value::as_i64).unwrap_or(0));
         self.give_sync_ids()?;
         for file in &others {
-            let name = str_of(file, "name")
-                .filter(|n| !n.is_empty())
-                .or(str_of(file, "device"))
-                .unwrap_or_default();
-            result.devices.push(name.to_owned());
-            self.merge(file, device, folders)?;
+            let id = str_of(file, "device").unwrap_or_default();
+            let name = str_of(file, "name").filter(|n| !n.is_empty()).unwrap_or(id);
+            let synced = !off.iter().any(|o| o == id);
+            result.devices.push(SyncDevice {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                written: file.get("written").and_then(Value::as_i64).unwrap_or(0),
+                synced,
+            });
+            if synced {
+                self.merge(file, device, folders)?;
+            }
         }
+        result.devices.reverse();
         let text = self.snapshot(device, folders, aliases, now_ms)?.to_string();
         Ok((text, result))
     }
@@ -820,16 +850,68 @@ mod tests {
     }
 
     fn sync(db: &mut Database, files: &[(String, String)]) -> (Value, SyncResult) {
+        sync_but(db, files, &[])
+    }
+
+    fn sync_but(
+        db: &mut Database,
+        files: &[(String, String)],
+        off: &[String],
+    ) -> (Value, SyncResult) {
         let (text, result) = db
             .sync(
                 &ME,
                 files,
+                off,
                 &[PathBuf::from("/m")],
                 Some("TXT = TOMORROW X TOGETHER"),
                 9_000,
             )
             .unwrap();
         (serde_json::from_str(&text).unwrap(), result)
+    }
+
+    #[test]
+    fn a_device_turned_off_is_listed_but_not_read() {
+        let mut db = db_with_songs();
+        let play = |id: &str| {
+            json!({ "id": id, "played": 200, "msPlayed": 60_000, "title": "Send My Love",
+            "artist": "Adele", "path": "Adele/25/02.flac" })
+        };
+        let mut dev = json!({ "format": FORMAT, "version": 1, "device": "dev",
+            "name": "Jewelcase Mobile Dev", "written": 6_000, "plays": [play("dev:1")] });
+        let files = [
+            phone(json!({ "plays": [play("phone:1")] })),
+            (file_name("dev"), dev.take().to_string()),
+        ];
+        let (_, result) = sync_but(&mut db, &files, &["dev".to_owned()]);
+        assert_eq!(
+            result.devices,
+            [
+                SyncDevice {
+                    id: "dev".into(),
+                    name: "Jewelcase Mobile Dev".into(),
+                    written: 6_000,
+                    synced: false
+                },
+                SyncDevice {
+                    id: "phone".into(),
+                    name: "Jewelcase Mobile".into(),
+                    written: 5_000,
+                    synced: true
+                },
+            ]
+        );
+        assert_eq!(result.synced(), ["Jewelcase Mobile"]);
+        let remote: Vec<String> = db
+            .conn
+            .prepare("SELECT remote_id FROM play_log WHERE remote_id IS NOT NULL")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(remote, ["phone:1"]);
     }
 
     #[test]
@@ -849,7 +931,7 @@ mod tests {
         )];
         let (mine, result) = sync(&mut db, &files);
         sync(&mut db, &files);
-        assert_eq!(result.devices, ["Jewelcase Mobile"]);
+        assert_eq!(result.synced(), ["Jewelcase Mobile"]);
         let remote: Vec<(String, i64)> = db
             .conn
             .prepare("SELECT remote_id, track_id FROM play_log WHERE remote_id IS NOT NULL")
@@ -1042,7 +1124,7 @@ mod tests {
             FROM_THE_PHONE.to_owned(),
         )];
         let (file, result) = sync(&mut db, &files);
-        assert_eq!(result.devices, ["Jewelcase Mobile"]);
+        assert_eq!(result.synced(), ["Jewelcase Mobile"]);
         let id: i64 = db
             .conn
             .query_row(
