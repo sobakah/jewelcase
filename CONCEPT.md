@@ -351,6 +351,17 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
   (`sync-device`: a random UUID made once; a temporary file renamed into place) and reads the
   others. It syncs at start, when the window comes back (at most every five minutes), at quit,
   and with *Sync Now* (`app/src/sync.rs`).
+- **A phone connected over USB** (2026-11-23, the owner's wish): GIO's volume monitor reports
+  MTP mounts (at start and when added); away from the main loop Jewelcase looks for another
+  device's sync file in each storage of the phone and its Music, Download and Documents
+  folders. Found, a toast offers *Sync* (until the phone goes), or, with
+  `sync-connected-phone` (*Sync With a Connected Phone*), it syncs at once: reading and writing
+  through GIO's `mtp://` off the main loop, the merge on it. The phone's name comes from the
+  MTP volume monitor's mount (gvfs's own, shadowed, is just "mtp"). The Flatpak needs
+  `--talk-name=org.gtk.vfs.*` and `--filesystem=xdg-run/gvfsd` for it.
+- Through gvfs's FUSE mount of a phone (the portal's path when the sync folder is chosen on
+  the phone), a rename onto an existing file deletes that file and leaves the source under its
+  name while reporting success: the temporary file is moved again when it is still there.
 - Merged (`core/src/db/sync.rs`, `Database::sync`): the user's choices for Spotify songs
   (*user_matched* with its file, *user_pinned_spotify*; forgotten ones too) by the latest time
   per song, applied to every playlist entry of the song (Jewelcase keeps choices per entry);

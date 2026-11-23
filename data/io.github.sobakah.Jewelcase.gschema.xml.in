@@ -126,6 +126,11 @@
       <summary>Sync folder</summary>
       <description>The folder Jewelcase and Jewelcase Mobile exchange their sync files in; empty: no sync.</description>
     </key>
+    <key name="sync-connected-phone" type="b">
+      <default>false</default>
+      <summary>Sync with a connected phone without asking</summary>
+      <description>When a phone connected over USB holds Jewelcase Mobile's sync file, sync with it at once instead of offering to.</description>
+    </key>
     <key name="sync-device" type="s">
       <default>''</default>
       <summary>Sync device ID</summary>

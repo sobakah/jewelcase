@@ -125,6 +125,8 @@ mod imp {
                         }
                     });
                     window.present();
+                    // A phone connected over USB with Jewelcase Mobile's sync file.
+                    crate::sync::watch_phones();
                 }
             }
         }

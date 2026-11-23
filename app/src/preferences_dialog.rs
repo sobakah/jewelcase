@@ -36,6 +36,8 @@ mod imp {
         #[template_child]
         pub sync_status_row: TemplateChild<adw::ActionRow>,
         #[template_child]
+        pub sync_phone_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub crossfade_row: TemplateChild<adw::SpinRow>,
@@ -175,6 +177,9 @@ mod imp {
             );
             settings
                 .bind("restore-queue", &*self.restore_queue_row, "active")
+                .build();
+            settings
+                .bind("sync-connected-phone", &*self.sync_phone_row, "active")
                 .build();
             settings
                 .bind("listening-stats", &*self.stats_row, "active")

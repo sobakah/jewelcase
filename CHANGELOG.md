@@ -14,6 +14,9 @@ The library database changes (for the sync with Jewelcase Mobile).
   reach (a cloud folder kept in step, or one you copy), and your choices of which file plays a
   Spotify song, MusicBrainz's ISRCs, LRCLIB's lyrics, the listening statistics and your
   playlists become the same on the computer and the phone.
+- **A phone connected over USB** with Jewelcase Mobile's sync file in its Music, Download or
+  Documents folder: Jewelcase offers to sync with it, or syncs without asking (Preferences →
+  Library → Jewelcase Mobile → *Sync With a Connected Phone*).
 
 ## [0.12.0] — 2026-11-22
 

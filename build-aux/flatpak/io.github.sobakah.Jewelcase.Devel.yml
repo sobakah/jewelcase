@@ -43,6 +43,10 @@ finish-args:
   # on the host.
   - --talk-name=io.github.sobakah.cdport
   - --talk-name=io.github.sobakah.lyrembed
+  # Jewelcase Mobile's sync file on a phone connected over USB (MTP,
+  # through GNOME's gvfs: its volume monitors and daemon).
+  - --talk-name=org.gtk.vfs.*
+  - --filesystem=xdg-run/gvfsd
   # Song analysis waits while on battery.
   - --system-talk-name=org.freedesktop.UPower
 

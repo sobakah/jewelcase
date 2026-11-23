@@ -1713,6 +1713,10 @@ impl JewelcaseWindow {
         imp_toast(self, message);
     }
 
+    pub fn add_toast(&self, toast: adw::Toast) {
+        self.imp().toast_overlay.add_toast(toast);
+    }
+
     fn update_tool_banners(&self, tools: &crate::tools::Tools) {
         let imp = self.imp();
         let status = tools.page_status();
