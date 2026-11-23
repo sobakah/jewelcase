@@ -251,7 +251,6 @@ mod imp {
                 .build();
             self.setup_analysis(&settings);
             self.setup_integrations(&settings);
-            obj.show_sync_state();
             // Answering here counts as answering the Artists view's question.
             self.online_row.connect_active_notify(glib::clone!(
                 #[weak]
@@ -290,6 +289,8 @@ mod imp {
             }
             self.settings.set(settings).expect("settings are set once");
             obj.refresh_folders();
+            // Reads the settings: only once they're set above.
+            obj.show_sync_state();
             obj.add(&crate::spotify::preferences::page());
         }
     }
