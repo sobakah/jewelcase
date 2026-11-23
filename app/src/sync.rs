@@ -287,26 +287,53 @@ fn renames_safely(fs_type: Option<&str>) -> bool {
 }
 
 /// The folder on a connected phone that holds another device's sync file (`own`: this
-/// device's file name, which doesn't count): each storage (an MTP mount's top folders), and
-/// in it Music, Download and Documents.
+/// device's file name, which doesn't count): each storage (an MTP mount's top folders), in it
+/// Music, Download and Documents, and in each of those a hidden `.sync` folder; with files in
+/// several, the one with the newest (an old file left in one place doesn't win).
 fn find_on_phone(root: &gio::File, own: &str) -> Option<gio::File> {
-    let has_other = |folder: &gio::File| {
-        file_names(folder)
-            .is_ok_and(|names| names.iter().any(|name| is_sync_file(name) && name != own))
-    };
     let mut storages = file_names(root).unwrap_or_default();
     storages.sort();
+    let mut best: Option<(u64, gio::File)> = None;
     for storage in storages {
         let storage = root.child(storage);
-        let candidates =
+        let places =
             std::iter::once(storage.clone()).chain(PHONE_FOLDERS.iter().map(|f| storage.child(f)));
-        for folder in candidates {
-            if has_other(&folder) {
-                return Some(folder);
+        for place in places {
+            for folder in [place.child(".sync"), place] {
+                let Some(newest) = newest_other(&folder, own) else {
+                    continue;
+                };
+                if best.as_ref().is_none_or(|(at, _)| newest > *at) {
+                    best = Some((newest, folder));
+                }
             }
         }
     }
-    None
+    best.map(|(_, folder)| folder)
+}
+
+/// When another device's sync file in `folder` last changed (the newest; Unix seconds), if any.
+fn newest_other(folder: &gio::File, own: &str) -> Option<u64> {
+    let children = folder
+        .enumerate_children(
+            &format!(
+                "{},{}",
+                gio::FILE_ATTRIBUTE_STANDARD_NAME,
+                gio::FILE_ATTRIBUTE_TIME_MODIFIED
+            ),
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::Cancellable::NONE,
+        )
+        .ok()?;
+    children
+        .flatten()
+        .filter(|info| {
+            let name = info.name();
+            let name = name.to_string_lossy();
+            is_sync_file(&name) && name != own
+        })
+        .map(|info| info.attribute_uint64(gio::FILE_ATTRIBUTE_TIME_MODIFIED))
+        .max()
 }
 
 /// Watches for phones connected over USB (once, with the first window): those already there
@@ -464,6 +491,33 @@ mod tests {
         write(&storage.join("Download/notes.txt"), "");
         write(&storage.join("Music/jewelcase-sync-phone.json"), "{}");
         let root = gio::File::for_path(phone.path());
+        let found = find_on_phone(&root, "jewelcase-sync-desktop.json").unwrap();
+        assert_eq!(found.path().unwrap(), storage.join("Music"));
+    }
+
+    #[test]
+    fn the_folder_with_the_newest_file_wins_also_a_hidden_sync_folder() {
+        let phone = tempfile::tempdir().unwrap();
+        let storage = phone.path().join("Internal shared storage");
+        let old = storage.join("Music/jewelcase-sync-phone.json");
+        let new = storage.join("Music/.sync/jewelcase-sync-phone.json");
+        write(&old, "{}");
+        write(&new, "{}");
+        let at = |path: &std::path::Path, secs: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        at(&old, 1_000);
+        at(&new, 2_000);
+        let root = gio::File::for_path(phone.path());
+        let found = find_on_phone(&root, "jewelcase-sync-desktop.json").unwrap();
+        assert_eq!(found.path().unwrap(), storage.join("Music/.sync"));
+        // The other way round: the one in Music.
+        at(&old, 3_000);
         let found = find_on_phone(&root, "jewelcase-sync-desktop.json").unwrap();
         assert_eq!(found.path().unwrap(), storage.join("Music"));
     }

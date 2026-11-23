@@ -8,6 +8,11 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ### Fixed
 
+- A phone connected over USB is synced with the folder holding the newest sync file, also a
+  hidden `.sync` folder in its Music, Download or Documents folder; an old file left elsewhere
+  is no longer taken.
+- A published playlist without a cover of its own shows Spotify's, so a cover changed on the
+  phone or on Spotify shows here too.
 - A playlist published to Spotify shows once on the computer and the phone, also when it was
   published on the other one (it came twice: as the synced playlist and as the Spotify
   playlist).

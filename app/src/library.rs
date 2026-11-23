@@ -1094,10 +1094,14 @@ impl Library {
             .map(|playlist| {
                 // Spotify playlists show Spotify's cover (its own image, or
                 // its mosaic of the whole playlist), not a mosaic of the
-                // few songs that are in the library.
-                let spotify = (playlist.source == "spotify")
-                    .then(|| playlist.spotify_cover_key.clone())
-                    .flatten();
+                // few songs that are in the library; so do published ones
+                // without a cover of their own (one changed on the phone or
+                // on Spotify shows here).
+                let spotify = spotify_cover(
+                    &playlist.source,
+                    playlist.spotify_id.is_some(),
+                    playlist.spotify_cover_key.clone(),
+                );
                 let cover = playlist.custom_cover_key.clone().or(spotify).or_else(|| {
                     match playlist.cover_keys.len() {
                         // Not loaded yet: Spotify's, if there is one.
@@ -1809,5 +1813,25 @@ impl Library {
 impl Default for Library {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The cover Spotify gives a playlist that shows it: a Spotify playlist, or a local one linked
+/// with one (published, here or on the phone).
+fn spotify_cover(source: &str, linked: bool, key: Option<String>) -> Option<String> {
+    (source == "spotify" || linked).then_some(key).flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_published_playlist_shows_spotifys_cover_too() {
+        let key = || Some("s-key".to_owned());
+        assert_eq!(spotify_cover("spotify", true, key()), key());
+        assert_eq!(spotify_cover("local", true, key()), key());
+        assert_eq!(spotify_cover("local", false, key()), None);
+        assert_eq!(spotify_cover("local", true, None), None);
     }
 }

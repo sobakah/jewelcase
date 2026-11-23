@@ -355,7 +355,9 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
 - **A phone connected over USB** (2026-11-23, the owner's wish): GIO's volume monitor reports
   MTP mounts (at start and when added); away from the main loop Jewelcase looks for another
   device's sync file in each storage of the phone and its Music, Download and Documents
-  folders. Found, a toast offers *Sync* (until the phone goes), or, with
+  folders, and a hidden `.sync` folder in each of those; with files in several, the folder with
+  the newest one (2026-11-23: a file left in Music outvoted the phone's `Music/.sync`). Found, a
+  toast offers *Sync* (until the phone goes), or, with
   `sync-connected-phone` (*Sync With a Connected Phone*), it syncs at once: reading and writing
   through GIO's `mtp://` off the main loop, the merge on it. The phone's name comes from the
   MTP volume monitor's mount (gvfs's own, shadowed, is just "mtp"). The Flatpak needs
