@@ -6,6 +6,12 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A playlist published to Spotify shows once on the computer and the phone, also when it was
+  published on the other one (it came twice: as the synced playlist and as the Spotify
+  playlist).
+
 ## [0.13.0] — 2026-11-23
 
 The library database changes (for the sync with Jewelcase Mobile); 0.12.0 can't open it any

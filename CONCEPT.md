@@ -360,6 +360,13 @@ Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
   through GIO's `mtp://` off the main loop, the merge on it. The phone's name comes from the
   MTP volume monitor's mount (gvfs's own, shadowed, is just "mtp"). The Flatpak needs
   `--talk-name=org.gtk.vfs.*` and `--filesystem=xdg-run/gvfsd` for it.
+- **Published playlists across devices** (2026-11-23): a playlist's `"spotify"` field in the
+  sync file names the Spotify playlist it is linked with (Jewelcase's published ones, Jewelcase
+  Mobile's *Create on Spotify*). Read, this side's own copy of that Spotify playlist (a mirror) is
+  deleted, unless its changes still wait to be sent, the synced playlist takes the link with no
+  snapshot (the next Spotify sync reads it in), and its songs keep their URIs also when they
+  play from a file (`matched`). Written for each linked playlist; a file without it doesn't
+  unlink. Each device sends only its own changes to Spotify.
 - **Devices in the folder** (2026-11-23, the owner's wish): the last sync's other devices
   (`sync-devices`: ID, name, written) are rows of switches under *Sync With a Connected Phone*;
   turned off (`sync-off-devices`), a device's file isn't merged but still listed, and turning

@@ -412,6 +412,42 @@ impl Database {
                 id
             }
         };
+        // Linked with a Spotify playlist (published on either side): this playlist stands for it,
+        // its copy of the Spotify playlist goes (unless its own changes wait to be sent), and the
+        // next Spotify sync reads it in (no snapshot). A file without the link keeps this one's.
+        let mut linked: Option<String> = self.conn.query_row(
+            "SELECT spotify_id FROM playlist WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if let Some(spotify_id) =
+            str_of(playlist, "spotify").filter(|s| linked.as_deref() != Some(*s))
+        {
+            let mirror: Option<(i64, i64)> = self
+                .conn
+                .query_row(
+                    "SELECT id, (SELECT COUNT(*) FROM spotify_outbox o WHERE o.playlist_id = playlist.id)
+                     FROM playlist WHERE spotify_id = ?1 AND source = 'spotify'",
+                    [spotify_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let free = match mirror {
+                Some((_, waiting)) if waiting > 0 => false,
+                Some((mirror, _)) => {
+                    self.delete_playlist(mirror)?;
+                    true
+                }
+                None => true,
+            };
+            if free {
+                self.conn.execute(
+                    "UPDATE playlist SET spotify_id = ?2, snapshot_id = NULL WHERE id = ?1",
+                    params![id, spotify_id],
+                )?;
+                linked = Some(spotify_id.to_owned());
+            }
+        }
         let songs = list(playlist, "songs");
         let mut found = Vec::with_capacity(songs.len());
         for song in songs {
@@ -437,7 +473,10 @@ impl Database {
             let path = str_of(song, "path").map(|relative| absolute(relative, folders));
             let uri = str_of(song, "uri");
             // A library song this side has, a Spotify song, or a library song it hasn't got.
+            // In a linked playlist a song keeps its Spotify URI also when it plays from a file.
+            let keep_uri = linked.is_some() && uri.is_some();
             let state = match (track, uri) {
+                (Some(_), Some(_)) if keep_uri => "matched",
                 (Some(_), _) => "local",
                 (None, Some(_)) => "spotify_only",
                 (None, None) => "unavailable",
@@ -450,7 +489,7 @@ impl Database {
                     id,
                     position as i64,
                     track,
-                    if track.is_some() { None } else { uri },
+                    if track.is_some() && !keep_uri { None } else { uri },
                     str_of(song, "isrc"),
                     str_of(song, "title"),
                     artist,
@@ -685,10 +724,10 @@ impl Database {
         let mut playlists: Vec<Value> = Vec::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, sync_id, name, created, modified FROM playlist
+                "SELECT id, sync_id, name, created, modified, spotify_id FROM playlist
                  WHERE source = 'local' AND sync_id IS NOT NULL",
             )?;
-            let rows: Vec<(i64, String, String, i64, i64)> = stmt
+            let rows: Vec<(i64, String, String, i64, i64, Option<String>)> = stmt
                 .query_map([], |row| {
                     Ok((
                         row.get(0)?,
@@ -696,10 +735,11 @@ impl Database {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            for (id, sync_id, name, created, modified) in rows {
+            for (id, sync_id, name, created, modified, spotify_id) in rows {
                 let mut items = self.conn.prepare(
                     "SELECT i.spotify_uri, COALESCE(t.path, i.path), COALESCE(t.isrc, i.isrc),
                        COALESCE(t.title, i.title), COALESCE(t.artist, i.artist), COALESCE(t.album, i.album),
@@ -723,10 +763,14 @@ impl Database {
                         }))
                     })?
                     .collect::<rusqlite::Result<_>>()?;
-                playlists.push(json!({
+                let mut playlist = json!({
                     "id": sync_id, "name": name, "created": created * 1000, "modified": modified * 1000,
                     "deleted": false, "songs": songs
-                }));
+                });
+                if let Some(spotify_id) = spotify_id {
+                    playlist["spotify"] = Value::String(spotify_id);
+                }
+                playlists.push(playlist);
             }
             let mut stmt = self.conn.prepare(
                 "SELECT sync_id, at FROM playlist_deleted d
@@ -873,6 +917,60 @@ mod tests {
             )
             .unwrap();
         (serde_json::from_str(&text).unwrap(), result)
+    }
+
+    #[test]
+    fn a_playlist_published_on_the_phone_takes_the_place_of_its_spotify_copy() {
+        let mut db = db_with_songs();
+        // The Spotify playlist as this side read it: a copy of its own.
+        db.conn
+            .execute(
+                "INSERT INTO playlist (name, created, modified, source, spotify_id, snapshot_id)
+                 VALUES ('Mixed', 1, 1, 'spotify', 'sp', 's1')",
+                [],
+            )
+            .unwrap();
+        let files = [phone(
+            json!({ "playlists": [{ "id": "p1", "name": "Mixed", "created": 1000,
+            "modified": 40000, "deleted": false, "spotify": "sp", "songs": [
+                { "uri": "spotify:track:hello", "path": "Adele/25/01.flac", "title": "Hello",
+                  "artists": ["Adele"], "durationMs": 295000 },
+                { "path": "Nowhere/x.flac", "title": "Only on the Phone", "artists": ["Someone"],
+                  "durationMs": 1000 }
+            ] }] }),
+        )];
+        let (mine, _) = sync(&mut db, &files);
+        // One playlist for "sp": the phone's, linked, to be read from Spotify again.
+        let rows: Vec<(String, Option<String>, Option<String>)> = db
+            .conn
+            .prepare("SELECT source, sync_id, snapshot_id FROM playlist WHERE spotify_id = 'sp'")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows, [("local".to_owned(), Some("p1".to_owned()), None)]);
+        // The song keeps its URI though it plays from the file.
+        let (uri, state): (Option<String>, String) = db
+            .conn
+            .query_row(
+                "SELECT spotify_uri, match_state FROM playlist_item WHERE title = 'Hello'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (uri.as_deref(), state.as_str()),
+            (Some("spotify:track:hello"), "matched")
+        );
+        // Written back with its link.
+        let written = mine["playlists"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "p1")
+            .unwrap();
+        assert_eq!(written["spotify"], "sp");
     }
 
     #[test]
