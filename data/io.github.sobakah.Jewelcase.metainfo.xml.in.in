@@ -48,6 +48,14 @@
   </branding>
 
   <releases>
+    <release version="0.13.1" date="2026-11-23" type="development">
+      <description>
+        <ul>
+          <li>A phone over USB syncs with its newest sync folder</li>
+          <li>Published playlists show Spotify’s cover and show only once</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-11-23" type="development">
       <description>
         <ul>
