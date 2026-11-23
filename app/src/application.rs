@@ -87,6 +87,10 @@ mod imp {
             crate::mpris::start(&app, &player);
             spotify.start();
             crate::romanizer::watch_idle();
+            // The sync with Jewelcase Mobile, once the library is open.
+            glib::idle_add_local_once(|| {
+                crate::sync::sync_now();
+            });
         }
 
         fn shutdown(&self) {
@@ -102,6 +106,8 @@ mod imp {
                 }
             }
             crate::romanizer::stop();
+            // What changed this session goes to the phone's side.
+            crate::sync::sync_now();
             self.parent_shutdown();
         }
 
@@ -110,7 +116,16 @@ mod imp {
             let app = self.obj();
             match app.active_window() {
                 Some(window) => window.present(),
-                None => JewelcaseWindow::new(&app).present(),
+                None => {
+                    let window = JewelcaseWindow::new(&app);
+                    // Back to the window: the phone may have synced meanwhile.
+                    window.connect_is_active_notify(|window| {
+                        if window.is_active() {
+                            crate::sync::sync_if_due();
+                        }
+                    });
+                    window.present();
+                }
             }
         }
     }

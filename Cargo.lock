@@ -2476,6 +2476,7 @@ dependencies = [
  "rand 0.9.5",
  "rusqlite",
  "rusqlite_migration",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",

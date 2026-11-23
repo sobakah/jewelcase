@@ -32,6 +32,10 @@ mod imp {
         #[template_child]
         pub folders_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
+        pub sync_folder_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub sync_status_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
         pub replaygain_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub crossfade_row: TemplateChild<adw::SpinRow>,
@@ -135,6 +139,14 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
+            klass.install_action_async(
+                "prefs.choose-sync-folder",
+                None,
+                |dialog, _, _| async move {
+                    dialog.choose_sync_folder().await;
+                },
+            );
+            klass.install_action("prefs.sync-now", None, |dialog, _, _| dialog.sync_now());
             klass.install_action_async("prefs.add-folder", None, |dialog, _, _| async move {
                 dialog.add_folder().await;
             });
@@ -239,6 +251,7 @@ mod imp {
                 .build();
             self.setup_analysis(&settings);
             self.setup_integrations(&settings);
+            obj.show_sync_state();
             // Answering here counts as answering the Artists view's question.
             self.online_row.connect_active_notify(glib::clone!(
                 #[weak]
@@ -622,6 +635,65 @@ impl PreferencesDialog {
         ));
         row.add_suffix(&remove);
         row
+    }
+
+    /// The folder Jewelcase and Jewelcase Mobile exchange their sync files in (CONCEPT.md §6.4).
+    async fn choose_sync_folder(&self) {
+        let file_dialog = gtk::FileDialog::builder()
+            .title(gettext("Choose Sync Folder"))
+            .modal(true)
+            .build();
+        let parent = self.root().and_downcast::<gtk::Window>();
+        let file = match file_dialog.select_folder_future(parent.as_ref()).await {
+            Ok(file) => file,
+            Err(err) => {
+                if !err.matches(gtk::DialogError::Dismissed) {
+                    tracing::warn!("Folder chooser failed: {err}");
+                }
+                return;
+            }
+        };
+        let Some(folder) = file.path() else {
+            self.toast(&gettext("Only local folders can be the sync folder"));
+            return;
+        };
+        if let Err(err) = self
+            .settings()
+            .set_string("sync-folder", &folder.to_string_lossy())
+        {
+            tracing::warn!("Cannot keep the sync folder: {err}");
+            return;
+        }
+        self.sync_now();
+    }
+
+    fn sync_now(&self) {
+        crate::sync::sync_now();
+        self.show_sync_state();
+    }
+
+    /// The sync folder, and how the last sync went.
+    fn show_sync_state(&self) {
+        let imp = self.imp();
+        let folder = self.settings().string("sync-folder");
+        imp.sync_folder_row.set_subtitle(
+            if folder.is_empty() {
+                gettext("Not set")
+            } else {
+                folder.to_string()
+            }
+            .as_str(),
+        );
+        imp.sync_status_row.set_sensitive(!folder.is_empty());
+        let status = match crate::sync::last() {
+            None => gettext("Not synced yet this session"),
+            Some(Err(err)) => gettext("The sync failed: {}").replace("{}", &err),
+            Some(Ok(done)) if done.devices.is_empty() => {
+                gettext("Synced; no file of Jewelcase Mobile in the folder yet")
+            }
+            Some(Ok(done)) => gettext("Synced with {}").replace("{}", &done.devices.join(", ")),
+        };
+        imp.sync_status_row.set_subtitle(&status);
     }
 
     async fn add_folder(&self) {

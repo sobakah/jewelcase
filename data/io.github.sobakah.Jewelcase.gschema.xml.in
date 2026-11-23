@@ -121,6 +121,16 @@
       <default>false</default>
       <summary>Queue pane was open</summary>
     </key>
+    <key name="sync-folder" type="s">
+      <default>''</default>
+      <summary>Sync folder</summary>
+      <description>The folder Jewelcase and Jewelcase Mobile exchange their sync files in; empty: no sync.</description>
+    </key>
+    <key name="sync-device" type="s">
+      <default>''</default>
+      <summary>Sync device ID</summary>
+      <description>This installation's random ID in the sync files, made once.</description>
+    </key>
     <key name="library-folders" type="as">
       <default>[]</default>
       <summary>Music folders</summary>

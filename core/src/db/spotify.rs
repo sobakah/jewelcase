@@ -601,17 +601,34 @@ impl Database {
     /// The user picked the library song for a Spotify entry (`None`: let
     /// matching decide again).
     pub fn choose_local_match(&mut self, item_id: i64, track_id: Option<i64>) -> Result<()> {
+        // When, for the sync with Jewelcase Mobile (the latest choice wins there).
+        let now = crate::db::sync::now_ms();
         match track_id {
-            Some(track) => self.conn.execute(
-                "UPDATE playlist_item SET local_track_id = ?2, match_state = 'user_matched',
-                   suggested_track_id = NULL WHERE id = ?1",
-                params![item_id, track],
-            )?,
-            None => self.conn.execute(
-                "UPDATE playlist_item SET local_track_id = NULL, match_state = 'spotify_only',
-                   suggested_track_id = NULL WHERE id = ?1",
-                [item_id],
-            )?,
+            Some(track) => {
+                self.conn.execute(
+                    "UPDATE playlist_item SET local_track_id = ?2, match_state = 'user_matched',
+                       suggested_track_id = NULL, choice_at = ?3 WHERE id = ?1",
+                    params![item_id, track, now],
+                )?;
+                self.conn.execute(
+                    "DELETE FROM forgotten_choice
+                     WHERE uri = (SELECT spotify_uri FROM playlist_item WHERE id = ?1)",
+                    [item_id],
+                )?;
+            }
+            None => {
+                self.conn.execute(
+                    "UPDATE playlist_item SET local_track_id = NULL, match_state = 'spotify_only',
+                       suggested_track_id = NULL, choice_at = NULL WHERE id = ?1",
+                    [item_id],
+                )?;
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO forgotten_choice (uri, at)
+                     SELECT spotify_uri, ?2 FROM playlist_item
+                     WHERE id = ?1 AND spotify_uri IS NOT NULL",
+                    params![item_id, now],
+                )?;
+            }
         };
         Ok(())
     }
@@ -631,7 +648,12 @@ impl Database {
     pub fn pin_spotify(&mut self, item_id: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE playlist_item SET local_track_id = NULL, match_state = 'user_pinned_spotify',
-               suggested_track_id = NULL WHERE id = ?1 AND spotify_uri IS NOT NULL",
+               suggested_track_id = NULL, choice_at = ?2 WHERE id = ?1 AND spotify_uri IS NOT NULL",
+            params![item_id, crate::db::sync::now_ms()],
+        )?;
+        self.conn.execute(
+            "DELETE FROM forgotten_choice
+             WHERE uri = (SELECT spotify_uri FROM playlist_item WHERE id = ?1)",
             [item_id],
         )?;
         Ok(())

@@ -339,6 +339,30 @@ queue_item_unshuffled(position, track_ref) -- original order to restore when shu
 
 ---
 
+### 6.4 Syncing with Jewelcase Mobile
+
+The owner's choices (2026-11-23): Jewelcase and Jewelcase Mobile (the phone app) are brought to
+the same state through **sync files in a folder both reach** (a cloud folder kept in step,
+Syncthing, or files copied over USB): no server, no pairing. The format and merge rules are
+Jewelcase Mobile's `docs/SYNC.md` (version 1); both apps follow it.
+
+- Preferences → Library → *Jewelcase Mobile*: *Sync Folder* (`sync-folder`) and *Sync Now*
+  with the last sync's outcome. Jewelcase writes `jewelcase-sync-<device>.json` there
+  (`sync-device`: a random UUID made once; a temporary file renamed into place) and reads the
+  others. It syncs at start, when the window comes back (at most every five minutes), at quit,
+  and with *Sync Now* (`app/src/sync.rs`).
+- Merged (`core/src/db/sync.rs`, `Database::sync`): the user's choices for Spotify songs
+  (*user_matched* with its file, *user_pinned_spotify*; forgotten ones too) by the latest time
+  per song, applied to every playlist entry of the song (Jewelcase keeps choices per entry);
+  MusicBrainz's ISRCs by release; LRCLIB's answers by the latest check; plays by id (each side
+  writes only its own; *Delete Statistics* remembers the phone's ids); local playlists by UUID,
+  the latest change winning whole, deletions kept so they hold (Spotify playlists aren't synced:
+  both read them from Spotify). Jewelcase also writes lyrembed's alias list (its last copy), so
+  the phone's matching knows the same artists.
+- A song is named by its path below a library folder, else ISRC, else title, artist and
+  length. Migration 035: the choices' times, forgotten choices, plays read from the phone and
+  those deleted, playlists' UUIDs and deletions.
+
 ## 7. Shuffle & Repeat
 
 **Repeat** (cycles with one button, `AdwToggleGroup` in the popover):

@@ -22,6 +22,7 @@ mod romanizer;
 mod sorting;
 mod spotify;
 mod style;
+mod sync;
 mod theme;
 mod tools;
 mod updates;

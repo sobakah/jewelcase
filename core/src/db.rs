@@ -26,6 +26,7 @@ mod popular;
 pub use popular::PopularSong;
 mod spotify_library;
 mod stats;
+pub mod sync;
 pub use spotify_library::{SpotifyAlbum, SpotifyArtist, StoredDiscography};
 pub use stats::{PlayEntry, Ranked, Summary, Trend};
 
@@ -64,6 +65,7 @@ const MIGRATIONS: &[M<'static>] = &[
     M::up(include_str!("db/032_discography_total.sql")),
     M::up(include_str!("db/033_popular_songs.sql")),
     M::up(include_str!("db/034_all_isrcs.sql")),
+    M::up(include_str!("db/035_sync.sql")),
 ];
 
 /// Rebuilds the album table with AUTOINCREMENT, once
@@ -1062,6 +1064,13 @@ impl Database {
     }
 
     pub fn delete_playlist(&mut self, id: i64) -> Result<()> {
+        // Remembered, so the sync deletes it on the phone too instead of bringing it back.
+        self.conn.execute(
+            "INSERT OR REPLACE INTO playlist_deleted (sync_id, at)
+             SELECT sync_id, CAST(strftime('%s', 'now') AS INTEGER) * 1000
+             FROM playlist WHERE id = ?1 AND sync_id IS NOT NULL",
+            [id],
+        )?;
         self.conn
             .execute("DELETE FROM playlist WHERE id = ?1", [id])?;
         self.conn.execute(
@@ -2647,9 +2656,8 @@ mod tests {
     fn the_isrc_migration_rereads_files_with_one_and_asks_musicbrainz_again() {
         let mut conn = Connection::open_in_memory().unwrap();
         let migrations = Migrations::from_slice(MIGRATIONS);
-        migrations
-            .to_version(&mut conn, MIGRATIONS.len() - 1)
-            .unwrap();
+        // Up to before 034_all_isrcs (the 34th), whatever came after it.
+        migrations.to_version(&mut conn, 33).unwrap();
         conn.execute_batch(
             "INSERT INTO track (path, mtime, size, added, album_artists, genres,
                  mb_album_artist_ids, compilation, duration_ms, format, isrc)

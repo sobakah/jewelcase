@@ -236,6 +236,38 @@ template $JewelcasePreferencesDialog: Adw.PreferencesDialog {
         }
       }
     }
+
+    Adw.PreferencesGroup {
+      title: _("Jewelcase Mobile");
+      description: _(
+        "Your choices of which file plays a Spotify song, MusicBrainz’s ISRCs, LRCLIB’s lyrics, the listening statistics and your playlists, the same on the phone: each writes a sync file into a folder both reach, such as a cloud folder kept in step or one you copy over USB, and reads the other’s."
+      );
+
+      Adw.ActionRow sync_folder_row {
+        title: _("Sync Folder");
+        subtitle: _("Not set");
+
+        [suffix]
+        Gtk.Button {
+          valign: center;
+          action-name: "prefs.choose-sync-folder";
+          label: _("_Choose…");
+          use-underline: true;
+        }
+      }
+
+      Adw.ActionRow sync_status_row {
+        title: _("Last Sync");
+
+        [suffix]
+        Gtk.Button {
+          valign: center;
+          action-name: "prefs.sync-now";
+          label: _("Sync _Now");
+          use-underline: true;
+        }
+      }
+    }
   }
 
   Adw.PreferencesPage {

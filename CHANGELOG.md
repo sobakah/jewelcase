@@ -4,6 +4,17 @@ All notable changes to Jewelcase are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+The library database changes (for the sync with Jewelcase Mobile).
+
+### Added
+
+- **Sync with Jewelcase Mobile**: Preferences → Library → Jewelcase Mobile picks a folder both
+  reach (a cloud folder kept in step, or one you copy), and your choices of which file plays a
+  Spotify song, MusicBrainz's ISRCs, LRCLIB's lyrics, the listening statistics and your
+  playlists become the same on the computer and the phone.
+
 ## [0.12.0] — 2026-11-22
 
 The library database changes (every ISRC of a file is kept); 0.11.0 can't open it any more.

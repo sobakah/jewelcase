@@ -136,8 +136,16 @@ impl Database {
     }
 
     /// Deletes the whole log (Preferences → Privacy).
+    /// Deletes the log; plays read from Jewelcase Mobile's sync file aren't read again.
     pub fn delete_play_log(&mut self) -> Result<()> {
-        self.conn.execute("DELETE FROM play_log", [])?;
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO skipped_play (remote_id)
+             SELECT remote_id FROM play_log WHERE remote_id IS NOT NULL",
+            [],
+        )?;
+        tx.execute("DELETE FROM play_log", [])?;
+        tx.commit()?;
         Ok(())
     }
 

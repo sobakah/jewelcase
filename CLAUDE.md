@@ -109,7 +109,8 @@ Terms used in all seven:
 ```
 app/        GTK interface (crate `jewelcase`): windows, widgets, tools.rs (companion tools),
             updates.rs (update banner), rename.rs (migration from the old name)
-core/       library, scanner, queue, playback, similarity, matching; no GTK
+core/       library, scanner, queue, playback, similarity, matching, the sync with Jewelcase
+            Mobile (db/sync.rs; app/src/sync.rs does the files; CONCEPT.md §6.4); no GTK
 lyrics/     embedded and sidecar lyrics, LRC, romanization pairing
 metadata/   MusicBrainz, Wikidata, Commons and Deezer lookups
 spotify/    Spotify login (OAuth PKCE) and Web API
