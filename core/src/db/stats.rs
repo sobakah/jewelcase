@@ -135,8 +135,8 @@ impl Database {
             .flatten())
     }
 
-    /// Deletes the whole log (Preferences → Privacy).
-    /// Deletes the log; plays read from Jewelcase Mobile's sync file aren't read again.
+    /// Deletes the whole log (Preferences → Privacy); plays read from Jewelcase Mobile's sync
+    /// file aren't read again.
     pub fn delete_play_log(&mut self) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
