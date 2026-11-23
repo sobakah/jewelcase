@@ -399,5 +399,9 @@ the real GPU; `JEWELCASE_HEADLESS_MONITOR=WxH@RATE` matches the owner's screen
   now.
 - Not verified: two Soloists running on one API key at the same time; Soloist's WebSocket with two
   connected apps at once.
+- On the owner's docket for later (2026-11-23): a crate of its own here for the code Jewelcase
+  Mobile copies (tags, grouping, titles and artists, matching, lyrics, the statistics'
+  ranking; its `rust/UPSTREAM.md` lists them), without GTK, GStreamer or the database, so both
+  apps build from one copy. Not before the owner says to start.
 - Known issues left from the code reviews: CONCEPT.md §13 "Known issues". Roadmap and optional
   features: CONCEPT.md §13; open questions: §14.
