@@ -2030,7 +2030,8 @@ impl JewelcaseWindow {
     /// its first album); `JEWELCASE_SCREENSHOT_PANEL_ACTIONS` runs album
     /// panel actions (`panel.add-to-playlist`);
     /// `JEWELCASE_SCREENSHOT_PREFS=<page>` opens Preferences;
-    /// `JEWELCASE_SCREENSHOT_SEARCH=text` searches;
+    /// `JEWELCASE_SCREENSHOT_SEARCH=text` searches (`_SEARCH_FILTERS=kind:source`
+    /// chooses the filters first);
     /// `JEWELCASE_SCREENSHOT_ADD_SONGS=text` searches songs to add in the
     /// playlist panel (`JEWELCASE_SCREENSHOT_FILTER_SONGS`: its own songs);
     /// `JEWELCASE_SCREENSHOT_SETTINGS="key=value …"` sets GSettings first;
@@ -2183,6 +2184,13 @@ impl JewelcaseWindow {
             // `JEWELCASE_SCREENSHOT_SEARCH=text`: search for it.
             if let Ok(text) = std::env::var("JEWELCASE_SCREENSHOT_SEARCH") {
                 window.imp().search_bar.set_search_mode(true);
+                // `JEWELCASE_SCREENSHOT_SEARCH_FILTERS=kind:source` (the
+                // toggles' names, e.g. `albums:library`).
+                if let Ok(filters) = std::env::var("JEWELCASE_SCREENSHOT_SEARCH_FILTERS") {
+                    let (kind, source) =
+                        filters.split_once(':').unwrap_or((&filters, "everywhere"));
+                    window.imp().search_view.set_filters(kind, source);
+                }
                 window.imp().search_entry.set_text(&text);
             }
             // `JEWELCASE_SCREENSHOT_ADD_SONGS=text`: search songs to add in

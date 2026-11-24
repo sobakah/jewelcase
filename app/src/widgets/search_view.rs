@@ -3,8 +3,9 @@
 //! then what Spotify found that isn't in the library; an icon on every
 //! row says which is which. Spotify is asked once per search (all four
 //! kinds in one request), a moment after typing stops, and its answers are
-//! kept for the session. With an empty field the card shows the last
-//! searches.
+//! kept for the session. Two toggle groups above the results show one kind
+//! or all, and from the library, Spotify or both (as Jewelcase Mobile's
+//! chips). With an empty field the card shows the last searches.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -25,8 +26,9 @@ use crate::config::APP_ID;
 use crate::objects::TrackObject;
 use crate::{covers, format};
 
-/// Library results per section.
+/// Library results per section; with one kind shown, that kind's.
 const LIMIT: usize = 8;
+const LIMIT_ONE_KIND: usize = 30;
 /// Searches kept for "Recent Searches".
 const RECENT: usize = 5;
 /// Spotify is asked this long after the last keystroke.
@@ -35,6 +37,96 @@ const SPOTIFY_DELAY: std::time::Duration = std::time::Duration::from_millis(450)
 /// Covers of Spotify results, downloaded after the rows: (cover, image
 /// address).
 type SpotifyCovers = Vec<(CoverImage, String)>;
+
+/// Which kind of results the search shows: all, or one (the first toggle group).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    All,
+    Artists,
+    Albums,
+    Songs,
+    Playlists,
+}
+
+impl Kind {
+    /// The toggles' names, in order.
+    const NAMES: [(&'static str, Kind); 5] = [
+        ("all", Kind::All),
+        ("artists", Kind::Artists),
+        ("albums", Kind::Albums),
+        ("songs", Kind::Songs),
+        ("playlists", Kind::Playlists),
+    ];
+
+    fn from_name(name: &str) -> Kind {
+        Self::NAMES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map_or(Kind::All, |(_, kind)| *kind)
+    }
+
+    fn shows(self, kind: Kind) -> bool {
+        self == Kind::All || self == kind
+    }
+
+    /// The library's results of this kind only.
+    fn keep(self, results: SearchResults) -> SearchResults {
+        SearchResults {
+            artists: if self.shows(Kind::Artists) {
+                results.artists
+            } else {
+                Vec::new()
+            },
+            albums: if self.shows(Kind::Albums) {
+                results.albums
+            } else {
+                Vec::new()
+            },
+            tracks: if self.shows(Kind::Songs) {
+                results.tracks
+            } else {
+                Vec::new()
+            },
+            playlists: if self.shows(Kind::Playlists) {
+                results.playlists
+            } else {
+                Vec::new()
+            },
+        }
+    }
+}
+
+/// Where the results come from: both, the library or Spotify (the second
+/// toggle group). It narrows whatever kind is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Everywhere,
+    Library,
+    Spotify,
+}
+
+impl Source {
+    const NAMES: [(&'static str, Source); 3] = [
+        ("everywhere", Source::Everywhere),
+        ("library", Source::Library),
+        ("spotify", Source::Spotify),
+    ];
+
+    fn from_name(name: &str) -> Source {
+        Self::NAMES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map_or(Source::Everywhere, |(_, source)| *source)
+    }
+
+    fn library(self) -> bool {
+        self != Source::Spotify
+    }
+
+    fn spotify(self) -> bool {
+        self != Source::Library
+    }
+}
 
 /// The four sections, in order.
 #[derive(Debug, Clone)]
@@ -82,6 +174,10 @@ mod imp {
 
     #[derive(Debug, Default)]
     pub struct SearchView {
+        /// The filters above the results (not over the recent searches).
+        pub filters: adw::Bin,
+        pub kinds: adw::ToggleGroup,
+        pub sources: adw::ToggleGroup,
         pub stack: gtk::Stack,
         pub sections: gtk::Box,
         pub empty: adw::StatusPage,
@@ -143,7 +239,66 @@ mod imp {
             self.stack.add_named(&self.empty, Some("empty"));
             let obj = self.obj();
             obj.set_overflow(gtk::Overflow::Hidden);
-            obj.set_child(Some(&self.stack));
+            // The filters: a kind, and a source. Kept while the app runs.
+            for (name, label) in [
+                ("all", gettext("All")),
+                ("artists", gettext("Artists")),
+                ("albums", gettext("Albums")),
+                ("songs", gettext("Songs")),
+                ("playlists", gettext("Playlists")),
+            ] {
+                self.kinds
+                    .add(adw::Toggle::builder().name(name).label(label).build());
+            }
+            for (name, label) in [
+                ("everywhere", gettext("Everywhere")),
+                ("library", gettext("Library")),
+                ("spotify", gettext("Spotify")),
+            ] {
+                self.sources
+                    .add(adw::Toggle::builder().name(name).label(label).build());
+            }
+            self.kinds.set_active_name(Some("all"));
+            self.sources.set_active_name(Some("everywhere"));
+            crate::widgets::set_accessible_label(
+                self.kinds.upcast_ref::<gtk::Widget>(),
+                &gettext("What to Show"),
+            );
+            crate::widgets::set_accessible_label(
+                self.sources.upcast_ref::<gtk::Widget>(),
+                &gettext("Where From"),
+            );
+            for group in [&self.kinds, &self.sources] {
+                group.connect_active_name_notify(glib::clone!(
+                    #[weak]
+                    obj,
+                    move |_| {
+                        let query = obj.imp().last_query.borrow().clone();
+                        if !query.trim().is_empty() {
+                            obj.search(&query);
+                        }
+                    }
+                ));
+            }
+            // The two groups side by side, each on its own line when the
+            // card is narrow (at their natural widths: shrunk, their labels
+            // would be cut to "A…").
+            let row = adw::WrapBox::builder()
+                .child_spacing(12)
+                .line_spacing(6)
+                .wrap_policy(adw::WrapPolicy::Natural)
+                .margin_top(12)
+                .margin_start(18)
+                .margin_end(18)
+                .build();
+            row.append(&self.kinds);
+            row.append(&self.sources);
+            self.filters.set_child(Some(&row));
+            self.filters.set_visible(false);
+            let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            content.append(&self.filters);
+            content.append(&self.stack);
+            obj.set_child(Some(&content));
             // Spotify connected while a search shows: add its results.
             JewelcaseApplication::get()
                 .spotify()
@@ -190,17 +345,47 @@ impl SearchView {
         }
     }
 
+    /// The kind and source chosen in the filters.
+    fn filters(&self) -> (Kind, Source) {
+        let imp = self.imp();
+        (
+            Kind::from_name(imp.kinds.active_name().as_deref().unwrap_or("all")),
+            Source::from_name(imp.sources.active_name().as_deref().unwrap_or("everywhere")),
+        )
+    }
+
+    /// Chooses the filters by their names (the screenshot hook).
+    pub fn set_filters(&self, kind: &str, source: &str) {
+        self.imp().kinds.set_active_name(Some(kind));
+        self.imp().sources.set_active_name(Some(source));
+    }
+
     pub fn search(&self, query: &str) {
         let imp = self.imp();
         imp.last_query.replace(query.to_owned());
         self.clear();
+        imp.filters.set_visible(true);
+        let (kind, source) = self.filters();
         let library = JewelcaseApplication::get().library();
-        let results = library.search(query, LIMIT);
-        let spotify = JewelcaseApplication::get().spotify().is_connected()
-            && query.trim().chars().count() >= 2;
+        let results = if source.library() {
+            let limit = if kind == Kind::All {
+                LIMIT
+            } else {
+                LIMIT_ONE_KIND
+            };
+            kind.keep(library.search(query, limit))
+        } else {
+            SearchResults::default()
+        };
+        let connected = JewelcaseApplication::get().spotify().is_connected();
+        let spotify = source.spotify() && connected && query.trim().chars().count() >= 2;
         if results.is_empty() && !spotify {
-            imp.empty
-                .set_description(Some(&gettext("Nothing in your library matches")));
+            let why = match source {
+                Source::Spotify if !connected => gettext("Spotify isn’t connected"),
+                Source::Spotify => gettext("Type at least two letters to search Spotify"),
+                _ => gettext("Nothing in your library matches"),
+            };
+            imp.empty.set_description(Some(&why));
             imp.stack.set_visible_child_name("empty");
             return;
         }
@@ -221,6 +406,7 @@ impl SearchView {
     /// The last searches, for an empty field; false if there are none.
     pub fn show_recent(&self) -> bool {
         self.clear();
+        self.imp().filters.set_visible(false);
         let recent = self.settings().strv("recent-searches");
         if recent.is_empty() {
             return false;
@@ -635,10 +821,19 @@ impl SearchView {
         };
         sections.status.set_visible(false);
         let mut covers = SpotifyCovers::new();
-        self.spotify_artists(&sections.artists, &found.artists, &mut covers);
-        self.spotify_albums(&sections.albums, &found.albums, &mut covers);
-        self.spotify_songs(&sections.songs, &found.tracks, &mut covers);
-        self.spotify_playlists(&sections.playlists, &found.playlists, &mut covers);
+        let (kind, source) = self.filters();
+        if kind.shows(Kind::Artists) {
+            self.spotify_artists(&sections.artists, &found.artists, &mut covers);
+        }
+        if kind.shows(Kind::Albums) {
+            self.spotify_albums(&sections.albums, &found.albums, &mut covers);
+        }
+        if kind.shows(Kind::Songs) {
+            self.spotify_songs(&sections.songs, &found.tracks, &mut covers);
+        }
+        if kind.shows(Kind::Playlists) {
+            self.spotify_playlists(&sections.playlists, &found.playlists, &mut covers);
+        }
         let nothing = [
             &sections.artists,
             &sections.albums,
@@ -649,9 +844,12 @@ impl SearchView {
         .all(|s| !s.container.get_visible());
         if nothing {
             let imp = self.imp();
-            imp.empty.set_description(Some(&gettext(
-                "Nothing in your library or on Spotify matches",
-            )));
+            imp.empty
+                .set_description(Some(&if source == Source::Spotify {
+                    gettext("Nothing on Spotify matches")
+                } else {
+                    gettext("Nothing in your library or on Spotify matches")
+                }));
             imp.stack.set_visible_child_name("empty");
         }
         // Covers arrive after the rows.
@@ -847,5 +1045,38 @@ impl SearchView {
 impl Default for SearchView {
     fn default() -> Self {
         glib::Object::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kind_keeps_its_own_results() {
+        let results = SearchResults {
+            artists: vec![1],
+            albums: vec![2],
+            tracks: vec![3],
+            playlists: vec![4],
+        };
+        assert_eq!(Kind::All.keep(results.clone()), results);
+        assert_eq!(
+            Kind::Albums.keep(results.clone()),
+            SearchResults {
+                albums: vec![2],
+                ..SearchResults::default()
+            }
+        );
+        assert!(Kind::Songs.shows(Kind::Songs) && !Kind::Songs.shows(Kind::Artists));
+    }
+
+    #[test]
+    fn the_toggles_names_choose_the_filters() {
+        assert_eq!(Kind::from_name("playlists"), Kind::Playlists);
+        assert_eq!(Kind::from_name("anything"), Kind::All);
+        assert_eq!(Source::from_name("spotify"), Source::Spotify);
+        assert!(Source::Library.library() && !Source::Library.spotify());
+        assert!(Source::Everywhere.library() && Source::Everywhere.spotify());
     }
 }

@@ -6,6 +6,12 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Filters in search**: toggles above the results show one kind (artists, albums, songs or
+  playlists) and only your library or only Spotify, also together (only Spotify's albums, for
+  example). With one kind shown, more of your library's matches are listed.
+
 ## [0.13.1] — 2026-11-23
 
 The library database doesn't change; 0.13.0 still opens it.
