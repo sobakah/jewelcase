@@ -6,6 +6,10 @@ All notable changes to Jewelcase are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-25
+
+The library database doesn't change; 0.13.1 still opens it.
+
 ### Added
 
 - **Filters in search**: toggles above the results show one kind (artists, albums, songs or
@@ -271,7 +275,8 @@ complete local player.
 - **Install** on Fedora 45: download the RPM from the release and run
   `sudo dnf install ./jewelcase-0.5.0-1.fc45.x86_64.rpm`.
 
-[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.13.1...HEAD
+[Unreleased]: https://github.com/sobakah/jewelcase/compare/0.14.0...HEAD
+[0.14.0]: https://github.com/sobakah/jewelcase/compare/0.13.1...0.14.0
 [0.13.1]: https://github.com/sobakah/jewelcase/compare/0.13.0...0.13.1
 [0.13.0]: https://github.com/sobakah/jewelcase/compare/0.12.0...0.13.0
 [0.12.0]: https://github.com/sobakah/jewelcase/compare/0.11.0...0.12.0

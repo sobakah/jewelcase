@@ -6,7 +6,7 @@
 %global app_id io.github.sobakah.Jewelcase
 
 Name:           jewelcase
-Version:        0.13.1
+Version:        0.14.0
 Release:        1%{?dist}
 Summary:        Album-focused local music player
 
@@ -106,6 +106,12 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 
 %changelog
+* Wed Nov 25 2026 sobakah - 0.14.0-1
+- Search filters by kind and source, with more results from Spotify
+- Choose several songs in albums and playlists
+- A playlist's cover from the albums in it
+- A disc's sheen behind the album, playlist and artist panels
+
 * Mon Nov 23 2026 sobakah - 0.13.1-1
 - A phone over USB syncs with its newest sync folder
 - Published playlists show Spotify's cover and show only once

@@ -48,6 +48,16 @@
   </branding>
 
   <releases>
+    <release version="0.14.0" date="2026-11-25" type="development">
+      <description>
+        <ul>
+          <li>Search filters by kind and source, with more results from Spotify</li>
+          <li>Choose several songs in albums and playlists</li>
+          <li>A playlist’s cover from the albums in it</li>
+          <li>A disc’s sheen behind the album, playlist and artist panels</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.13.1" date="2026-11-23" type="development">
       <description>
         <ul>

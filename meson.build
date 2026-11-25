@@ -1,6 +1,6 @@
 project(
   'jewelcase',
-  version: '0.13.1',
+  version: '0.14.0',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 1.4.0',
 )
