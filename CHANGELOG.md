@@ -10,7 +10,16 @@ All notable changes to Jewelcase are documented here. The format follows
 
 - **Filters in search**: toggles above the results show one kind (artists, albums, songs or
   playlists) and only your library or only Spotify, also together (only Spotify's albums, for
-  example). With one kind shown, more of your library's matches are listed.
+  example). With one kind shown, more of your library's matches are listed, and *More From
+  Spotify* under them lists Spotify's next ten.
+- **Choose several songs**: Ctrl+click or Shift+click songs in an album or a playlist; a bar
+  above them plays them next, adds them to the queue or a playlist, or removes them from your
+  playlist. While songs are chosen, a click chooses another instead of playing; Esc or the bar's
+  close button ends it.
+- **A playlist's cover from its albums**: *Change Cover…* shows the covers of the albums in the
+  playlist to choose from, besides an image file.
+- **A disc's sheen** behind the album, playlist and artist panels: fine grooves around the cover
+  and a bow tie of light in the cover's colours, as in Jewelcase Mobile.
 
 ## [0.13.1] — 2026-11-23
 

@@ -990,34 +990,22 @@ impl Client {
             .unwrap_or_default())
     }
 
-    /// Up to 10 tracks; `query` may use filters like `isrc:USA2P2025832`
-    /// or `track:… artist:…`.
+    /// Songs, artists, albums and playlists for a search, in one request
+    /// (at most `MAX_SEARCH_RESULTS` of each).
     ///
     /// Without `market=from_token`: since 2026 Spotify answers a search
     /// that names it with "403 Insufficient client scope" (it would need
     /// `user-read-private`), though playlist reads still accept it.
-    /// Songs, artists, albums and playlists for a search, in one request
-    /// (at most `MAX_SEARCH_RESULTS` of each).
     pub fn search_all(&self, query: &str) -> Result<SearchResults> {
-        let value = self.get(
-            "/search",
-            &[
-                ("q", query.to_owned()),
-                ("type", "track,artist,album,playlist".into()),
-                ("limit", MAX_SEARCH_RESULTS.to_string()),
-            ],
-        )?;
-        let items = |kind: &str| value[kind]["items"].as_array().cloned().unwrap_or_default();
-        Ok(SearchResults {
-            tracks: items("tracks").iter().filter_map(Track::parse).collect(),
-            artists: items("artists").iter().filter_map(Artist::parse).collect(),
-            albums: items("albums").iter().filter_map(Album::parse).collect(),
-            // Spotify lists removed playlists as null.
-            playlists: items("playlists")
-                .iter()
-                .filter_map(PlaylistSummary::parse)
-                .collect(),
-        })
+        let value = self.get("/search", &search_query(query, &SearchKind::ALL, 0))?;
+        Ok(search_page(&value))
+    }
+
+    /// The next results of one kind, from `offset` on (*More From
+    /// Spotify*: one request of `MAX_SEARCH_RESULTS`).
+    pub fn search_more(&self, query: &str, kind: SearchKind, offset: u32) -> Result<SearchResults> {
+        let value = self.get("/search", &search_query(query, &[kind], offset))?;
+        Ok(search_page(&value))
     }
 
     /// A release found elsewhere (Deezer's new releases): by its barcode
@@ -1107,6 +1095,140 @@ pub struct SearchResults {
     pub artists: Vec<Artist>,
     pub albums: Vec<Album>,
     pub playlists: Vec<PlaylistSummary>,
+    /// The kinds Spotify has more of, with where their next page starts.
+    pub more: Vec<(SearchKind, u32)>,
+}
+
+impl SearchResults {
+    /// How many of a kind there are.
+    pub fn count(&self, kind: SearchKind) -> usize {
+        match kind {
+            SearchKind::Tracks => self.tracks.len(),
+            SearchKind::Artists => self.artists.len(),
+            SearchKind::Albums => self.albums.len(),
+            SearchKind::Playlists => self.playlists.len(),
+        }
+    }
+
+    /// Where the next page of a kind starts, if Spotify has more of it.
+    pub fn next_offset(&self, kind: SearchKind) -> Option<u32> {
+        self.more
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, at)| *at)
+    }
+
+    /// The next page of one kind added to this one (`page` from
+    /// `search_more`): its results after these, and whether there's more
+    /// after it.
+    pub fn extend(&mut self, kind: SearchKind, page: SearchResults) {
+        match kind {
+            SearchKind::Tracks => self.tracks.extend(page.tracks),
+            SearchKind::Artists => self.artists.extend(page.artists),
+            SearchKind::Albums => self.albums.extend(page.albums),
+            SearchKind::Playlists => self.playlists.extend(page.playlists),
+        }
+        self.more.retain(|(k, _)| *k != kind);
+        self.more
+            .extend(page.more.into_iter().filter(|(k, _)| *k == kind));
+    }
+}
+
+/// A kind of search result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SearchKind {
+    Tracks,
+    Artists,
+    Albums,
+    Playlists,
+}
+
+impl SearchKind {
+    pub const ALL: [SearchKind; 4] = [
+        SearchKind::Tracks,
+        SearchKind::Artists,
+        SearchKind::Albums,
+        SearchKind::Playlists,
+    ];
+
+    /// Its name in the request's `type`.
+    fn param(self) -> &'static str {
+        match self {
+            SearchKind::Tracks => "track",
+            SearchKind::Artists => "artist",
+            SearchKind::Albums => "album",
+            SearchKind::Playlists => "playlist",
+        }
+    }
+
+    /// Its key in the answer.
+    fn key(self) -> &'static str {
+        match self {
+            SearchKind::Tracks => "tracks",
+            SearchKind::Artists => "artists",
+            SearchKind::Albums => "albums",
+            SearchKind::Playlists => "playlists",
+        }
+    }
+}
+
+/// A search's query: these kinds, `MAX_SEARCH_RESULTS` of each, from
+/// `offset` on.
+fn search_query(query: &str, kinds: &[SearchKind], offset: u32) -> Vec<(&'static str, String)> {
+    let kinds: Vec<&str> = kinds.iter().map(|k| k.param()).collect();
+    let mut params = vec![
+        ("q", query.to_owned()),
+        ("type", kinds.join(",")),
+        ("limit", MAX_SEARCH_RESULTS.to_string()),
+    ];
+    if offset > 0 {
+        params.push(("offset", offset.to_string()));
+    }
+    params
+}
+
+/// What a search's answer holds, and which kinds have a next page (from
+/// Spotify's paging: its offset and items, removed ones included, so a
+/// next page never repeats one).
+fn search_page(value: &serde_json::Value) -> SearchResults {
+    let items = |kind: SearchKind| {
+        value[kind.key()]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    };
+    SearchResults {
+        tracks: items(SearchKind::Tracks)
+            .iter()
+            .filter_map(Track::parse)
+            .collect(),
+        artists: items(SearchKind::Artists)
+            .iter()
+            .filter_map(Artist::parse)
+            .collect(),
+        albums: items(SearchKind::Albums)
+            .iter()
+            .filter_map(Album::parse)
+            .collect(),
+        // Spotify lists removed playlists as null.
+        playlists: items(SearchKind::Playlists)
+            .iter()
+            .filter_map(PlaylistSummary::parse)
+            .collect(),
+        more: SearchKind::ALL
+            .into_iter()
+            .filter(|k| {
+                value[k.key()]["next"]
+                    .as_str()
+                    .is_some_and(|n| !n.is_empty())
+            })
+            .map(|k| {
+                let page = &value[k.key()];
+                let offset = page["offset"].as_u64().unwrap_or(0) as u32;
+                (k, offset + items(k).len() as u32)
+            })
+            .collect(),
+    }
 }
 
 /// What to play.
@@ -1242,6 +1364,42 @@ mod tests {
             artist_albums_query(10).last(),
             Some(&("offset", "10".to_owned()))
         );
+    }
+
+    /// *More From Spotify*: a search says which kinds have a next page,
+    /// and the next page of one kind is asked from where the shown end.
+    #[test]
+    fn a_search_says_which_kinds_have_more() {
+        let page = serde_json::json!({
+            "artists": {"items": [{"id": "a", "name": "A"}], "offset": 0, "next": "https://api.spotify.com/v1/search?offset=1"},
+            "albums": {"items": [], "next": null},
+            // Removed playlists come as null, but count for the next page.
+            "playlists": {"items": [null, {"id": "p", "name": "P"}], "offset": 0, "next": "https://api.spotify.com/v1/search?offset=2"},
+        });
+        let mut found = search_page(&page);
+        assert_eq!(found.artists.len(), 1);
+        assert_eq!(found.playlists.len(), 1);
+        assert_eq!(found.next_offset(SearchKind::Artists), Some(1));
+        assert_eq!(found.next_offset(SearchKind::Playlists), Some(2));
+        assert_eq!(found.next_offset(SearchKind::Albums), None);
+
+        let query = search_query("echo", &[SearchKind::Artists], 10);
+        assert!(query.contains(&("type", "artist".to_owned())));
+        assert!(query.contains(&("offset", "10".to_owned())));
+        assert!(
+            !search_query("echo", &SearchKind::ALL, 0)
+                .iter()
+                .any(|(k, _)| *k == "offset")
+        );
+
+        let next = search_page(&serde_json::json!({
+            "artists": {"items": [{"id": "b", "name": "B"}], "offset": 1, "next": null},
+        }));
+        found.extend(SearchKind::Artists, next);
+        assert_eq!(found.count(SearchKind::Artists), 2);
+        assert_eq!(found.next_offset(SearchKind::Artists), None);
+        // The other kinds' pages stay.
+        assert_eq!(found.next_offset(SearchKind::Playlists), Some(2));
     }
 
     /// The count is logged at quit too: sessions shorter than an hour left

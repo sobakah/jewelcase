@@ -11,6 +11,7 @@ use gtk::{gio, glib};
 use jewelcase_core::db::PlaylistItem;
 
 use super::playlist_picker::ask_name;
+use super::song_selection::{Act, SongSelection};
 use super::{CoverBackdrop, CoverImage, ListCard};
 use crate::application::JewelcaseApplication;
 use crate::config::APP_ID;
@@ -53,6 +54,8 @@ mod imp {
     pub struct PlaylistPanel {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub toolbar: TemplateChild<adw::ToolbarView>,
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
@@ -141,6 +144,8 @@ mod imp {
         pub library_only_action: std::cell::OnceCell<gio::SimpleAction>,
         /// Only those are shown now (chosen, and some others there).
         pub library_only: std::cell::Cell<bool>,
+        /// Songs chosen with Ctrl or Shift (by entry ID).
+        pub selection: SongSelection,
     }
 
     #[glib::object_subclass]
@@ -193,8 +198,8 @@ mod imp {
             klass.install_action_async("playlist.rename", None, |panel, _, _| async move {
                 panel.rename().await;
             });
-            klass.install_action_async("playlist.change-cover", None, |panel, _, _| async move {
-                panel.change_cover().await;
+            klass.install_action("playlist.change-cover", None, |panel, _, _| {
+                panel.change_cover();
             });
             klass.install_action("playlist.reset-cover", None, |panel, _, _| {
                 if let Some(id) = panel.playlist_id() {
@@ -254,6 +259,13 @@ mod imp {
             self.parent_constructed();
             self.backdrop.follow(&self.cover);
             let obj = self.obj();
+            self.toolbar.add_top_bar(self.selection.bar());
+            obj.add_controller(self.selection.escape_controller());
+            self.selection.connect_act(glib::clone!(
+                #[weak]
+                obj,
+                move |act, ids| obj.act_on_chosen(act, &ids)
+            ));
             obj.setup_list();
             // Renaming by clicking the name.
             let click = gtk::GestureClick::new();
@@ -452,7 +464,10 @@ impl PlaylistPanel {
         model.connect_items_changed(glib::clone!(
             #[weak(rename_to = panel)]
             self,
-            move |_, _, _, _| panel.restyle_rows()
+            move |_, _, _, _| {
+                panel.restyle_rows();
+                panel.update_chosen_order();
+            }
         ));
         // Like a list box's rows: a click plays.
         imp.items.set_single_click_activate(true);
@@ -594,6 +609,59 @@ impl PlaylistPanel {
         imp.entries.borrow().iter().position(|e| e.id == id)
     }
 
+    /// The songs shown, in order, for choosing several (Shift's range).
+    fn update_chosen_order(&self) {
+        let imp = self.imp();
+        let Some(model) = imp.items.model() else {
+            return;
+        };
+        let order = (1..model.n_items())
+            .filter_map(|position| {
+                model
+                    .item(position)
+                    .and_downcast::<glib::BoxedAnyObject>()
+                    .map(|song| song.borrow::<Song>().entry.id)
+            })
+            .collect();
+        imp.selection.set_order(order);
+    }
+
+    /// The bar's buttons, with the chosen songs (entry IDs, in order).
+    fn act_on_chosen(&self, act: Act, ids: &[i64]) {
+        let Some(playlist_id) = self.playlist_id() else {
+            return;
+        };
+        let chosen: Vec<PlaylistItem> = {
+            let entries = self.imp().entries.borrow();
+            ids.iter()
+                .filter_map(|id| entries.iter().find(|e| e.id == *id).cloned())
+                .collect()
+        };
+        let app = JewelcaseApplication::get();
+        match act {
+            Act::PlayNext => {
+                let tracks = Self::queueable_of(&chosen);
+                if !tracks.is_empty() {
+                    app.player().play_next(tracks);
+                }
+            }
+            Act::AddToQueue => {
+                let tracks = Self::queueable_of(&chosen);
+                if !tracks.is_empty() {
+                    app.player().add_to_queue(tracks);
+                }
+            }
+            Act::AddToPlaylist => {
+                let tracks: Vec<i64> = entry_track_ids(&chosen).into_iter().flatten().collect();
+                if !tracks.is_empty() {
+                    // At the ⋮ button: the bar goes once it's used.
+                    super::playlist_picker::show(&self.imp().menu_button.get(), tracks);
+                }
+            }
+            Act::Remove => app.library().remove_playlist_items(playlist_id, ids),
+        }
+    }
+
     /// The songs can be dragged into another order now.
     fn reorderable(&self) -> bool {
         let imp = self.imp();
@@ -666,6 +734,7 @@ impl PlaylistPanel {
         let changed = self.playlist_id() != Some(playlist.id());
         if changed {
             self.finish_arranging();
+            imp.selection.clear();
             // Another playlist: its rows from scratch (in batches).
             imp.rebuild.set(true);
         }
@@ -1163,6 +1232,7 @@ impl PlaylistPanel {
         imp.source.set_label(&source_line(info, sending));
         imp.source.set_visible(info.spotify_id.is_some());
         let editable = info.editable;
+        imp.selection.set_removable(editable);
         let connected = JewelcaseApplication::get().spotify().is_connected();
         let linked = info.spotify_id.is_some();
         let mirror = info.source == "spotify";
@@ -1465,6 +1535,7 @@ impl PlaylistPanel {
             .css_classes(["track-row", "reorder-item"])
             .build();
         row.append(&line);
+        self.imp().selection.attach(&row, item_id);
         if let Some(question) = suggestion(playlist_id, entry, editable) {
             row.append(&question);
         }
@@ -1775,9 +1846,15 @@ impl PlaylistPanel {
     /// The entries that can go to the queue, in order: library songs, and
     /// Spotify songs when they can play (streaming, or a Spotify device).
     fn queueable(&self) -> Vec<TrackObject> {
+        let entries = self.imp().entries.borrow().clone();
+        Self::queueable_of(&entries)
+    }
+
+    /// These entries' songs for the queue; Spotify songs that can't play
+    /// here are left out, with a message.
+    fn queueable_of(entries: &[PlaylistItem]) -> Vec<TrackObject> {
         let app = JewelcaseApplication::get();
         let spotify_plays = app.player().is_remote() || app.spotify().can_stream();
-        let entries = self.imp().entries.borrow().clone();
         let wanted: Vec<PlaylistItem> = entries
             .iter()
             .filter(|e| e.track.is_some() || spotify_plays)
@@ -1876,8 +1953,22 @@ impl PlaylistPanel {
         }
     }
 
-    async fn change_cover(&self) {
+    /// *Change Cover…*: the albums' covers, or an image file.
+    fn change_cover(&self) {
         let Some(id) = self.playlist_id() else { return };
+        let covers =
+            super::playlist_cover_dialog::album_covers(&self.imp().entries.borrow(), |key| {
+                crate::config::cover_cache().has(key)
+            });
+        let panel = self.downgrade();
+        super::playlist_cover_dialog::show(&self.imp().menu_button.get(), id, covers, move || {
+            if let Some(panel) = panel.upgrade() {
+                glib::spawn_future_local(async move { panel.choose_cover_file(id).await });
+            }
+        });
+    }
+
+    async fn choose_cover_file(&self, id: i64) {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some(&gettext("Images")));
         filter.add_mime_type("image/*");

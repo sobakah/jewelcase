@@ -14,6 +14,7 @@
     <file compressed="true">style.css</file>
     <!-- Added to the icon theme automatically by GtkApplication. -->
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-lyrics-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-play-next-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-smart-shuffle-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/jewelcase-spotify-symbolic.svg</file>
     <!-- The app icon's discs (app_icon.rs), also its picker's previews; the
@@ -84,6 +85,7 @@
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-more-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-refresh-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/view-sort-descending-symbolic.svg</file>
+    <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/window-close-symbolic.svg</file>
     <file compressed="true" preprocess="xml-stripblanks">icons/scalable/actions/preferences-system-notifications-symbolic.svg</file>
   </gresource>
 </gresources>

@@ -1561,6 +1561,25 @@ impl Library {
         Ok(())
     }
 
+    /// Uses a cover already in the cache as the playlist's cover (one of
+    /// its albums' covers, *Change Cover…*); Spotify gets it too, as with
+    /// an image file.
+    pub fn use_playlist_cover(&self, id: i64, key: &str) {
+        if self.refuse_read_only(id) || self.refuse_while_sending(id) {
+            return;
+        }
+        self.playlist_op_quiet(|db, now| db.set_playlist_cover(id, Some(key), now));
+        if self.spotify_link(id).is_some_and(|p| p.editable) {
+            self.queue_spotify_op(
+                id,
+                crate::spotify::Op::Cover {
+                    key: key.to_owned(),
+                },
+            );
+        }
+        self.reload_playlists();
+    }
+
     /// Imports an M3U/M3U8/XSPF file as a new playlist. Returns its ID and
     /// how many entries matched library tracks, of how many.
     pub async fn import_playlist(&self, path: PathBuf) -> Result<(i64, usize, usize), String> {

@@ -98,6 +98,17 @@
   transition: background-color 200ms ease-out;
 }
 
+/* Songs chosen with Ctrl or Shift (song_selection.rs). */
+.track-row.chosen,
+listview.playlist-songs > row > .track-row.chosen {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 20%, transparent);
+  transition: none;
+}
+
+listview.playlist-songs > row.activatable:hover > .track-row.chosen {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 26%, transparent);
+}
+
 .track-row.playing .title,
 .track-row.playing label {
   font-weight: bold;

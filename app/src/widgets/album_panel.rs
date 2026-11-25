@@ -11,6 +11,7 @@ use gtk::glib;
 use gtk::glib::subclass::Signal;
 
 use super::album_tile::artist_or_unknown;
+use super::song_selection::{Act, SongSelection};
 use super::{CoverBackdrop, CoverImage, TrackRow};
 use crate::application::JewelcaseApplication;
 use crate::format;
@@ -24,6 +25,8 @@ mod imp {
     pub struct AlbumPanel {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub toolbar: TemplateChild<adw::ToolbarView>,
         #[template_child]
         pub cover: TemplateChild<CoverImage>,
         #[template_child]
@@ -55,6 +58,8 @@ mod imp {
         pub versions_handler: RefCell<Option<glib::SignalHandlerId>>,
         /// A Spotify album shown instead of a library one (§9.8).
         pub spotify: RefCell<Option<jewelcase_core::db::SpotifyAlbum>>,
+        /// Songs chosen with Ctrl or Shift (by track ID).
+        pub selection: SongSelection,
     }
 
     #[glib::object_subclass]
@@ -130,6 +135,13 @@ mod imp {
             self.parent_constructed();
             self.backdrop.follow(&self.cover);
             let obj = self.obj();
+            self.toolbar.add_top_bar(self.selection.bar());
+            obj.add_controller(self.selection.escape_controller());
+            self.selection.connect_act(glib::clone!(
+                #[weak]
+                obj,
+                move |act, ids| obj.act_on_chosen(act, &ids)
+            ));
             let player = JewelcaseApplication::get().player();
             let id = player.connect_current_track_notify(glib::clone!(
                 #[weak]
@@ -610,12 +622,37 @@ impl AlbumPanel {
                 list = Some(new_list);
             }
             let row = TrackRow::new(track, album_artist);
+            imp.selection.attach(&row, track.id());
             if let Some(list) = &list {
                 list.append(&row);
             }
             rows.push(row);
         }
         imp.rows.replace(rows);
+        // Another album, or another version: what was chosen there is
+        // dropped; the same songs read again stay chosen.
+        imp.selection
+            .set_order(tracks.iter().map(TrackObject::id).collect());
+    }
+
+    /// The bar's buttons, with the chosen songs (track IDs, in order).
+    fn act_on_chosen(&self, act: Act, ids: &[i64]) {
+        let tracks: Vec<TrackObject> = {
+            let all = self.imp().track_objects.borrow();
+            ids.iter()
+                .filter_map(|id| all.iter().find(|t| t.id() == *id).cloned())
+                .collect()
+        };
+        let player = JewelcaseApplication::get().player();
+        match act {
+            Act::PlayNext => player.play_next(tracks),
+            Act::AddToQueue => player.add_to_queue(tracks),
+            // At the ⋮ button: the bar goes once it's used.
+            Act::AddToPlaylist => {
+                super::playlist_picker::show(&self.imp().menu_button.get(), ids.to_vec());
+            }
+            Act::Remove => {}
+        }
     }
 
     /// Points out one song: highlighted for a moment and scrolled to

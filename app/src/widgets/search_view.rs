@@ -5,7 +5,9 @@
 //! kinds in one request), a moment after typing stops, and its answers are
 //! kept for the session. Two toggle groups above the results show one kind
 //! or all, and from the library, Spotify or both (as Jewelcase Mobile's
-//! chips). With an empty field the card shows the last searches.
+//! chips). With one kind shown, *More From Spotify* under its results
+//! asks for the next ten of that kind (one request a click). With an empty
+//! field the card shows the last searches.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -67,6 +69,18 @@ impl Kind {
 
     fn shows(self, kind: Kind) -> bool {
         self == Kind::All || self == kind
+    }
+
+    /// Spotify's name for this one kind (`None` for all).
+    fn spotify(self) -> Option<jewelcase_spotify::SearchKind> {
+        use jewelcase_spotify::SearchKind;
+        match self {
+            Kind::All => None,
+            Kind::Artists => Some(SearchKind::Artists),
+            Kind::Albums => Some(SearchKind::Albums),
+            Kind::Songs => Some(SearchKind::Tracks),
+            Kind::Playlists => Some(SearchKind::Playlists),
+        }
     }
 
     /// The library's results of this kind only.
@@ -147,6 +161,19 @@ pub struct Section {
     library_rows: Rc<std::cell::Cell<i32>>,
 }
 
+impl Sections {
+    /// The section of one kind (`None` for all).
+    fn of(&self, kind: Kind) -> Option<&Section> {
+        match kind {
+            Kind::All => None,
+            Kind::Artists => Some(&self.artists),
+            Kind::Albums => Some(&self.albums),
+            Kind::Songs => Some(&self.songs),
+            Kind::Playlists => Some(&self.playlists),
+        }
+    }
+}
+
 impl Section {
     fn append(&self, row: &impl IsA<gtk::Widget>, in_library: bool) {
         if in_library {
@@ -191,6 +218,9 @@ mod imp {
         pub spotify_cache:
             std::cell::RefCell<HashMap<String, Rc<jewelcase_spotify::SearchResults>>>,
         pub last_query: std::cell::RefCell<String>,
+        /// The query Spotify was asked for (trimmed), for *More From
+        /// Spotify*.
+        pub spotify_query: std::cell::RefCell<String>,
         pub settings: std::cell::OnceCell<gio::Settings>,
     }
 
@@ -759,6 +789,7 @@ impl SearchView {
         let imp = self.imp();
         let generation = imp.spotify_generation.get();
         let key = query.to_lowercase();
+        imp.spotify_query.replace(query.to_owned());
         if let Some(cached) = imp.spotify_cache.borrow().get(&key).cloned() {
             self.show_spotify(&cached);
             return;
@@ -834,6 +865,11 @@ impl SearchView {
         if kind.shows(Kind::Playlists) {
             self.spotify_playlists(&sections.playlists, &found.playlists, &mut covers);
         }
+        if let (Some(section), Some(spotify_kind)) = (sections.of(kind), kind.spotify())
+            && let Some(offset) = found.next_offset(spotify_kind)
+        {
+            self.more_row(section, kind, offset);
+        }
         let nothing = [
             &sections.artists,
             &sections.albums,
@@ -852,13 +888,108 @@ impl SearchView {
                 }));
             imp.stack.set_visible_child_name("empty");
         }
-        // Covers arrive after the rows.
+        Self::load_covers(covers);
+    }
+
+    /// Covers arrive after the rows.
+    fn load_covers(covers: SpotifyCovers) {
         let urls: Vec<String> = covers.iter().map(|(_, url)| url.clone()).collect();
         crate::spotify::fetch_covers(urls, move || {
             for (cover, url) in &covers {
                 cover.set_cover(Some(&crate::spotify::image_cover_key(url)));
             }
         });
+    }
+
+    /// *More From Spotify* at the end of the one kind shown: the next
+    /// results of that kind from `offset` on, one request a click.
+    fn more_row(&self, section: &Section, kind: Kind, offset: u32) {
+        let row = adw::ButtonRow::builder()
+            .title(gettext("More From Spotify"))
+            .start_icon_name("list-add-symbolic")
+            .build();
+        let generation = self.imp().spotify_generation.get();
+        row.connect_activated(glib::clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[strong]
+            section,
+            move |row| {
+                row.set_sensitive(false);
+                glib::spawn_future_local(glib::clone!(
+                    #[weak]
+                    view,
+                    #[strong]
+                    section,
+                    #[weak]
+                    row,
+                    async move {
+                        view.fetch_more(&section, &row, kind, offset, generation)
+                            .await;
+                    }
+                ));
+            }
+        ));
+        section.append(&row, false);
+    }
+
+    async fn fetch_more(
+        &self,
+        section: &Section,
+        row: &adw::ButtonRow,
+        kind: Kind,
+        offset: u32,
+        generation: u64,
+    ) {
+        let Some(spotify_kind) = kind.spotify() else {
+            return;
+        };
+        let imp = self.imp();
+        let query = imp.spotify_query.borrow().clone();
+        let asked = query.clone();
+        let result = JewelcaseApplication::get()
+            .spotify()
+            .call(move |client| client.search_more(&asked, spotify_kind, offset))
+            .await;
+        // Typed on, or another filter: these rows are gone.
+        if imp.spotify_generation.get() != generation {
+            return;
+        }
+        let page = match result {
+            Ok(page) => page,
+            Err(err) => {
+                tracing::warn!("Spotify search failed: {err}");
+                row.set_sensitive(true);
+                if let Some(sections) = imp.current.borrow().as_ref() {
+                    sections.status.set_label(&format!(
+                        "{} {}",
+                        gettext("Spotify can’t be searched right now."),
+                        crate::spotify::search_error(&err)
+                    ));
+                    sections.status.set_visible(true);
+                }
+                return;
+            }
+        };
+        // Kept with the first answer, so the filters can change and come back.
+        let key = query.to_lowercase();
+        let next = page.next_offset(spotify_kind);
+        if let Some(cached) = imp.spotify_cache.borrow_mut().get_mut(&key) {
+            Rc::make_mut(cached).extend(spotify_kind, page.clone());
+        }
+        section.list.remove(row);
+        let mut covers = SpotifyCovers::new();
+        match kind {
+            Kind::Artists => self.spotify_artists(section, &page.artists, &mut covers),
+            Kind::Albums => self.spotify_albums(section, &page.albums, &mut covers),
+            Kind::Songs => self.spotify_songs(section, &page.tracks, &mut covers),
+            Kind::Playlists => self.spotify_playlists(section, &page.playlists, &mut covers),
+            Kind::All => {}
+        }
+        Self::load_covers(covers);
+        if let Some(offset) = next {
+            self.more_row(section, kind, offset);
+        }
     }
 
     fn spotify_artists(
